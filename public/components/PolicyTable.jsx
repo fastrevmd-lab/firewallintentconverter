@@ -153,6 +153,45 @@ export default function PolicyTable({
     ));
   };
 
+  /** Render security profiles for a policy row */
+  const renderProfileCell = (policy) => {
+    const sp = policy.security_profiles || {};
+    const profileEntries = Object.entries(sp);
+    const hasGroup = !!policy.profile_group;
+    const hasProfiles = profileEntries.length > 0;
+
+    if (!hasGroup && !hasProfiles) {
+      return <span className="cell-chip" style={{ opacity: 0.4 }}>none</span>;
+    }
+
+    const chips = [];
+
+    if (hasProfiles) {
+      const shortLabels = {
+        'virus': 'AV', 'wildfire-analysis': 'WF', 'url-filtering': 'URL',
+        'file-blocking': 'FB', 'spyware': 'AS', 'vulnerability': 'VP',
+      };
+      for (const [pType, pName] of profileEntries) {
+        const label = shortLabels[pType] || pType;
+        chips.push(
+          <span key={pType} className="cell-chip profile-chip" title={`${pType}: ${pName}`}>
+            {label}
+          </span>
+        );
+      }
+    }
+
+    if (hasGroup && !hasProfiles) {
+      chips.push(
+        <span key="group" className="cell-chip profile-chip profile-group-chip" title={`Profile group: ${policy.profile_group}`}>
+          {policy.profile_group}
+        </span>
+      );
+    }
+
+    return chips;
+  };
+
   /** Render an editable cell */
   const renderEditableCell = (policy, field, content) => {
     const realIndex = getRealIndex(policy);
@@ -231,6 +270,7 @@ export default function PolicyTable({
               <th onClick={() => handleSort('src_addresses')}>Source{sortIndicator('src_addresses')}</th>
               <th onClick={() => handleSort('dst_addresses')}>Destination{sortIndicator('dst_addresses')}</th>
               <th onClick={() => handleSort('applications')}>App / Service{sortIndicator('applications')}</th>
+              <th>Profiles</th>
               <th onClick={() => handleSort('action')}>Action{sortIndicator('action')}</th>
               <th>Log</th>
               <th>Status</th>
@@ -260,6 +300,7 @@ export default function PolicyTable({
                   <td>{renderEditableCell(policy, 'src_addresses', renderCellValues(policy.src_addresses))}</td>
                   <td>{renderEditableCell(policy, 'dst_addresses', renderCellValues(policy.dst_addresses))}</td>
                   <td>{renderEditableCell(policy, 'applications', renderCellValues([...policy.applications, ...policy.services.filter(s => s !== 'application-default')]))}</td>
+                  <td>{renderProfileCell(policy)}</td>
                   <td>
                     <span className={`action-${policy.action === 'allow' ? 'permit' : 'deny'}`}>
                       {policy.action}

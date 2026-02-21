@@ -18,6 +18,7 @@ export default function ObjectEditor({ intermediateConfig, onConfigUpdate }) {
   const addresses = intermediateConfig?.address_objects || [];
   const groups = intermediateConfig?.address_groups || [];
   const services = intermediateConfig?.service_objects || [];
+  const secProfiles = intermediateConfig?.security_profile_objects || [];
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -41,6 +42,12 @@ export default function ObjectEditor({ intermediateConfig, onConfigUpdate }) {
         >
           Services ({services.length})
         </button>
+        <button
+          className={`sub-tab-btn ${subTab === 'profiles' ? 'active' : ''}`}
+          onClick={() => setSubTab('profiles')}
+        >
+          Security Profiles ({secProfiles.length})
+        </button>
       </div>
 
       {/* Content */}
@@ -61,6 +68,12 @@ export default function ObjectEditor({ intermediateConfig, onConfigUpdate }) {
           <ServiceObjectTable
             items={services}
             onUpdate={(items) => onConfigUpdate('service_objects', items)}
+          />
+        )}
+        {subTab === 'profiles' && (
+          <SecurityProfileTable
+            items={secProfiles}
+            onUpdate={(items) => onConfigUpdate('security_profile_objects', items)}
           />
         )}
       </div>
@@ -314,6 +327,138 @@ function ServiceObjectTable({ items, onUpdate }) {
       </table>
       <div style={{ padding: '8px 12px' }}>
         <button className="btn btn-secondary btn-sm" onClick={handleAdd}>+ Add Service</button>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Security Profile Objects Table
+// ---------------------------------------------------------------------------
+
+const PROFILE_TYPE_OPTIONS = [
+  { value: 'virus', label: 'Antivirus' },
+  { value: 'spyware', label: 'Anti-Spyware' },
+  { value: 'vulnerability', label: 'Vulnerability' },
+  { value: 'url-filtering', label: 'URL Filtering' },
+  { value: 'file-blocking', label: 'File Blocking' },
+  { value: 'wildfire-analysis', label: 'WildFire' },
+];
+
+const PROFILE_FEATURE_MAP = {
+  'virus':              { srxFeature: 'utm', srxType: 'anti-virus',        label: 'Antivirus' },
+  'wildfire-analysis':  { srxFeature: 'utm', srxType: 'anti-virus',        label: 'WildFire' },
+  'url-filtering':      { srxFeature: 'utm', srxType: 'web-filtering',     label: 'URL Filtering' },
+  'file-blocking':      { srxFeature: 'utm', srxType: 'content-filtering', label: 'File Blocking' },
+  'spyware':            { srxFeature: 'idp', srxType: 'idp-policy',        label: 'Anti-Spyware' },
+  'vulnerability':      { srxFeature: 'idp', srxType: 'idp-policy',        label: 'Vulnerability' },
+};
+
+function SecurityProfileTable({ items, onUpdate }) {
+  const handleChange = (index, field, value) => {
+    const updated = items.map((item, i) => {
+      if (i !== index) return item;
+      const newItem = { ...item, [field]: value };
+      // Auto-update SRX mapping when profile_type changes
+      if (field === 'profile_type') {
+        const info = PROFILE_FEATURE_MAP[value];
+        if (info) {
+          newItem.srx_feature = info.srxFeature;
+          newItem.srx_type = info.srxType;
+          newItem.profile_type_label = info.label;
+        }
+      }
+      return newItem;
+    });
+    onUpdate(updated);
+  };
+
+  const handleAdd = () => {
+    onUpdate([...items, {
+      name: `profile-${items.length + 1}`,
+      profile_type: 'virus',
+      profile_type_label: 'Antivirus',
+      profile_name: 'default',
+      srx_feature: 'utm',
+      srx_type: 'anti-virus',
+      source: 'manual',
+      attached_rules: [],
+    }]);
+  };
+
+  const handleDelete = (index) => {
+    onUpdate(items.filter((_, i) => i !== index));
+  };
+
+  return (
+    <div>
+      <table className="editor-table">
+        <thead>
+          <tr>
+            <th style={{ width: 160 }}>Name</th>
+            <th style={{ width: 130 }}>Type</th>
+            <th style={{ width: 140 }}>Profile Name</th>
+            <th style={{ width: 60 }}>SRX</th>
+            <th style={{ width: 120 }}>SRX Type</th>
+            <th style={{ width: 80 }}>Source</th>
+            <th>Attached Rules</th>
+            <th style={{ width: 36 }}></th>
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((item, i) => (
+            <tr key={i}>
+              <td>
+                <input
+                  className="cell-input"
+                  value={item.name}
+                  onChange={(e) => handleChange(i, 'name', e.target.value)}
+                />
+              </td>
+              <td>
+                <select
+                  className="cell-select"
+                  value={item.profile_type}
+                  onChange={(e) => handleChange(i, 'profile_type', e.target.value)}
+                >
+                  {PROFILE_TYPE_OPTIONS.map(opt => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
+              </td>
+              <td>
+                <input
+                  className="cell-input"
+                  value={item.profile_name}
+                  onChange={(e) => handleChange(i, 'profile_name', e.target.value)}
+                  placeholder="default"
+                />
+              </td>
+              <td>
+                <span className={`cell-chip ${item.srx_feature === 'utm' ? 'profile-chip-utm' : 'profile-chip-idp'}`}>
+                  {item.srx_feature.toUpperCase()}
+                </span>
+              </td>
+              <td style={{ fontSize: 11, color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>
+                {item.srx_type}
+              </td>
+              <td style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                {item.source === 'individual' ? 'rule' : item.source?.startsWith('group:') ? 'group' : item.source}
+              </td>
+              <td>
+                {(item.attached_rules || []).map((r, j) => (
+                  <span key={j} className="cell-chip" style={{ fontSize: 10 }}>{r}</span>
+                ))}
+              </td>
+              <td>
+                <button className="btn-icon btn-icon-danger" onClick={() => handleDelete(i)} title="Delete">x</button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div style={{ padding: '8px 12px' }}>
+        <button className="btn btn-secondary btn-sm" onClick={handleAdd}>+ Add Profile</button>
       </div>
     </div>
   );

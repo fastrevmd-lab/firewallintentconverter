@@ -256,6 +256,7 @@ export default function App() {
         description: '',
         tags: [],
         profile_group: '',
+        security_profiles: {},
         _review_status: 'unreviewed',
       };
       return {

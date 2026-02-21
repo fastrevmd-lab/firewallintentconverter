@@ -111,6 +111,9 @@ export function parsePanosConfig(configText) {
   // Flag rules that reference EDL block lists for SecIntel mapping
   flagSecIntelRules(securityPolicies, externalLists, warnings);
 
+  // Build security profile objects from rules
+  const securityProfileObjects = buildSecurityProfileObjects(securityPolicies);
+
   const intermediateConfig = {
     zones,
     address_objects: addressObjects,
@@ -120,6 +123,7 @@ export function parsePanosConfig(configText) {
     security_policies: securityPolicies,
     nat_rules: natRules,
     applications,
+    security_profile_objects: securityProfileObjects,
     external_lists: externalLists,
     vpn_tunnels: [], // Phase 2
     metadata: {
@@ -564,6 +568,88 @@ function parseAction(actionField) {
     return keys[0] || 'deny';
   }
   return 'deny';
+}
+
+// ---------------------------------------------------------------------------
+// Security Profile Object Builder
+// ---------------------------------------------------------------------------
+
+/**
+ * Builds security_profile_objects from all rules' security_profiles and profile_groups.
+ *
+ * For individual profiles (e.g. virus: 'default'), creates one object per unique
+ * type+name pair.
+ *
+ * For profile groups (e.g. profile_group: 'strict-security'), expands to all 6
+ * standard profile types using the group name, since PAN-OS config doesn't
+ * include group definitions inline.
+ */
+function buildSecurityProfileObjects(policies) {
+  const seen = new Map(); // key → object
+  const allProfileTypes = ['virus', 'spyware', 'vulnerability', 'url-filtering', 'file-blocking', 'wildfire-analysis'];
+
+  const featureLabels = {
+    'virus':              { srxFeature: 'utm', srxType: 'anti-virus',        label: 'Antivirus' },
+    'wildfire-analysis':  { srxFeature: 'utm', srxType: 'anti-virus',        label: 'WildFire Analysis' },
+    'url-filtering':      { srxFeature: 'utm', srxType: 'web-filtering',     label: 'URL Filtering' },
+    'file-blocking':      { srxFeature: 'utm', srxType: 'content-filtering', label: 'File Blocking' },
+    'spyware':            { srxFeature: 'idp', srxType: 'idp-policy',        label: 'Anti-Spyware' },
+    'vulnerability':      { srxFeature: 'idp', srxType: 'idp-policy',        label: 'Vulnerability Protection' },
+  };
+
+  for (const policy of policies) {
+    // Individual profiles
+    const sp = policy.security_profiles || {};
+    for (const [pType, pName] of Object.entries(sp)) {
+      const key = `${pType}::${pName}`;
+      if (!seen.has(key)) {
+        const info = featureLabels[pType] || { srxFeature: 'unknown', srxType: pType, label: pType };
+        seen.set(key, {
+          name: `${pType}-${pName}`.replace(/\s+/g, '-'),
+          profile_type: pType,
+          profile_type_label: info.label,
+          profile_name: pName,
+          srx_feature: info.srxFeature,
+          srx_type: info.srxType,
+          source: 'individual',
+          attached_rules: [policy.name],
+        });
+      } else {
+        const obj = seen.get(key);
+        if (!obj.attached_rules.includes(policy.name)) {
+          obj.attached_rules.push(policy.name);
+        }
+      }
+    }
+
+    // Profile group — expand to all 6 types
+    if (policy.profile_group && Object.keys(sp).length === 0) {
+      const groupName = policy.profile_group;
+      for (const pType of allProfileTypes) {
+        const key = `group:${groupName}::${pType}`;
+        if (!seen.has(key)) {
+          const info = featureLabels[pType];
+          seen.set(key, {
+            name: `${groupName}-${pType}`.replace(/\s+/g, '-'),
+            profile_type: pType,
+            profile_type_label: info.label,
+            profile_name: groupName,
+            srx_feature: info.srxFeature,
+            srx_type: info.srxType,
+            source: `group:${groupName}`,
+            attached_rules: [policy.name],
+          });
+        } else {
+          const obj = seen.get(key);
+          if (!obj.attached_rules.includes(policy.name)) {
+            obj.attached_rules.push(policy.name);
+          }
+        }
+      }
+    }
+  }
+
+  return [...seen.values()];
 }
 
 // ---------------------------------------------------------------------------

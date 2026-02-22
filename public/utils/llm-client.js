@@ -528,7 +528,7 @@ Provide 2-4 specific, actionable suggestions for this rule. Focus on security be
 /**
  * Builds a structured rule suggestion prompt that instructs the LLM to respond with JSON.
  */
-export function buildStructuredRuleSuggestionPrompt(rule, targetModel, zones, srxLicense) {
+export function buildStructuredRuleSuggestionPrompt(rule, targetModel, zones, srxLicense, srxContext) {
   const zoneList = (zones || []).map(z => z.name).join(', ');
   const systemPrompt = loadSystemPrompt();
 
@@ -576,8 +576,9 @@ Valid field names and their types:
 For array fields, use JSON arrays like ["value1", "value2"].
 For boolean fields, use true or false (no quotes).` + licenseContext,
 
-    user: `Review this firewall security rule for a PAN-OS to SRX (${targetModel || 'SRX'}) migration${srxLicense ? ` (license: ${srxLicense})` : ''}:
+    user: `Review this firewall security rule being migrated from PAN-OS to SRX (${targetModel || 'SRX'})${srxLicense ? ` (license: ${srxLicense})` : ''}:
 
+=== ORIGINAL PAN-OS RULE ===
 Rule: "${rule.name}"
   Action: ${rule.action}
   From zones: ${(rule.src_zones || []).join(', ') || 'any'}
@@ -591,10 +592,15 @@ Rule: "${rule.name}"
   Description: ${rule.description || '(none)'}
   Security profiles: ${profileSummary}
   Tags: ${(rule.tags || []).join(', ') || '(none)'}
-
+${srxContext ? `
+=== SRX TRANSLATION (current user edits) ===
+  Action: ${srxContext.action}
+  Application Services: ${srxContext.applicationServices?.join(', ') || 'none'}
+  Logging: ${srxContext.logging?.join(', ') || 'none'}
+` : ''}
 Available zones: ${zoneList}
 
-Respond with ONLY the JSON object.`,
+Review both the original PAN-OS rule and its SRX translation. Identify any issues with the migration mapping, missing security features, or best-practice violations on the SRX side. Respond with ONLY the JSON object.`,
   };
 }
 

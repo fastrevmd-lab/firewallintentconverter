@@ -208,7 +208,9 @@ export default function PolicyTable({
   /** SRX view: render Security Subscriptions column (vertical label/value pairs) */
   const renderSrxSubscriptions = (policy) => {
     const sp = policy.security_profiles || {};
-    const hasSecIntel = policy._secIntelAddresses?.length > 0;
+    const hasSecIntel = policy._srx_secintel !== undefined
+      ? !!policy._srx_secintel
+      : (policy._secIntelAddresses?.length > 0);
     const rows = [];
 
     // IPS = spyware + vulnerability (maps to IDP on SRX)
@@ -217,9 +219,20 @@ export default function PolicyTable({
       rows.push({ label: 'IPS', cls: 'ips', value: parts });
     }
 
-    // SecIntel
-    if (hasSecIntel) {
-      rows.push({ label: 'SecIntel', cls: 'secintel', value: 'Security Intelligence' });
+    // Content Security = url-filtering + file-blocking
+    if (sp['url-filtering'] || sp['file-blocking']) {
+      const parts = [sp['url-filtering'], sp['file-blocking']].filter(Boolean).join(', ');
+      rows.push({ label: 'Content Security', cls: 'urlfilter', value: parts });
+    }
+
+    // Decrypt
+    if (policy._srx_decrypt) {
+      rows.push({ label: 'Decrypt', cls: 'ips', value: 'SSL Proxy' });
+    }
+
+    // Flow-based AV
+    if (policy._srx_flow_av) {
+      rows.push({ label: 'Flow-based AV', cls: 'antimalware', value: 'enabled' });
     }
 
     // Anti-malware = virus + wildfire
@@ -228,14 +241,19 @@ export default function PolicyTable({
       rows.push({ label: 'Anti-malware', cls: 'antimalware', value: parts });
     }
 
-    // URL Filtering
-    if (sp['url-filtering']) {
-      rows.push({ label: 'URL Filter', cls: 'urlfilter', value: sp['url-filtering'] });
+    // SecIntel
+    if (hasSecIntel) {
+      rows.push({ label: 'SecIntel', cls: 'secintel', value: 'Security Intelligence' });
     }
 
-    // File blocking
-    if (sp['file-blocking']) {
-      rows.push({ label: 'File Block', cls: 'fileblock', value: sp['file-blocking'] });
+    // Secure Web Proxy
+    if (policy._srx_secure_web_proxy) {
+      rows.push({ label: 'Secure Web Proxy', cls: 'secintel', value: 'enabled' });
+    }
+
+    // ICAP Redirect
+    if (policy._srx_icap_redirect) {
+      rows.push({ label: 'ICAP Redirect', cls: 'fileblock', value: 'enabled' });
     }
 
     if (rows.length === 0) {
@@ -259,6 +277,8 @@ export default function PolicyTable({
     const zones = type === 'src' ? policy.src_zones : policy.dst_zones;
     const addrs = type === 'src' ? policy.src_addresses : policy.dst_addresses;
     const MAX_SHOW = 2;
+    // URL filtering profile — show under destinations
+    const urlFilter = type === 'dst' ? (policy.security_profiles || {})['url-filtering'] : null;
 
     return (
       <div className="srx-cell-stack">
@@ -300,6 +320,13 @@ export default function PolicyTable({
             )}
           </>
         )}
+        {/* URL Filtering (destinations only) */}
+        {urlFilter && (
+          <div className="srx-cell-row">
+            <span className="srx-cell-icon url">U</span>
+            <span className="srx-cell-value" style={{ fontSize: 11 }}>{urlFilter}</span>
+          </div>
+        )}
       </div>
     );
   };
@@ -317,56 +344,63 @@ export default function PolicyTable({
     );
   };
 
-  /** SRX view: render applications/services cell with icons */
+  /** SRX view: render applications/services cell — split into Application + Port */
   const renderSrxApps = (policy) => {
     const apps = policy.applications || [];
     const svcs = (policy.services || []).filter(s => s !== 'application-default');
     const hasSvcDefault = (policy.services || []).includes('application-default');
-    const MAX_SHOW = 3;
+    const MAX_APP = 2;
+    const MAX_SVC = 2;
 
-    if (apps.length === 0 && svcs.length === 0) {
-      return (
-        <div className="srx-cell-stack">
+    return (
+      <div className="srx-cell-stack">
+        {/* Applications section */}
+        {apps.length === 0 ? (
           <div className="srx-cell-row">
             <span className="srx-cell-icon app">A</span>
             <span className="srx-cell-value" style={{ opacity: 0.5 }}>any</span>
           </div>
-          {hasSvcDefault && (
-            <div className="srx-cell-row">
-              <span className="srx-cell-icon svc">S</span>
-              <span className="srx-cell-value" style={{ opacity: 0.5 }}>defaults</span>
-            </div>
-          )}
-        </div>
-      );
-    }
-
-    const allItems = [
-      ...apps.map(a => ({ type: 'app', value: a })),
-      ...svcs.map(s => ({ type: 'svc', value: s })),
-    ];
-
-    return (
-      <div className="srx-cell-stack">
-        {allItems.slice(0, MAX_SHOW).map((item, i) => (
-          <div key={i} className="srx-cell-row">
-            <span className={`srx-cell-icon ${item.type}`}>{item.type === 'app' ? 'A' : 'S'}</span>
-            <span className="srx-cell-value">{item.value}</span>
-          </div>
-        ))}
-        {allItems.length > MAX_SHOW && (
-          <div className="srx-cell-row">
-            <span className="srx-cell-icon app">A</span>
-            <span className="srx-cell-extra" title={allItems.slice(MAX_SHOW).map(i => i.value).join(', ')}>
-              +{allItems.length - MAX_SHOW}
-            </span>
-          </div>
+        ) : (
+          <>
+            {apps.slice(0, MAX_APP).map((a, i) => (
+              <div key={`a-${i}`} className="srx-cell-row">
+                <span className="srx-cell-icon app">A</span>
+                <span className="srx-cell-value">{a}</span>
+              </div>
+            ))}
+            {apps.length > MAX_APP && (
+              <div className="srx-cell-row">
+                <span className="srx-cell-icon app">A</span>
+                <span className="srx-cell-extra" title={apps.slice(MAX_APP).join(', ')}>
+                  +{apps.length - MAX_APP}
+                </span>
+              </div>
+            )}
+          </>
         )}
-        {hasSvcDefault && (
+        {/* Port / Services section */}
+        {svcs.length === 0 && hasSvcDefault ? (
           <div className="srx-cell-row">
-            <span className="srx-cell-icon svc">S</span>
+            <span className="srx-cell-icon svc">P</span>
             <span className="srx-cell-value" style={{ opacity: 0.5 }}>defaults</span>
           </div>
+        ) : svcs.length === 0 ? null : (
+          <>
+            {svcs.slice(0, MAX_SVC).map((s, i) => (
+              <div key={`s-${i}`} className="srx-cell-row">
+                <span className="srx-cell-icon svc">P</span>
+                <span className="srx-cell-value">{s}</span>
+              </div>
+            ))}
+            {svcs.length > MAX_SVC && (
+              <div className="srx-cell-row">
+                <span className="srx-cell-icon svc">P</span>
+                <span className="srx-cell-extra" title={svcs.slice(MAX_SVC).join(', ')}>
+                  +{svcs.length - MAX_SVC}
+                </span>
+              </div>
+            )}
+          </>
         )}
       </div>
     );
@@ -464,14 +498,11 @@ export default function PolicyTable({
           <th>Profiles</th>
           <th onClick={() => handleSort('action')}>Action{sortIndicator('action')}</th>
           <th>Log</th>
-          <th>Status</th>
           <th style={{ width: 36 }}></th>
         </tr>
       </thead>
       <tbody>
         {displayPolicies.map((policy) => {
-          const status = getRuleStatus(policy);
-          const warnStatus = getWarningStatus(policy);
           const isSelected = selectedRule?.name === policy.name && selectedRule?._rule_index === policy._rule_index;
           const realIndex = getRealIndex(policy);
 
@@ -499,14 +530,6 @@ export default function PolicyTable({
               </td>
               <td style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
                 {getDisplayLog(policy)}
-              </td>
-              <td>
-                <span className={`status-label status-${status}`}>
-                  {statusLabels[status]}
-                </span>
-                {warnStatus !== 'clean' && (
-                  <span className={`status-dot ${warnStatus}`} data-tooltip={warningTooltips[warnStatus] || warnStatus} style={{ marginLeft: 4 }} />
-                )}
               </td>
               <td>
                 <button
@@ -537,7 +560,7 @@ export default function PolicyTable({
             <th onClick={() => handleSort('name')}>Name{sortIndicator('name')}</th>
             <th>Sources</th>
             <th>Destinations</th>
-            <th onClick={() => handleSort('applications')}>Applications/Services{sortIndicator('applications')}</th>
+            <th onClick={() => handleSort('applications')}>Applications / Ports{sortIndicator('applications')}</th>
             <th onClick={() => handleSort('action')} style={{ width: 100 }}>Action{sortIndicator('action')}</th>
             <th>Security Subscriptions</th>
             <th style={{ width: 70 }}>Options</th>
@@ -659,17 +682,19 @@ export default function PolicyTable({
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
         />
-        <select
-          className="status-filter-select"
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
-        >
-          <option value="all">All Status</option>
-          <option value="unreviewed">Unreviewed</option>
-          <option value="llm-reviewed">LLM Reviewed</option>
-          <option value="accepted">Accepted</option>
-          <option value="disabled">Disabled</option>
-        </select>
+        {isSrx && (
+          <select
+            className="status-filter-select"
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+          >
+            <option value="all">All Status</option>
+            <option value="unreviewed">Unreviewed</option>
+            <option value="llm-reviewed">LLM Reviewed</option>
+            <option value="accepted">Accepted</option>
+            <option value="disabled">Disabled</option>
+          </select>
+        )}
         <span style={{ fontSize: '11px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
           {displayPolicies.length} of {policies.length}
         </span>

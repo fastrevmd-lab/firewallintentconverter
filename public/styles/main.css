@@ -111,7 +111,7 @@ html, body, #root {
 }
 
 .navbar-brand .brand-accent {
-  color: var(--accent);
+  color: #2a9d8f;
   font-weight: 700;
 }
 
@@ -2325,6 +2325,86 @@ html, body, #root {
   color: var(--text-muted);
   font-size: 11px;
   opacity: 0.5;
+}
+
+/* JunOS-style toggle switch for Security Subscriptions */
+.srx-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--border-color);
+}
+.srx-toggle-row:last-child { border-bottom: none; }
+.srx-toggle-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+.srx-toggle-sublabel {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-weight: 400;
+}
+/* Inline profile name input below toggle */
+.srx-profile-inline {
+  margin: 2px 0 6px 16px;
+  padding: 0;
+  font-size: 11px;
+}
+.srx-profile-inline .field-label {
+  font-size: 10px;
+  min-width: 80px;
+}
+.srx-profile-inline .field-edit-input {
+  font-size: 11px;
+  padding: 3px 6px;
+}
+/* Toggle switch track */
+.srx-toggle {
+  position: relative;
+  width: 36px;
+  height: 20px;
+  flex-shrink: 0;
+}
+.srx-toggle input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+.srx-toggle-track {
+  position: absolute;
+  inset: 0;
+  background: var(--bg-elevated);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 0.2s;
+  border: 1px solid var(--border-color);
+}
+.srx-toggle-track::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  transition: transform 0.2s, background 0.2s;
+}
+.srx-toggle input:checked + .srx-toggle-track {
+  background: var(--accent-dim);
+  border-color: var(--accent);
+}
+.srx-toggle input:checked + .srx-toggle-track::after {
+  transform: translateX(16px);
+  background: var(--accent);
+}
+
+/* URL icon for destinations */
+.srx-cell-icon.url {
+  background: rgba(251, 191, 36, 0.2);
+  color: var(--warning);
 }
 
 /* Seq cell in SRX view */

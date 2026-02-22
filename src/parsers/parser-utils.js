@@ -217,6 +217,27 @@ export function detectVendor(configText) {
     return { vendor: 'cisco_asa', format: 'text', confidence: 0.7 };
   }
 
+  // Junos SRX: set commands format
+  if (trimmed.includes('set security policies') || trimmed.includes('set security zones')) {
+    return { vendor: 'srx', format: 'set', confidence: 0.95 };
+  }
+  if (trimmed.includes('set security') && (trimmed.includes('from-zone') || trimmed.includes('address-book'))) {
+    return { vendor: 'srx', format: 'set', confidence: 0.9 };
+  }
+
+  // Junos SRX: hierarchical format
+  if (trimmed.includes('security {') && (trimmed.includes('policies {') || trimmed.includes('zones {'))) {
+    return { vendor: 'srx', format: 'hierarchical', confidence: 0.9 };
+  }
+  if (trimmed.includes('security-zone') && trimmed.includes('interfaces {')) {
+    return { vendor: 'srx', format: 'hierarchical', confidence: 0.85 };
+  }
+
+  // Junos generic (could be SRX or other Junos device)
+  if (/^set\s+(system|interfaces|routing-options|protocols|security)\s/m.test(trimmed)) {
+    return { vendor: 'srx', format: 'set', confidence: 0.7 };
+  }
+
   // Default: assume PAN-OS XML if it looks like XML
   if (trimmed.startsWith('<')) {
     return { vendor: 'panos', format: 'xml', confidence: 0.5 };

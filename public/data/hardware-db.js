@@ -460,6 +460,158 @@ export const PANOS_MODELS = {
 // Juniper SRX Models
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Juniper SRX EOS/Legacy Models (source import only)
+// ---------------------------------------------------------------------------
+
+export const SRX_EOS_MODELS = {
+  'SRX100': {
+    name: 'SRX100',
+    tier: 'branch',
+    eol: true,
+    description: 'Entry-level branch gateway (End of Life)',
+    throughput: { l4: '150 Mbps', l7: 'N/A', threat: '45 Mbps' },
+    ports: [
+      ...genSrxPorts('fe', 0, 0, 0, 7, 'copper', '100M'),
+    ],
+  },
+
+  'SRX110': {
+    name: 'SRX110',
+    tier: 'branch',
+    eol: true,
+    description: 'Small branch gateway with wireless (End of Life)',
+    throughput: { l4: '150 Mbps', l7: 'N/A', threat: '45 Mbps' },
+    ports: [
+      ...genSrxPorts('fe', 0, 0, 0, 7, 'copper', '100M'),
+    ],
+  },
+
+  'SRX210': {
+    name: 'SRX210',
+    tier: 'branch',
+    eol: true,
+    description: 'Small branch gateway (End of Life)',
+    throughput: { l4: '350 Mbps', l7: 'N/A', threat: '70 Mbps' },
+    ports: [
+      ...genSrxPorts('ge', 0, 0, 0, 1, 'copper', '1G'),
+      ...genSrxPorts('fe', 0, 0, 2, 9, 'copper', '100M'),
+    ],
+  },
+
+  'SRX220': {
+    name: 'SRX220',
+    tier: 'branch',
+    eol: true,
+    description: 'Branch gateway with 8 GbE (End of Life)',
+    throughput: { l4: '350 Mbps', l7: 'N/A', threat: '100 Mbps' },
+    ports: [
+      ...genSrxPorts('ge', 0, 0, 0, 7, 'copper', '1G'),
+    ],
+  },
+
+  'SRX240': {
+    name: 'SRX240',
+    tier: 'branch',
+    eol: true,
+    description: 'Branch gateway with 16 GbE + expansion (End of Life)',
+    throughput: { l4: '750 Mbps', l7: 'N/A', threat: '250 Mbps' },
+    ports: [
+      ...genSrxPorts('ge', 0, 0, 0, 15, 'copper', '1G'),
+    ],
+  },
+
+  'SRX550': {
+    name: 'SRX550',
+    tier: 'midrange',
+    eol: true,
+    description: 'Mid-range firewall, 12 GbE + expansion (End of Life)',
+    throughput: { l4: '3 Gbps', l7: 'N/A', threat: '700 Mbps' },
+    ports: [
+      ...genSrxPorts('ge', 0, 0, 0, 11, 'copper', '1G'),
+      ...genSrxPorts('ge', 0, 0, 12, 15, 'SFP', '1G'),
+    ],
+  },
+
+  'SRX550M': {
+    name: 'SRX550M',
+    tier: 'midrange',
+    eol: true,
+    description: 'Mid-range firewall, enhanced (End of Life)',
+    throughput: { l4: '5.5 Gbps', l7: 'N/A', threat: '1.2 Gbps' },
+    ports: [
+      ...genSrxPorts('ge', 0, 0, 0, 11, 'copper', '1G'),
+      ...genSrxPorts('ge', 0, 0, 12, 17, 'SFP', '1G'),
+      ...genSrxPorts('xe', 0, 0, 0, 1, 'SFP+', '10G'),
+    ],
+  },
+
+  'SRX650': {
+    name: 'SRX650',
+    tier: 'midrange',
+    eol: true,
+    description: 'Mid-range firewall with high port density (End of Life)',
+    throughput: { l4: '6 Gbps', l7: 'N/A', threat: '1.5 Gbps' },
+    ports: [
+      ...genSrxPorts('ge', 0, 0, 0, 15, 'copper', '1G'),
+      ...genSrxPorts('ge', 0, 0, 16, 19, 'SFP', '1G'),
+      ...genSrxPorts('xe', 0, 0, 0, 3, 'SFP+', '10G'),
+    ],
+  },
+
+  'SRX1400': {
+    name: 'SRX1400',
+    tier: 'datacenter',
+    eol: true,
+    description: 'Data center firewall, fixed (End of Life)',
+    throughput: { l4: '10 Gbps', l7: 'N/A', threat: '3 Gbps' },
+    ports: [
+      ...genSrxPorts('ge', 0, 0, 0, 15, 'copper', '1G'),
+      ...genSrxPorts('xe', 0, 0, 0, 3, 'SFP+', '10G'),
+    ],
+  },
+
+  'SRX1500': {
+    name: 'SRX1500',
+    tier: 'midrange',
+    eol: true,
+    description: 'Enterprise edge firewall (End of Life)',
+    throughput: { l4: '6 Gbps', l7: '3 Gbps', threat: '4 Gbps' },
+    ports: [
+      ...genSrxPorts('ge', 0, 0, 0, 15, 'copper', '1G'),
+      ...genSrxPorts('xe', 0, 0, 0, 3, 'SFP+', '10G'),
+    ],
+  },
+
+  'SRX3400': {
+    name: 'SRX3400',
+    tier: 'datacenter',
+    eol: true,
+    description: 'Data center firewall, modular (End of Life)',
+    throughput: { l4: '30 Gbps', l7: 'N/A', threat: '7 Gbps' },
+    ports: [
+      ...genSrxPorts('ge', 0, 0, 0, 15, 'copper', '1G'),
+      ...genSrxPorts('xe', 0, 0, 0, 7, 'SFP+', '10G'),
+    ],
+  },
+
+  'SRX3600': {
+    name: 'SRX3600',
+    tier: 'datacenter',
+    eol: true,
+    description: 'Data center firewall, high performance (End of Life)',
+    throughput: { l4: '60 Gbps', l7: 'N/A', threat: '15 Gbps' },
+    ports: [
+      ...genSrxPorts('ge', 0, 0, 0, 15, 'copper', '1G'),
+      ...genSrxPorts('xe', 0, 0, 0, 15, 'SFP+', '10G'),
+    ],
+  },
+};
+
+// ---------------------------------------------------------------------------
+// Juniper SRX Models (current, used as target + source)
+// ---------------------------------------------------------------------------
+
 export const SRX_MODELS = {
   // ---- Branch ----
   'SRX300': {
@@ -806,6 +958,83 @@ export function detectPanosModel(intermediateConfig) {
 }
 
 /**
+ * All SRX models available as source (current + EOS).
+ * Used in ModelSelector when source vendor is SRX.
+ */
+export const SRX_SOURCE_MODELS = { ...SRX_EOS_MODELS, ...SRX_MODELS };
+
+/**
+ * Attempts to detect the SRX hardware model from the parsed config.
+ * Examines zone interfaces to match against known SRX port counts.
+ *
+ * @param {Object} intermediateConfig - The parsed intermediate JSON
+ * @returns {{ model: string, confidence: number } | null}
+ */
+export function detectSrxModel(intermediateConfig) {
+  if (!intermediateConfig?.zones) return null;
+
+  const allInterfaces = [];
+  for (const zone of intermediateConfig.zones) {
+    for (const iface of (zone.interfaces || [])) {
+      allInterfaces.push(iface);
+    }
+  }
+
+  if (allInterfaces.length === 0) return null;
+
+  // Determine interface types and max port numbers
+  let maxPort = 0;
+  let hasXe = false;
+  let hasEt = false;
+  let hasFe = false;
+
+  for (const iface of allInterfaces) {
+    const base = iface.split('.')[0]; // strip unit
+    const match = base.match(/^(ge|xe|et|fe)-(\d+)\/(\d+)\/(\d+)$/);
+    if (match) {
+      const port = parseInt(match[4]);
+      if (port > maxPort) maxPort = port;
+      if (match[1] === 'xe') hasXe = true;
+      if (match[1] === 'et') hasEt = true;
+      if (match[1] === 'fe') hasFe = true;
+    }
+  }
+
+  if (maxPort === 0 && !hasXe && !hasEt && !hasFe) return null;
+
+  // Search through all SRX models (current + EOS)
+  const allModels = { ...SRX_EOS_MODELS, ...SRX_MODELS };
+  const candidates = [];
+
+  for (const [modelName, model] of Object.entries(allModels)) {
+    if (model.tier === 'virtual') continue;
+
+    const portNames = model.ports.map(p => p.name);
+    const allFound = allInterfaces.every(iface => {
+      const base = iface.split('.')[0];
+      return portNames.includes(base);
+    });
+
+    if (allFound) {
+      const fitScore = model.ports.length - allInterfaces.length;
+      const eolPenalty = model.eol ? 50 : 0;
+      candidates.push({ model: modelName, fitScore: Math.abs(fitScore) + eolPenalty, portCount: model.ports.length });
+    }
+  }
+
+  if (candidates.length === 0) return null;
+  candidates.sort((a, b) => a.fitScore - b.fitScore);
+
+  const best = candidates[0];
+  const confidence = Math.max(0.4, Math.min(0.95, 1 - (best.fitScore / Math.max(best.portCount, 1))));
+
+  return {
+    model: best.model,
+    confidence: Math.round(confidence * 100) / 100,
+  };
+}
+
+/**
  * Suggests a compatible SRX model based on the source PAN-OS model's throughput.
  *
  * Logic:
@@ -819,7 +1048,8 @@ export function detectPanosModel(intermediateConfig) {
  * @returns {{ model: string, recommended: boolean } | null}
  */
 export function suggestSrxModel(panosModel, metric = 'l7') {
-  const source = PANOS_MODELS[panosModel];
+  // Look up source model from PAN-OS or SRX databases
+  const source = PANOS_MODELS[panosModel] || SRX_SOURCE_MODELS[panosModel];
   if (!source) return null;
 
   // Virtual always maps to vSRX

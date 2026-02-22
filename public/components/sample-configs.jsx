@@ -1,12 +1,14 @@
 /**
- * Sample PAN-OS Configurations for Testing
+ * Sample Configurations for Testing
  *
- * Four realistic but fictional configurations covering common scenarios:
- *
+ * PAN-OS samples:
  *   1. Basic — Small office: 2 zones, 5 address objects, 6 security rules, 1 NAT
  *   2. Medium — Branch office: 3 zones, address groups, service objects, 12 rules, 3 NAT
  *   3. Complex — Enterprise: 4 zones, custom apps, security profiles, disabled rules, 20+ rules
  *   4. Edge Cases — Tricky constructs: FQDN, any/any, tags, application-default, dynamic groups
+ *
+ * SRX samples:
+ *   5. SRX Basic — SRX set commands: 3 zones, address objects, 6 security policies, source NAT
  */
 
 export const SAMPLE_CONFIGS = {
@@ -2167,5 +2169,81 @@ export const SAMPLE_CONFIGS = {
     </entry>
   </devices>
 </config>`,
+  },
+
+  // =========================================================================
+  // SAMPLE 6: SRX Set Commands (Junos)
+  // =========================================================================
+  srx_basic: {
+    label: 'SRX Basic (6 rules)',
+    description: 'SRX set commands: 3 zones, address objects, 6 security policies, source NAT',
+    xml: `set version 21.4R3-S5.4
+set system host-name srx550-branch01
+
+set security zones security-zone trust interfaces ge-0/0/0.0
+set security zones security-zone trust interfaces ge-0/0/1.0
+set security zones security-zone untrust interfaces ge-0/0/2.0
+set security zones security-zone dmz interfaces ge-0/0/3.0
+
+set security address-book global address web-server-1 10.10.10.10/32
+set security address-book global address web-server-2 10.10.10.11/32
+set security address-book global address app-server-1 10.20.20.10/32
+set security address-book global address db-server-1 10.30.30.10/32
+set security address-book global address dns-server 10.1.1.53/32
+set security address-book global address internal-net 192.168.0.0/16
+set security address-book global address dmz-net 10.10.10.0/24
+set security address-book global address-set web-servers address web-server-1
+set security address-book global address-set web-servers address web-server-2
+set security address-book global address-set all-servers address web-server-1
+set security address-book global address-set all-servers address web-server-2
+set security address-book global address-set all-servers address app-server-1
+set security address-book global address-set all-servers address db-server-1
+
+set security policies from-zone trust to-zone untrust policy allow-internet match source-address any
+set security policies from-zone trust to-zone untrust policy allow-internet match destination-address any
+set security policies from-zone trust to-zone untrust policy allow-internet match application junos-http
+set security policies from-zone trust to-zone untrust policy allow-internet match application junos-https
+set security policies from-zone trust to-zone untrust policy allow-internet match application junos-dns-udp
+set security policies from-zone trust to-zone untrust policy allow-internet then permit
+set security policies from-zone trust to-zone untrust policy allow-internet then log session-close
+
+set security policies from-zone untrust to-zone dmz policy allow-web match source-address any
+set security policies from-zone untrust to-zone dmz policy allow-web match destination-address web-servers
+set security policies from-zone untrust to-zone dmz policy allow-web match application junos-http
+set security policies from-zone untrust to-zone dmz policy allow-web match application junos-https
+set security policies from-zone untrust to-zone dmz policy allow-web then permit
+set security policies from-zone untrust to-zone dmz policy allow-web then log session-init
+set security policies from-zone untrust to-zone dmz policy allow-web then log session-close
+
+set security policies from-zone trust to-zone dmz policy trust-to-dmz match source-address internal-net
+set security policies from-zone trust to-zone dmz policy trust-to-dmz match destination-address dmz-net
+set security policies from-zone trust to-zone dmz policy trust-to-dmz match application any
+set security policies from-zone trust to-zone dmz policy trust-to-dmz then permit
+set security policies from-zone trust to-zone dmz policy trust-to-dmz then log session-close
+
+set security policies from-zone dmz to-zone trust policy dmz-to-db match source-address app-server-1
+set security policies from-zone dmz to-zone trust policy dmz-to-db match destination-address db-server-1
+set security policies from-zone dmz to-zone trust policy dmz-to-db match application junos-mysql
+set security policies from-zone dmz to-zone trust policy dmz-to-db then permit
+set security policies from-zone dmz to-zone trust policy dmz-to-db then log session-close
+
+set security policies from-zone trust to-zone untrust policy allow-dns match source-address any
+set security policies from-zone trust to-zone untrust policy allow-dns match destination-address any
+set security policies from-zone trust to-zone untrust policy allow-dns match application junos-dns-udp
+set security policies from-zone trust to-zone untrust policy allow-dns then permit
+
+set security policies from-zone untrust to-zone trust policy deny-all match source-address any
+set security policies from-zone untrust to-zone trust policy deny-all match destination-address any
+set security policies from-zone untrust to-zone trust policy deny-all match application any
+set security policies from-zone untrust to-zone trust policy deny-all then deny
+set security policies from-zone untrust to-zone trust policy deny-all then log session-close
+
+set security nat source rule-set trust-to-untrust from zone trust
+set security nat source rule-set trust-to-untrust to zone untrust
+set security nat source rule-set trust-to-untrust rule source-nat-rule match source-address 0.0.0.0/0
+set security nat source rule-set trust-to-untrust rule source-nat-rule then source-nat interface
+
+set applications application custom-app-8080 protocol tcp
+set applications application custom-app-8080 destination-port 8080`,
   },
 };

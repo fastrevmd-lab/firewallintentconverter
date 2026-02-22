@@ -19,6 +19,7 @@ export default function PolicyTable({
   onDeleteRule,
   onAddRule,
   viewMode,
+  platformView,
 }) {
   const [sortField, setSortField] = useState('_rule_index');
   const [sortDir, setSortDir] = useState('asc');
@@ -690,7 +691,7 @@ export default function PolicyTable({
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
         />
-        {isSrx && (
+        {platformView === 'srx' && (
           <select
             className="status-filter-select"
             value={statusFilter}

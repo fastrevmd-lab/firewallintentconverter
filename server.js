@@ -14,6 +14,8 @@ import express from 'express';
 import { fileURLToPath } from 'url';
 import { dirname, resolve } from 'path';
 import { parsePanosConfig } from './src/parsers/panos-parser.js';
+import { parseSrxConfig } from './src/parsers/srx-parser.js';
+import { detectVendor } from './src/parsers/parser-utils.js';
 import { convertToSrxSetCommands } from './src/converters/srx-converter.js';
 import { buildSrxXml } from './src/converters/srx-xml-builder.js';
 import { validateSrxOutput } from './src/validators/srx-validator.js';
@@ -43,7 +45,19 @@ app.post('/api/parse', (req, res) => {
     if (!configText || typeof configText !== 'string') {
       return res.status(400).json({ error: 'configText is required and must be a string' });
     }
-    const result = parsePanosConfig(configText);
+
+    // Detect vendor to route to the correct parser
+    const detection = detectVendor(configText);
+    let result;
+
+    if (detection.vendor === 'srx') {
+      result = parseSrxConfig(configText);
+    } else {
+      result = parsePanosConfig(configText);
+    }
+
+    // Include detected vendor in response
+    result.detectedVendor = detection.vendor;
     res.json(result);
   } catch (error) {
     console.error('[parse] Error:', error.message);

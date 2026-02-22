@@ -49,7 +49,7 @@ export default function ConfigInput({
     <div className="panel config-input-panel">
       <div className="panel-header">
         <h2>Source Configuration</h2>
-        <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>PAN-OS XML</span>
+        <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>PAN-OS XML / Junos SRX</span>
       </div>
 
       <div className="panel-body" style={{ display: 'flex', flexDirection: 'column' }}>
@@ -119,7 +119,7 @@ export default function ConfigInput({
           className="config-textarea"
           value={configText}
           onChange={(e) => onConfigChange(e.target.value)}
-          placeholder={"Paste your PAN-OS XML configuration here...\n\nExample:\n<config version=\"10.1.0\">\n  <devices>\n    <entry name=\"localhost.localdomain\">\n      <vsys>\n        ..."}
+          placeholder={"Paste your firewall configuration here...\n\nSupported formats:\n• PAN-OS XML configuration\n• Junos SRX set commands\n• Junos SRX hierarchical config"}
           spellCheck={false}
           style={{ flex: 1 }}
         />

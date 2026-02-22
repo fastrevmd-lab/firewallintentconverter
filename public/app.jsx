@@ -46,6 +46,7 @@ export default function App() {
   const [targetModel, setTargetModel] = useState('');
   const [srxLicense, setSrxLicense] = useState('');
   const [interfaceMappings, setInterfaceMappings] = useState({});
+  const [sourceVendor, setSourceVendor] = useState('panos'); // 'panos' | 'srx'
 
   // --- Modal state ---
   const [showModelSelector, setShowModelSelector] = useState(false);
@@ -91,6 +92,9 @@ export default function App() {
   }, [intermediateConfig]);
 
   const allRulesAccepted = reviewProgress.total > 0 && reviewProgress.accepted === reviewProgress.total;
+
+  // Compute effective viewMode: 'from' tab uses SRX style when source is SRX
+  const effectiveViewMode = platformView === 'srx' ? 'srx' : (sourceVendor === 'srx' ? 'srx' : 'panos');
 
   // ------------------------------------------------------------------
   // Sanitize handler: strips sensitive data from config text
@@ -140,7 +144,7 @@ export default function App() {
   const handleParse = useCallback(async () => {
     if (!configText.trim()) return;
     setIsLoading(true);
-    setLoadingMessage('Parsing PAN-OS configuration...');
+    setLoadingMessage('Parsing configuration...');
     setError(null);
     setSrxOutput(null);
     setConvertWarnings([]);
@@ -166,6 +170,15 @@ export default function App() {
       policies.forEach(rule => {
         rule._review_status = 'unreviewed';
       });
+
+      // Store detected vendor
+      const detectedVendor = data.detectedVendor || data.intermediateConfig?.metadata?.source_vendor || 'panos';
+      setSourceVendor(detectedVendor);
+
+      // If source is SRX, default to 'panos' platform view (shows the "from SRX" tab)
+      if (detectedVendor === 'srx') {
+        setPlatformView('panos');
+      }
 
       setIntermediateConfig(data.intermediateConfig);
       setParseWarnings(data.warnings || []);
@@ -523,7 +536,7 @@ export default function App() {
                     className={`platform-view-btn ${platformView === 'panos' ? 'active' : ''}`}
                     onClick={() => handlePlatformViewChange('panos')}
                   >
-                    from {sourceModel || 'PAN-OS'}
+                    from {sourceModel || (sourceVendor === 'srx' ? 'SRX' : 'PAN-OS')}
                   </button>
                   <button
                     className={`platform-view-btn ${platformView === 'srx' ? 'active' : ''}`}
@@ -538,19 +551,19 @@ export default function App() {
                     className={`center-tab-btn ${editTab === 'rules' ? 'active' : ''}`}
                     onClick={() => setEditTab('rules')}
                   >
-                    {platformView === 'srx' ? 'Security Policies' : 'Security Rules'} ({intermediateConfig.security_policies?.length || 0})
+                    {effectiveViewMode === 'srx' ? 'Security Policies' : 'Security Rules'} ({intermediateConfig.security_policies?.length || 0})
                   </button>
                   <button
                     className={`center-tab-btn ${editTab === 'zones' ? 'active' : ''}`}
                     onClick={() => setEditTab('zones')}
                   >
-                    {platformView === 'srx' ? 'Security Zones' : 'Zones'} ({intermediateConfig.zones?.length || 0})
+                    {effectiveViewMode === 'srx' ? 'Security Zones' : 'Zones'} ({intermediateConfig.zones?.length || 0})
                   </button>
                   <button
                     className={`center-tab-btn ${editTab === 'objects' ? 'active' : ''}`}
                     onClick={() => setEditTab('objects')}
                   >
-                    {platformView === 'srx' ? 'Address Book' : 'Objects'}
+                    {effectiveViewMode === 'srx' ? 'Address Book' : 'Objects'}
                   </button>
                   <button
                     className={`center-tab-btn ${editTab === 'nat' ? 'active' : ''}`}
@@ -621,14 +634,15 @@ export default function App() {
                     onUpdateRule={handleUpdateRule}
                     onDeleteRule={handleDeleteRule}
                     onAddRule={handleAddRule}
-                    viewMode={platformView}
+                    viewMode={effectiveViewMode}
+                    platformView={platformView}
                   />
                 )}
                 {editTab === 'zones' && (
                   <ZoneEditor
                     zones={intermediateConfig.zones || []}
                     onZonesUpdate={handleZonesUpdate}
-                    viewMode={platformView}
+                    viewMode={effectiveViewMode}
                     interfaceMappings={interfaceMappings}
                   />
                 )}
@@ -636,14 +650,14 @@ export default function App() {
                   <ObjectEditor
                     intermediateConfig={intermediateConfig}
                     onConfigUpdate={handleConfigUpdate}
-                    viewMode={platformView}
+                    viewMode={effectiveViewMode}
                   />
                 )}
                 {editTab === 'nat' && (
                   <NATEditor
                     natRules={intermediateConfig.nat_rules || []}
                     onNATUpdate={handleNATUpdate}
-                    viewMode={platformView}
+                    viewMode={effectiveViewMode}
                   />
                 )}
               </div>
@@ -661,7 +675,7 @@ export default function App() {
                     <line x1="9" y1="21" x2="9" y2="9" />
                   </svg>
                   <h3>No configuration loaded</h3>
-                  <p>Paste a PAN-OS XML configuration in the left panel and click "Parse" to view security policies here.</p>
+                  <p>Paste a PAN-OS XML or Junos SRX configuration in the left panel and click "Parse" to view security policies here.</p>
                 </div>
               </div>
             </>
@@ -697,7 +711,8 @@ export default function App() {
             }}
             targetModel={targetModel}
             srxLicense={srxLicense}
-            viewMode={platformView}
+            viewMode={effectiveViewMode}
+            platformView={platformView}
             isSanitized={isSanitized}
             llmWarningDismissed={llmWarningDismissed}
             onLLMWarning={() => setShowLLMWarning(true)}
@@ -838,6 +853,7 @@ export default function App() {
           sourceModel={sourceModel}
           targetModel={targetModel}
           srxLicense={srxLicense}
+          sourceVendor={sourceVendor}
           onModelSelection={handleModelSelection}
           onContinue={handleModelContinue}
           onClose={() => setShowModelSelector(false)}

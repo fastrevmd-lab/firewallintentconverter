@@ -14,7 +14,9 @@ import React, { useState, useEffect, useMemo } from 'react';
 import {
   PANOS_MODELS,
   SRX_MODELS,
+  SRX_SOURCE_MODELS,
   detectPanosModel,
+  detectSrxModel,
   suggestSrxModel,
   getThroughputDisplay,
   THROUGHPUT_LABELS,
@@ -27,6 +29,7 @@ export default function ModelSelector({
   sourceModel,
   targetModel,
   srxLicense,
+  sourceVendor,
   onModelSelection,
   onContinue,
   onClose,
@@ -38,16 +41,20 @@ export default function ModelSelector({
   const [throughputMetric, setThroughputMetric] = useState('l7');
   const [recommendedSrx, setRecommendedSrx] = useState(null); // { model, recommended }
 
+  const isSrxSource = sourceVendor === 'srx';
+
   // Auto-detect source model on mount
   useEffect(() => {
     if (intermediateConfig && !sourceModel) {
-      const detected = detectPanosModel(intermediateConfig);
+      const detected = isSrxSource
+        ? detectSrxModel(intermediateConfig)
+        : detectPanosModel(intermediateConfig);
       setDetection(detected);
       if (detected) {
         setSelectedSource(detected.model);
       }
     }
-  }, [intermediateConfig, sourceModel]);
+  }, [intermediateConfig, sourceModel, isSrxSource]);
 
   // Re-suggest SRX whenever source or metric changes
   useEffect(() => {
@@ -60,11 +67,12 @@ export default function ModelSelector({
     }
   }, [selectedSource, throughputMetric]);
 
-  const sourceInfo = PANOS_MODELS[selectedSource];
+  const sourceModelsDb = isSrxSource ? SRX_SOURCE_MODELS : PANOS_MODELS;
+  const sourceInfo = sourceModelsDb[selectedSource];
   const targetInfo = SRX_MODELS[selectedTarget];
 
   // Group models by tier for dropdown optgroups
-  const panosGroups = useMemo(() => groupByTier(PANOS_MODELS), []);
+  const sourceGroups = useMemo(() => groupByTier(sourceModelsDb), [isSrxSource]);
   const srxGroups = useMemo(() => groupByTier(SRX_MODELS), []);
 
   const metricLabel = METRIC_PREFIX[throughputMetric] || 'L7';
@@ -110,9 +118,11 @@ export default function ModelSelector({
             </div>
           </div>
 
-          {/* Source PAN-OS Model */}
+          {/* Source Model */}
           <div className="model-section">
-            <h3 className="model-section-title">Source Firewall (PAN-OS)</h3>
+            <h3 className="model-section-title">
+              Source Firewall ({isSrxSource ? 'Juniper SRX' : 'PAN-OS'})
+            </h3>
 
             {detection && (
               <div className="detection-banner">
@@ -128,8 +138,8 @@ export default function ModelSelector({
               value={selectedSource}
               onChange={(e) => setSelectedSource(e.target.value)}
             >
-              <option value="">-- Select PAN-OS Model (optional) --</option>
-              {Object.entries(panosGroups).map(([tier, models]) => (
+              <option value="">-- Select {isSrxSource ? 'SRX' : 'PAN-OS'} Model (optional) --</option>
+              {Object.entries(sourceGroups).map(([tier, models]) => (
                 <optgroup key={tier} label={tierLabel(tier)}>
                   {models.map(m => (
                     <option key={m.name} value={m.name}>
@@ -141,7 +151,7 @@ export default function ModelSelector({
             </select>
 
             {sourceInfo && (
-              <ModelInfoCard model={sourceInfo} vendor="panos" metric={throughputMetric} />
+              <ModelInfoCard model={sourceInfo} vendor={isSrxSource ? 'srx' : 'panos'} metric={throughputMetric} />
             )}
           </div>
 

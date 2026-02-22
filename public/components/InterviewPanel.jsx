@@ -33,9 +33,11 @@ export default function InterviewPanel({
   onAcceptRule,
   onSetLLMReviewed,
   viewMode,
+  platformView,
   srxLicense,
 }) {
   const isSrx = viewMode === 'srx';
+  const isToSrxTab = platformView === 'srx'; // true only on the "to SRX" tab
   const [structuredSuggestion, setStructuredSuggestion] = useState(null);
   const [rawSuggestion, setRawSuggestion] = useState('');
   const [isLoadingSuggestion, setIsLoadingSuggestion] = useState(false);
@@ -205,8 +207,8 @@ export default function InterviewPanel({
         </span>
       </div>
       <div className="panel-body">
-        {/* Review Action Bar — SRX view only */}
-        {isSrx && (
+        {/* Review Action Bar — "to SRX" tab only */}
+        {isToSrxTab && (
           <div className="rule-review-actions">
             <button
               className="btn btn-secondary btn-sm"
@@ -454,8 +456,8 @@ export default function InterviewPanel({
         <div className="detail-section">
           <h3>{isSrx ? 'Application Services' : 'Security Profiles'}</h3>
 
-          {/* License warning */}
-          {isSrx && srxLicense && (() => {
+          {/* License warning — "to SRX" tab only */}
+          {isToSrxTab && srxLicense && (() => {
             const gaps = getLicenseGaps(selectedRule, srxLicense);
             if (gaps.length === 0) return null;
             return (
@@ -535,8 +537,8 @@ export default function InterviewPanel({
           </div>
         )}
 
-        {/* AI Review Section — SRX view only */}
-        {isSrx && (
+        {/* AI Review Section — "to SRX" tab only */}
+        {isToSrxTab && (
           <div className="detail-section">
             <h3>AI Review</h3>
 

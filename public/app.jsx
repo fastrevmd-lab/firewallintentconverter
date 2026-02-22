@@ -375,7 +375,7 @@ export default function App() {
       <nav className="navbar">
         <div className="navbar-brand">
           <h1>
-            Firewall Policy to <span className="brand-accent">Intent</span> Converter
+            Firewall Policy to <span className="brand-accent">Intent Converter</span>
           </h1>
         </div>
 
@@ -544,31 +544,33 @@ export default function App() {
                     NAT ({intermediateConfig.nat_rules?.length || 0})
                   </button>
                   <div style={{ flex: 1 }} />
-                  <button
-                    className="btn btn-secondary btn-sm"
-                    onClick={handleReviewClick}
-                    style={{
-                      margin: '6px 4px',
-                      opacity: allRulesAccepted && platformView === 'srx' ? 1 : 0.5,
-                    }}
-                    title={
-                      platformView !== 'srx'
-                        ? 'Switch to SRX view for full review'
-                        : allRulesAccepted
-                          ? 'Start full ruleset review with LLM'
-                          : `${reviewProgress.accepted}/${reviewProgress.total} rules accepted`
-                    }
-                  >
-                    Review
-                  </button>
-                  <button
-                    className="btn btn-primary btn-sm"
-                    onClick={() => handleConvert('set')}
-                    disabled={isLoading}
-                    style={{ margin: '6px 12px 6px 4px' }}
-                  >
-                    Convert to SRX
-                  </button>
+                  {platformView === 'srx' && (
+                    <>
+                      <button
+                        className="btn btn-secondary btn-sm"
+                        onClick={handleReviewClick}
+                        style={{
+                          margin: '6px 4px',
+                          opacity: allRulesAccepted ? 1 : 0.5,
+                        }}
+                        title={
+                          allRulesAccepted
+                            ? 'Start full ruleset review with LLM'
+                            : `${reviewProgress.accepted}/${reviewProgress.total} rules accepted`
+                        }
+                      >
+                        Review
+                      </button>
+                      <button
+                        className="btn btn-primary btn-sm"
+                        onClick={() => handleConvert('set')}
+                        disabled={isLoading}
+                        style={{ margin: '6px 12px 6px 4px' }}
+                      >
+                        Convert to SRX
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
 

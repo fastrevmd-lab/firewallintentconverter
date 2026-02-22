@@ -63,11 +63,35 @@ export default function InterviewPanel({
     setRawSuggestion('');
 
     try {
+      // Build SRX context so the LLM sees both original PAN-OS and SRX translation
+      const sp = selectedRule.security_profiles || {};
+      const srxAppServices = [];
+      if (sp.spyware || sp.vulnerability) srxAppServices.push('IPS/IDP');
+      if (sp['url-filtering'] || sp['file-blocking']) srxAppServices.push('Content Security (UTM)');
+      if (sp.virus || sp['wildfire-analysis']) srxAppServices.push('Anti-malware');
+      if (selectedRule._srx_decrypt) srxAppServices.push('Decrypt/SSL Proxy');
+      if (selectedRule._srx_flow_av) srxAppServices.push('Flow-based AV');
+      if (selectedRule._srx_secintel || (selectedRule._secIntelAddresses || []).length > 0) srxAppServices.push('SecIntel');
+      if (selectedRule._srx_secure_web_proxy) srxAppServices.push('Secure Web Proxy');
+      if (selectedRule._srx_icap_redirect) srxAppServices.push('ICAP Redirect');
+
+      const srxLogging = [];
+      if (selectedRule.log_end) srxLogging.push('session-close');
+      if (selectedRule.log_start) srxLogging.push('session-init');
+      if (selectedRule._srx_log_count) srxLogging.push('count');
+
+      const srxContext = {
+        action: mapActionToSrx(selectedRule.action),
+        applicationServices: srxAppServices,
+        logging: srxLogging,
+      };
+
       const prompt = buildStructuredRuleSuggestionPrompt(
         selectedRule,
         targetModel,
         intermediateConfig?.zones,
-        srxLicense
+        srxLicense,
+        srxContext
       );
       const result = await getLLMSuggestion(prompt.user, prompt.system);
 
@@ -181,35 +205,37 @@ export default function InterviewPanel({
         </span>
       </div>
       <div className="panel-body">
-        {/* Review Action Bar */}
-        <div className="rule-review-actions">
-          <button
-            className="btn btn-secondary btn-sm"
-            onClick={handleLLMReview}
-            disabled={isLoadingSuggestion || !llmStatus.configured}
-          >
-            {isLoadingSuggestion ? (
-              <>
-                <span className="loading-spinner" style={{ width: 12, height: 12 }} />
-                Analyzing...
-              </>
-            ) : (
-              'LLM Review'
+        {/* Review Action Bar — SRX view only */}
+        {isSrx && (
+          <div className="rule-review-actions">
+            <button
+              className="btn btn-secondary btn-sm"
+              onClick={handleLLMReview}
+              disabled={isLoadingSuggestion || !llmStatus.configured}
+            >
+              {isLoadingSuggestion ? (
+                <>
+                  <span className="loading-spinner" style={{ width: 12, height: 12 }} />
+                  Analyzing...
+                </>
+              ) : (
+                'LLM Review'
+              )}
+            </button>
+            <button
+              className={`btn btn-sm ${isAccepted ? 'btn-accepted' : 'btn-accept'}`}
+              onClick={() => onAcceptRule && onAcceptRule()}
+              disabled={isAccepted}
+            >
+              {isAccepted ? 'Accepted' : 'Accept Policy'}
+            </button>
+            {!llmStatus.configured && (
+              <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
+                Configure LLM in Settings
+              </span>
             )}
-          </button>
-          <button
-            className={`btn btn-sm ${isAccepted ? 'btn-accepted' : 'btn-accept'}`}
-            onClick={() => onAcceptRule && onAcceptRule()}
-            disabled={isAccepted}
-          >
-            {isAccepted ? 'Accepted' : isSrx ? 'Accept Policy' : 'Accept Rule'}
-          </button>
-          {!llmStatus.configured && (
-            <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
-              Configure LLM in Settings
-            </span>
-          )}
-        </div>
+          </div>
+        )}
 
         {/* General */}
         <div className="detail-section">
@@ -293,14 +319,14 @@ export default function InterviewPanel({
 
         {/* Applications / Services */}
         <div className="detail-section">
-          <h3>Applications & Services</h3>
+          <h3>{isSrx ? 'Applications / Ports' : 'Applications & Services'}</h3>
           <EditableChipsField
             label="Applications"
             values={selectedRule.applications}
             onChange={(v) => handleFieldChange('applications', v)}
           />
           <EditableChipsField
-            label="Services"
+            label={isSrx ? 'Ports' : 'Services'}
             values={selectedRule.services}
             onChange={(v) => handleFieldChange('services', v)}
           />
@@ -309,20 +335,79 @@ export default function InterviewPanel({
         {/* Logging */}
         <div className="detail-section">
           <h3>Logging</h3>
-          <div className="detail-field">
-            <span className="field-label">Log Start</span>
-            <label className="toggle-label">
-              <input type="checkbox" checked={selectedRule.log_start || false} onChange={() => handleToggle('log_start')} />
-              <span>{selectedRule.log_start ? 'Yes' : 'No'}</span>
-            </label>
-          </div>
-          <div className="detail-field">
-            <span className="field-label">Log End</span>
-            <label className="toggle-label">
-              <input type="checkbox" checked={selectedRule.log_end || false} onChange={() => handleToggle('log_end')} />
-              <span>{selectedRule.log_end ? 'Yes' : 'No'}</span>
-            </label>
-          </div>
+          {isSrx ? (
+            <>
+              <div className="srx-toggle-row">
+                <div>
+                  <div className="srx-toggle-label">Session initiate logs</div>
+                  <div className="srx-toggle-sublabel">Log at session creation</div>
+                </div>
+                <label className="srx-toggle">
+                  <input type="checkbox" checked={selectedRule.log_start || false} onChange={() => handleToggle('log_start')} />
+                  <span className="srx-toggle-track" />
+                </label>
+              </div>
+              <div className="srx-toggle-row">
+                <div>
+                  <div className="srx-toggle-label">Session close logs</div>
+                  <div className="srx-toggle-sublabel">Log at session teardown</div>
+                </div>
+                <label className="srx-toggle">
+                  <input type="checkbox" checked={selectedRule.log_end || false} onChange={() => handleToggle('log_end')} />
+                  <span className="srx-toggle-track" />
+                </label>
+              </div>
+              <div className="srx-toggle-row">
+                <div>
+                  <div className="srx-toggle-label">Log count</div>
+                  <div className="srx-toggle-sublabel">Enable packet/byte counters</div>
+                </div>
+                <label className="srx-toggle">
+                  <input type="checkbox" checked={selectedRule._srx_log_count || false} onChange={() => handleToggle('_srx_log_count')} />
+                  <span className="srx-toggle-track" />
+                </label>
+              </div>
+              <div className="srx-toggle-row">
+                <div>
+                  <div className="srx-toggle-label">Rule options</div>
+                  <div className="srx-toggle-sublabel">Attach options profile</div>
+                </div>
+                <label className="srx-toggle">
+                  <input type="checkbox" checked={!!selectedRule._srx_rule_options || false} onChange={() => handleFieldChange('_srx_rule_options', selectedRule._srx_rule_options ? '' : 'default')} />
+                  <span className="srx-toggle-track" />
+                </label>
+              </div>
+              {selectedRule._srx_rule_options && (
+                <div className="detail-field" style={{ marginTop: 4 }}>
+                  <span className="field-label" style={{ fontSize: 11 }}>Profile</span>
+                  <input
+                    className="field-edit-input"
+                    value={selectedRule._srx_rule_options || ''}
+                    onChange={(e) => handleFieldChange('_srx_rule_options', e.target.value)}
+                    placeholder="default"
+                    style={{ fontSize: 11 }}
+                  />
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              <div className="detail-field">
+                <span className="field-label">Log Start</span>
+                <label className="toggle-label">
+                  <input type="checkbox" checked={selectedRule.log_start || false} onChange={() => handleToggle('log_start')} />
+                  <span>{selectedRule.log_start ? 'Yes' : 'No'}</span>
+                </label>
+              </div>
+              <div className="detail-field">
+                <span className="field-label">Log End</span>
+                <label className="toggle-label">
+                  <input type="checkbox" checked={selectedRule.log_end || false} onChange={() => handleToggle('log_end')} />
+                  <span>{selectedRule.log_end ? 'Yes' : 'No'}</span>
+                </label>
+              </div>
+            </>
+          )}
         </div>
 
         {/* Security Profiles / Application Services */}
@@ -346,34 +431,11 @@ export default function InterviewPanel({
           })()}
 
           {isSrx ? (
-            <>
-              {/* SRX view: show application-services summary */}
-              <div className="detail-field">
-                <span className="field-label">Services</span>
-                <div className="field-chips-container">
-                  {(() => {
-                    const appSvcs = buildApplicationServices(selectedRule);
-                    if (appSvcs.length === 0) return <span className="cell-chip" style={{ opacity: 0.4 }}>none</span>;
-                    return appSvcs.map(svc => {
-                      const cls = svc === 'utm-policy' ? 'utm' : svc === 'idp-policy' ? 'idp' : 'secintel';
-                      return <span key={svc} className={`app-svc-chip ${cls}`}>{svc}</span>;
-                    });
-                  })()}
-                </div>
-              </div>
-              {/* Still allow editing individual profiles in SRX view */}
-              {['virus', 'wildfire-analysis', 'url-filtering', 'file-blocking', 'spyware', 'vulnerability'].map(pType => (
-                <div className="detail-field" key={pType}>
-                  <span className="field-label">{formatProfileLabel(pType)}</span>
-                  <input
-                    className="field-edit-input"
-                    value={(selectedRule.security_profiles || {})[pType] || ''}
-                    onChange={(e) => handleProfileChange(pType, e.target.value)}
-                    placeholder="none"
-                  />
-                </div>
-              ))}
-            </>
+            <SrxSecurityToggles
+              rule={selectedRule}
+              onProfileChange={handleProfileChange}
+              onFieldChange={handleFieldChange}
+            />
           ) : (
             <>
               {(selectedRule.profile_group || !hasSecurityProfiles(selectedRule)) && (
@@ -384,7 +446,7 @@ export default function InterviewPanel({
                   placeholder="None"
                 />
               )}
-              {['virus', 'wildfire-analysis', 'url-filtering', 'file-blocking', 'spyware', 'vulnerability'].map(pType => (
+              {['virus', 'url-filtering', 'spyware'].map(pType => (
                 <div className="detail-field" key={pType}>
                   <span className="field-label">{formatProfileLabel(pType)}</span>
                   <input
@@ -432,69 +494,71 @@ export default function InterviewPanel({
           </div>
         )}
 
-        {/* AI Review Section */}
-        <div className="detail-section">
-          <h3>AI Review</h3>
+        {/* AI Review Section — SRX view only */}
+        {isSrx && (
+          <div className="detail-section">
+            <h3>AI Review</h3>
 
-          {llmStatus.configured && !isSanitized && (
-            <p style={{ fontSize: '11px', color: 'var(--warning)', marginBottom: 8 }}>
-              Configuration not sanitized — you will be warned before sending data to an LLM.
-            </p>
-          )}
+            {llmStatus.configured && !isSanitized && (
+              <p style={{ fontSize: '11px', color: 'var(--warning)', marginBottom: 8 }}>
+                Configuration not sanitized — you will be warned before sending data to an LLM.
+              </p>
+            )}
 
-          {suggestionError && (
-            <div className="suggestion-error">
-              {suggestionError}
-            </div>
-          )}
+            {suggestionError && (
+              <div className="suggestion-error">
+                {suggestionError}
+              </div>
+            )}
 
-          {/* Structured suggestion display */}
-          {structuredSuggestion && (
-            <div className="suggestion-card" style={{ padding: '10px 12px' }}>
-              <div className="suggestion-analysis">{structuredSuggestion.analysis}</div>
-              {structuredSuggestion.verdict && (
-                <span className={`suggestion-verdict ${structuredSuggestion.verdict}`}>
-                  {structuredSuggestion.verdict === 'looks_good' ? 'Looks Good' : 'Needs Changes'}
-                </span>
-              )}
+            {/* Structured suggestion display */}
+            {structuredSuggestion && (
+              <div className="suggestion-card" style={{ padding: '10px 12px' }}>
+                <div className="suggestion-analysis">{structuredSuggestion.analysis}</div>
+                {structuredSuggestion.verdict && (
+                  <span className={`suggestion-verdict ${structuredSuggestion.verdict}`}>
+                    {structuredSuggestion.verdict === 'looks_good' ? 'Looks Good' : 'Needs Changes'}
+                  </span>
+                )}
 
-              {structuredSuggestion.suggestions?.map((s, i) => (
-                <div key={i} className="suggestion-field-change">
-                  <div className="suggestion-field-name">{s.field}</div>
-                  <div className="suggestion-values">
-                    <span className="suggestion-current">{formatValue(s.current)}</span>
-                    <span className="suggestion-arrow">&rarr;</span>
-                    <span className="suggestion-new">{formatValue(s.suggested)}</span>
+                {structuredSuggestion.suggestions?.map((s, i) => (
+                  <div key={i} className="suggestion-field-change">
+                    <div className="suggestion-field-name">{s.field}</div>
+                    <div className="suggestion-values">
+                      <span className="suggestion-current">{formatValue(s.current)}</span>
+                      <span className="suggestion-arrow">&rarr;</span>
+                      <span className="suggestion-new">{formatValue(s.suggested)}</span>
+                    </div>
+                    <div className="suggestion-reason">{s.reason}</div>
+                    <button
+                      className="suggestion-import-btn"
+                      onClick={() => handleImportSuggestion(s)}
+                    >
+                      Import
+                    </button>
                   </div>
-                  <div className="suggestion-reason">{s.reason}</div>
+                ))}
+
+                {structuredSuggestion.suggestions?.length > 1 && (
                   <button
-                    className="suggestion-import-btn"
-                    onClick={() => handleImportSuggestion(s)}
+                    className="btn btn-secondary btn-sm btn-block"
+                    onClick={handleImportAll}
+                    style={{ marginTop: 8 }}
                   >
-                    Import
+                    Import All Suggestions
                   </button>
-                </div>
-              ))}
+                )}
+              </div>
+            )}
 
-              {structuredSuggestion.suggestions?.length > 1 && (
-                <button
-                  className="btn btn-secondary btn-sm btn-block"
-                  onClick={handleImportAll}
-                  style={{ marginTop: 8 }}
-                >
-                  Import All Suggestions
-                </button>
-              )}
-            </div>
-          )}
-
-          {/* Raw text fallback */}
-          {rawSuggestion && !structuredSuggestion && (
-            <div className="suggestion-card">
-              <div className="suggestion-content">{rawSuggestion}</div>
-            </div>
-          )}
-        </div>
+            {/* Raw text fallback */}
+            {rawSuggestion && !structuredSuggestion && (
+              <div className="suggestion-card">
+                <div className="suggestion-content">{rawSuggestion}</div>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -586,6 +650,99 @@ function EditableChipsField({ label, values, onChange }) {
           style={{ minWidth: 60, flex: 1 }}
         />
       </div>
+    </div>
+  );
+}
+
+/**
+ * JunOS-style Security Subscriptions toggles.
+ * Maps PAN-OS security_profiles and SRX-specific flags to toggle switches
+ * matching Security Director Cloud layout.
+ */
+const SRX_SUBSCRIPTION_TOGGLES = [
+  { key: 'ips',              label: 'IPS',              sub: 'Intrusion Prevention',       profiles: ['spyware', 'vulnerability'] },
+  { key: 'content-security', label: 'Content Security', sub: 'UTM Content Filtering',      profiles: ['url-filtering', 'file-blocking'] },
+  { key: 'decrypt',          label: 'Decrypt',          sub: 'SSL/TLS Inspection',         srxField: '_srx_decrypt' },
+  { key: 'flow-av',          label: 'Flow-based AV',    sub: 'Flow-mode Antivirus',        srxField: '_srx_flow_av' },
+  { key: 'antimalware',      label: 'Anti-malware',     sub: 'Antivirus / WildFire',       profiles: ['virus', 'wildfire-analysis'] },
+  { key: 'secintel',         label: 'SecIntel',         sub: 'Security Intelligence',      srxField: '_srx_secintel', initFromSecIntel: true },
+  { key: 'secure-web-proxy', label: 'Secure Web Proxy', sub: 'Explicit/Transparent Proxy', srxField: '_srx_secure_web_proxy' },
+  { key: 'icap-redirect',    label: 'ICAP Redirect',    sub: 'ICAP Content Adaptation',    srxField: '_srx_icap_redirect' },
+];
+
+function SrxSecurityToggles({ rule, onProfileChange, onFieldChange }) {
+  const sp = rule.security_profiles || {};
+
+  const isEnabled = (toggle) => {
+    if (toggle.srxField) {
+      if (toggle.initFromSecIntel && rule._srx_secintel === undefined) {
+        return (rule._secIntelAddresses || []).length > 0;
+      }
+      return !!rule[toggle.srxField];
+    }
+    if (toggle.profiles) return toggle.profiles.some(p => !!sp[p]);
+    return false;
+  };
+
+  const handleToggleChange = (toggle, checked) => {
+    if (toggle.srxField) {
+      onFieldChange(toggle.srxField, checked);
+      if (!checked) onFieldChange(toggle.srxField + '_profile', '');
+      return;
+    }
+    if (toggle.profiles) {
+      for (const p of toggle.profiles) {
+        onProfileChange(p, checked ? (sp[p] || 'default') : '');
+      }
+    }
+  };
+
+  return (
+    <div>
+      {SRX_SUBSCRIPTION_TOGGLES.map(toggle => {
+        const enabled = isEnabled(toggle);
+        return (
+          <React.Fragment key={toggle.key}>
+            <div className="srx-toggle-row">
+              <div>
+                <div className="srx-toggle-label">{toggle.label}</div>
+                <div className="srx-toggle-sublabel">{toggle.sub}</div>
+              </div>
+              <label className="srx-toggle">
+                <input
+                  type="checkbox"
+                  checked={enabled}
+                  onChange={(e) => handleToggleChange(toggle, e.target.checked)}
+                />
+                <span className="srx-toggle-track" />
+              </label>
+            </div>
+            {/* Profile name input directly below toggle when enabled */}
+            {enabled && toggle.profiles && toggle.profiles.filter(p => !!sp[p]).map(p => (
+              <div className="detail-field srx-profile-inline" key={p}>
+                <span className="field-label">{formatProfileLabel(p)}</span>
+                <input
+                  className="field-edit-input"
+                  value={sp[p] || ''}
+                  onChange={(e) => onProfileChange(p, e.target.value)}
+                  placeholder="default"
+                />
+              </div>
+            ))}
+            {enabled && toggle.srxField && (
+              <div className="detail-field srx-profile-inline">
+                <span className="field-label">Profile</span>
+                <input
+                  className="field-edit-input"
+                  value={rule[toggle.srxField + '_profile'] || ''}
+                  onChange={(e) => onFieldChange(toggle.srxField + '_profile', e.target.value)}
+                  placeholder="default"
+                />
+              </div>
+            )}
+          </React.Fragment>
+        );
+      })}
     </div>
   );
 }

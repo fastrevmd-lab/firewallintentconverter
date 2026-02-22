@@ -1150,4 +1150,1022 @@ export const SAMPLE_CONFIGS = {
   </devices>
 </config>`,
   },
+
+  // =========================================================================
+  // SAMPLE 5: Real-World Production (sanitized)
+  // =========================================================================
+  realworld: {
+    label: 'Real-World (23 rules)',
+    description: 'Production PA-440: 5 zones, EDL threat feeds, geo-negate blocking, 3 security profile groups, VPN tunnel zone, application groups, 23 security rules, 3 NAT rules',
+    xml: `<?xml version="1.0"?>
+<config version="11.1.0" urldb="paloaltonetworks">
+  <devices>
+    <entry name="localhost.localdomain">
+      <vsys>
+        <entry name="vsys1">
+          <application-group>
+            <entry name="MGT-Applications">
+              <members>
+                <member>icmp</member>
+                <member>ssh</member>
+                <member>ssl</member>
+                <member>web-browsing</member>
+                <member>ping</member>
+              </members>
+            </entry>
+            <entry name="AC-Internet-Applications">
+              <members>
+                <member>adobe-cloud</member>
+                <member>apple-push-notifications</member>
+                <member>boxnet</member>
+                <member>dns</member>
+                <member>dns-over-https</member>
+                <member>dropbox</member>
+                <member>facebook</member>
+                <member>gmail</member>
+                <member>google-base</member>
+                <member>google-play</member>
+                <member>icloud</member>
+                <member>lastpass</member>
+                <member>ldap</member>
+                <member>linkedin</member>
+                <member>ms-office365</member>
+                <member>ms-onedrive</member>
+                <member>ms-teams</member>
+                <member>ms-update</member>
+                <member>ntp</member>
+                <member>ocsp</member>
+                <member>outlook-web-online</member>
+                <member>ping</member>
+                <member>quic</member>
+                <member>sharepoint-online</member>
+                <member>spotify</member>
+                <member>ssl</member>
+                <member>stun</member>
+                <member>web-browsing</member>
+                <member>windows-azure</member>
+                <member>zoom</member>
+              </members>
+            </entry>
+            <entry name="PaloAlto-Applications">
+              <members>
+                <member>dns</member>
+                <member>google-base</member>
+                <member>ntp</member>
+                <member>ocsp</member>
+                <member>paloalto-device-telemetry</member>
+                <member>paloalto-dns-security</member>
+                <member>paloalto-shared-services</member>
+                <member>paloalto-updates</member>
+                <member>paloalto-wildfire-cloud</member>
+                <member>pan-db-cloud</member>
+                <member>panorama</member>
+                <member>ssl</member>
+                <member>web-browsing</member>
+              </members>
+            </entry>
+          </application-group>
+          <zone>
+            <entry name="Internet-Side">
+              <network>
+                <layer3>
+                  <member>ethernet1/1</member>
+                </layer3>
+              </network>
+            </entry>
+            <entry name="Default-LAN-Side">
+              <network>
+                <layer3>
+                  <member>ethernet1/2</member>
+                  <member>tunnel.1</member>
+                </layer3>
+              </network>
+            </entry>
+            <entry name="MGT-Net">
+              <network>
+                <layer3>
+                  <member>ethernet1/8</member>
+                </layer3>
+              </network>
+            </entry>
+            <entry name="DMZ">
+              <network>
+                <layer3>
+                  <member>ethernet1/7</member>
+                </layer3>
+              </network>
+            </entry>
+            <entry name="Server-Network">
+              <network>
+                <layer3>
+                  <member>ethernet1/3</member>
+                </layer3>
+              </network>
+            </entry>
+          </zone>
+          <service>
+            <entry name="Panorama-SSL-3978">
+              <protocol><tcp><port>443,3978</port><override><no/></override></tcp></protocol>
+            </entry>
+            <entry name="DirectoryLDAP">
+              <protocol><tcp><port>636</port><override><no/></override></tcp></protocol>
+            </entry>
+            <entry name="BackupCloud-Endpoint-Mgr">
+              <protocol><tcp><port>9079</port><override><no/></override></tcp></protocol>
+              <description>Backup Endpoint Manager</description>
+            </entry>
+            <entry name="BackupCloud-Server">
+              <protocol><tcp><port>9082</port><override><no/></override></tcp></protocol>
+              <description>Backup Cloud Server</description>
+            </entry>
+            <entry name="BackupCloud-DRAL">
+              <protocol><tcp><port>9083</port><override><no/></override></tcp></protocol>
+              <description>Backup Disaster Recovery Access Layer</description>
+            </entry>
+            <entry name="BackupCloud-Manager">
+              <protocol><tcp><port>9090</port><override><no/></override></tcp></protocol>
+              <description>Backup Manager</description>
+            </entry>
+            <entry name="NAS-Web-Admin-5000">
+              <protocol><tcp><port>5000</port><override><no/></override></tcp></protocol>
+              <description>NAS Server Web Admin</description>
+            </entry>
+            <entry name="ssl4318">
+              <protocol><tcp><port>4318</port><override><no/></override></tcp></protocol>
+            </entry>
+            <entry name="rdp-3389">
+              <protocol><tcp><port>3389</port><override><no/></override></tcp></protocol>
+            </entry>
+            <entry name="gpu-cluster-8443">
+              <protocol><tcp><port>8443</port><override><no/></override></tcp></protocol>
+            </entry>
+          </service>
+          <service-group>
+            <entry name="BackupCloud-D2C-Services">
+              <members>
+                <member>BackupCloud-Manager</member>
+                <member>BackupCloud-Server</member>
+                <member>BackupCloud-DRAL</member>
+                <member>BackupCloud-Endpoint-Mgr</member>
+                <member>service-http</member>
+                <member>service-https</member>
+              </members>
+            </entry>
+            <entry name="AC-Services-Internal-NAS">
+              <members>
+                <member>NAS-Web-Admin-5000</member>
+              </members>
+            </entry>
+          </service-group>
+          <rulebase>
+            <security>
+              <rules>
+                <entry name="DROP Inbound Bulletproof High Risk">
+                  <to><member>any</member></to>
+                  <from><member>any</member></from>
+                  <source>
+                    <member>panw-bulletproof-ip-list</member>
+                    <member>panw-highrisk-ip-list</member>
+                    <member>panw-known-ip-list</member>
+                    <member>panw-torexit-ip-list</member>
+                  </source>
+                  <destination><member>any</member></destination>
+                  <source-user><member>any</member></source-user>
+                  <category><member>any</member></category>
+                  <application><member>any</member></application>
+                  <service><member>any</member></service>
+                  <source-hip><member>any</member></source-hip>
+                  <destination-hip><member>any</member></destination-hip>
+                  <action>drop</action>
+                </entry>
+                <entry name="DROP Inbound Countries - Negate">
+                  <to><member>any</member></to>
+                  <from><member>any</member></from>
+                  <source>
+                    <member>10.0.0.0-10.255.255.255</member>
+                    <member>172.16.0.0-172.31.255.255</member>
+                    <member>192.168.0.0-192.168.255.255</member>
+                    <member>AU</member>
+                    <member>MY</member>
+                    <member>US</member>
+                  </source>
+                  <destination><member>any</member></destination>
+                  <source-user><member>any</member></source-user>
+                  <category><member>any</member></category>
+                  <application><member>any</member></application>
+                  <service><member>any</member></service>
+                  <source-hip><member>any</member></source-hip>
+                  <destination-hip><member>any</member></destination-hip>
+                  <action>drop</action>
+                  <negate-source>yes</negate-source>
+                  <description>Drop ALL inbound countries except listed here including US and private ranges. Addresses are negated from Any.</description>
+                </entry>
+                <entry name="DROP Outbound Bulletproof High Risk">
+                  <to><member>any</member></to>
+                  <from><member>any</member></from>
+                  <source><member>any</member></source>
+                  <destination>
+                    <member>panw-bulletproof-ip-list</member>
+                    <member>panw-highrisk-ip-list</member>
+                    <member>panw-known-ip-list</member>
+                    <member>panw-torexit-ip-list</member>
+                  </destination>
+                  <source-user><member>any</member></source-user>
+                  <category><member>any</member></category>
+                  <application><member>any</member></application>
+                  <service><member>any</member></service>
+                  <source-hip><member>any</member></source-hip>
+                  <destination-hip><member>any</member></destination-hip>
+                  <action>drop</action>
+                </entry>
+                <entry name="DROP Outbound Countries - Negate">
+                  <to><member>any</member></to>
+                  <from><member>any</member></from>
+                  <source><member>any</member></source>
+                  <destination>
+                    <member>10.0.0.0-10.255.255.255</member>
+                    <member>172.16.0.0-172.31.255.255</member>
+                    <member>192.168.0.0-192.168.255.255</member>
+                    <member>AU</member>
+                    <member>CA</member>
+                    <member>DE</member>
+                    <member>EU</member>
+                    <member>GB</member>
+                    <member>JP</member>
+                    <member>US</member>
+                  </destination>
+                  <source-user><member>any</member></source-user>
+                  <category><member>any</member></category>
+                  <application><member>any</member></application>
+                  <service><member>any</member></service>
+                  <source-hip><member>any</member></source-hip>
+                  <destination-hip><member>any</member></destination-hip>
+                  <action>drop</action>
+                  <negate-destination>yes</negate-destination>
+                  <disabled>no</disabled>
+                </entry>
+                <entry name="ALLOW PaloAlto-Applications">
+                  <from><member>MGT-Net</member></from>
+                  <to><member>Internet-Side</member></to>
+                  <source><member>any</member></source>
+                  <destination><member>any</member></destination>
+                  <service><member>application-default</member></service>
+                  <application><member>PaloAlto-Applications</member></application>
+                  <action>allow</action>
+                  <log-end>yes</log-end>
+                  <source-user><member>any</member></source-user>
+                  <category><member>any</member></category>
+                  <source-hip><member>any</member></source-hip>
+                  <destination-hip><member>any</member></destination-hip>
+                  <profile-setting>
+                    <group><member>Acme-Security-Profile</member></group>
+                  </profile-setting>
+                </entry>
+                <entry name="ALLOW PaloAlto-Panorama-SSL">
+                  <from><member>MGT-Net</member></from>
+                  <to><member>Internet-Side</member></to>
+                  <source><member>any</member></source>
+                  <destination><member>Cloud-Panorama</member></destination>
+                  <service><member>application-default</member></service>
+                  <application>
+                    <member>panorama</member>
+                    <member>ssl</member>
+                  </application>
+                  <action>allow</action>
+                  <log-end>yes</log-end>
+                  <source-user><member>any</member></source-user>
+                  <category><member>any</member></category>
+                  <source-hip><member>any</member></source-hip>
+                  <destination-hip><member>any</member></destination-hip>
+                  <profile-setting>
+                    <group><member>Acme-Security-Profile</member></group>
+                  </profile-setting>
+                  <log-start>no</log-start>
+                </entry>
+                <entry name="ALLOW PaloAlto-Panorama-SSL-TEMP-OPEN">
+                  <from><member>MGT-Net</member></from>
+                  <to><member>Internet-Side</member></to>
+                  <source><member>any</member></source>
+                  <destination><member>Cloud-Panorama</member></destination>
+                  <service><member>any</member></service>
+                  <application><member>any</member></application>
+                  <action>allow</action>
+                  <log-end>yes</log-end>
+                  <source-user><member>any</member></source-user>
+                  <category><member>any</member></category>
+                  <source-hip><member>any</member></source-hip>
+                  <destination-hip><member>any</member></destination-hip>
+                  <log-start>no</log-start>
+                </entry>
+                <entry name="ALLOW Server-Directory">
+                  <from><member>Server-Network</member></from>
+                  <to><member>Internet-Side</member></to>
+                  <source><member>Server-Gamma</member></source>
+                  <destination>
+                    <member>ldap-mfa.idp.example.com</member>
+                    <member>ldap.idp.example.com</member>
+                  </destination>
+                  <service><member>DirectoryLDAP</member></service>
+                  <application>
+                    <member>ldap</member>
+                    <member>ssl</member>
+                  </application>
+                  <action>allow</action>
+                  <log-end>yes</log-end>
+                  <source-user><member>any</member></source-user>
+                  <category><member>any</member></category>
+                  <source-hip><member>any</member></source-hip>
+                  <destination-hip><member>any</member></destination-hip>
+                  <profile-setting>
+                    <group><member>Acme-Security-Profile</member></group>
+                  </profile-setting>
+                </entry>
+                <entry name="ALLOW FW-Directory">
+                  <from><member>MGT-Net</member></from>
+                  <to><member>Internet-Side</member></to>
+                  <source><member>any</member></source>
+                  <destination>
+                    <member>ldap-mfa.idp.example.com</member>
+                    <member>ldap.idp.example.com</member>
+                  </destination>
+                  <service><member>DirectoryLDAP</member></service>
+                  <application>
+                    <member>ldap</member>
+                    <member>ssl</member>
+                  </application>
+                  <action>allow</action>
+                  <log-end>yes</log-end>
+                  <source-user><member>any</member></source-user>
+                  <category><member>any</member></category>
+                  <source-hip><member>any</member></source-hip>
+                  <destination-hip><member>any</member></destination-hip>
+                  <profile-setting>
+                    <group><member>Acme-Security-Profile</member></group>
+                  </profile-setting>
+                </entry>
+                <entry name="ALLOW MGT from Local LAN">
+                  <from><member>Default-LAN-Side</member></from>
+                  <to><member>MGT-Net</member></to>
+                  <source><member>AC-Network</member></source>
+                  <destination><member>MGT-Network</member></destination>
+                  <service><member>application-default</member></service>
+                  <application><member>MGT-Applications</member></application>
+                  <action>allow</action>
+                  <log-end>yes</log-end>
+                  <source-user><member>any</member></source-user>
+                  <category><member>any</member></category>
+                  <source-hip><member>any</member></source-hip>
+                  <destination-hip><member>any</member></destination-hip>
+                  <profile-setting>
+                    <group><member>Acme-Security-Profile</member></group>
+                  </profile-setting>
+                </entry>
+                <entry name="ALLOW AC Server Internet Apps">
+                  <from><member>Server-Network</member></from>
+                  <to><member>Internet-Side</member></to>
+                  <source><member>AC-Servers</member></source>
+                  <destination><member>any</member></destination>
+                  <service><member>application-default</member></service>
+                  <application><member>ssl</member></application>
+                  <action>allow</action>
+                  <log-end>yes</log-end>
+                  <source-user><member>any</member></source-user>
+                  <category><member>NAS-Cloud-Domains</member></category>
+                  <source-hip><member>any</member></source-hip>
+                  <destination-hip><member>any</member></destination-hip>
+                  <profile-setting>
+                    <group><member>Acme-Security-Profile</member></group>
+                  </profile-setting>
+                  <disabled>no</disabled>
+                </entry>
+                <entry name="ALLOW AC Internet Applications">
+                  <from><member>Default-LAN-Side</member></from>
+                  <to><member>Internet-Side</member></to>
+                  <source><member>AC-Network</member></source>
+                  <destination><member>any</member></destination>
+                  <service><member>application-default</member></service>
+                  <application><member>AC-Internet-Applications</member></application>
+                  <action>allow</action>
+                  <log-end>yes</log-end>
+                  <source-user><member>any</member></source-user>
+                  <category><member>any</member></category>
+                  <source-hip><member>any</member></source-hip>
+                  <destination-hip><member>any</member></destination-hip>
+                  <profile-setting>
+                    <group><member>Acme-Security-Profile</member></group>
+                  </profile-setting>
+                </entry>
+                <entry name="ALLOW AC Internal Apps NAS">
+                  <from><member>Default-LAN-Side</member></from>
+                  <to><member>Server-Network</member></to>
+                  <source><member>AC-Network</member></source>
+                  <destination><member>Server-Gamma</member></destination>
+                  <service><member>AC-Services-Internal-NAS</member></service>
+                  <application><member>any</member></application>
+                  <action>allow</action>
+                  <log-end>yes</log-end>
+                  <source-user><member>any</member></source-user>
+                  <category><member>any</member></category>
+                  <destination-hip><member>any</member></destination-hip>
+                  <profile-setting>
+                    <group><member>Acme-Security-Profile</member></group>
+                  </profile-setting>
+                  <source-hip><member>any</member></source-hip>
+                  <disabled>no</disabled>
+                </entry>
+                <entry name="ALLOW AC Internal SMB">
+                  <from>
+                    <member>Default-LAN-Side</member>
+                    <member>Server-Network</member>
+                  </from>
+                  <to>
+                    <member>Default-LAN-Side</member>
+                    <member>Server-Network</member>
+                  </to>
+                  <source>
+                    <member>AC-Network</member>
+                    <member>AC-Server-Network</member>
+                  </source>
+                  <destination>
+                    <member>AC-Server-Network</member>
+                    <member>AC-Servers</member>
+                  </destination>
+                  <service><member>any</member></service>
+                  <application>
+                    <member>4shared</member>
+                    <member>ms-ds-smb-base</member>
+                    <member>ms-ds-smbv2</member>
+                    <member>ms-ds-smbv3</member>
+                    <member>netbios-dg</member>
+                    <member>netbios-ns</member>
+                    <member>netbios-ss</member>
+                    <member>print-over-ms-smb</member>
+                    <member>ssl</member>
+                    <member>web-browsing</member>
+                  </application>
+                  <action>allow</action>
+                  <log-end>yes</log-end>
+                  <source-user><member>any</member></source-user>
+                  <category><member>any</member></category>
+                  <destination-hip><member>any</member></destination-hip>
+                  <source-hip><member>any</member></source-hip>
+                  <option>
+                    <disable-server-response-inspection>yes</disable-server-response-inspection>
+                  </option>
+                </entry>
+                <entry name="ALLOW AC Internal Applications">
+                  <from><member>Default-LAN-Side</member></from>
+                  <to><member>Server-Network</member></to>
+                  <source><member>AC-Network</member></source>
+                  <destination><member>AC-Servers</member></destination>
+                  <service><member>application-default</member></service>
+                  <application><member>any</member></application>
+                  <action>allow</action>
+                  <log-end>yes</log-end>
+                  <source-user><member>any</member></source-user>
+                  <category><member>any</member></category>
+                  <destination-hip><member>any</member></destination-hip>
+                  <profile-setting>
+                    <group><member>Acme-Security-Internal</member></group>
+                  </profile-setting>
+                  <source-hip><member>any</member></source-hip>
+                </entry>
+                <entry name="ALLOW BackupCloud D2C">
+                  <from>
+                    <member>Default-LAN-Side</member>
+                    <member>Server-Network</member>
+                  </from>
+                  <to><member>Internet-Side</member></to>
+                  <source><member>any</member></source>
+                  <destination><member>BackupCloud IP Addresses</member></destination>
+                  <service><member>BackupCloud-D2C-Services</member></service>
+                  <application><member>any</member></application>
+                  <action>allow</action>
+                  <log-end>yes</log-end>
+                  <source-user><member>any</member></source-user>
+                  <category><member>any</member></category>
+                  <source-hip><member>any</member></source-hip>
+                  <destination-hip><member>any</member></destination-hip>
+                  <profile-setting>
+                    <group><member>Acme-Security-Profile</member></group>
+                  </profile-setting>
+                </entry>
+                <entry name="ALLOW Outbound All">
+                  <from>
+                    <member>Default-LAN-Side</member>
+                    <member>MGT-Net</member>
+                    <member>Server-Network</member>
+                  </from>
+                  <to><member>Internet-Side</member></to>
+                  <source><member>any</member></source>
+                  <destination><member>any</member></destination>
+                  <service><member>application-default</member></service>
+                  <application><member>any</member></application>
+                  <action>allow</action>
+                  <log-end>yes</log-end>
+                  <source-user><member>any</member></source-user>
+                  <category><member>any</member></category>
+                  <source-hip><member>any</member></source-hip>
+                  <destination-hip><member>any</member></destination-hip>
+                  <profile-setting>
+                    <group><member>Acme-Security-Profile</member></group>
+                  </profile-setting>
+                </entry>
+                <entry name="ALLOW from LAN to Server SSH">
+                  <to><member>Server-Network</member></to>
+                  <from><member>Default-LAN-Side</member></from>
+                  <source><member>any</member></source>
+                  <destination><member>any</member></destination>
+                  <source-user><member>any</member></source-user>
+                  <category><member>any</member></category>
+                  <application><member>ssh</member></application>
+                  <service><member>any</member></service>
+                  <source-hip><member>any</member></source-hip>
+                  <destination-hip><member>any</member></destination-hip>
+                  <action>allow</action>
+                </entry>
+                <entry name="ALLOW from LAN cotp">
+                  <to><member>Server-Network</member></to>
+                  <from><member>Default-LAN-Side</member></from>
+                  <source><member>any</member></source>
+                  <destination><member>any</member></destination>
+                  <source-user><member>any</member></source-user>
+                  <category><member>any</member></category>
+                  <application><member>cotp</member></application>
+                  <service><member>application-default</member></service>
+                  <source-hip><member>any</member></source-hip>
+                  <destination-hip><member>any</member></destination-hip>
+                  <action>allow</action>
+                </entry>
+                <entry name="ALLOW from LAN ssl on 4318">
+                  <to><member>Server-Network</member></to>
+                  <from><member>Default-LAN-Side</member></from>
+                  <source><member>any</member></source>
+                  <destination><member>any</member></destination>
+                  <source-user><member>any</member></source-user>
+                  <category><member>any</member></category>
+                  <application><member>ssl</member></application>
+                  <service><member>ssl4318</member></service>
+                  <source-hip><member>any</member></source-hip>
+                  <destination-hip><member>any</member></destination-hip>
+                  <action>allow</action>
+                </entry>
+                <entry name="ALLOW from LAN t120 and rdp on 3389">
+                  <to><member>Server-Network</member></to>
+                  <from><member>Default-LAN-Side</member></from>
+                  <source><member>any</member></source>
+                  <destination><member>any</member></destination>
+                  <source-user><member>any</member></source-user>
+                  <category><member>any</member></category>
+                  <application>
+                    <member>ms-rdp</member>
+                    <member>t.120</member>
+                  </application>
+                  <service><member>rdp-3389</member></service>
+                  <source-hip><member>any</member></source-hip>
+                  <destination-hip><member>any</member></destination-hip>
+                  <action>allow</action>
+                </entry>
+                <entry name="Allow inbound for Web App">
+                  <to><member>Server-Network</member></to>
+                  <from><member>Internet-Side</member></from>
+                  <source><member>any</member></source>
+                  <destination><member>Web-App-Public-Host</member></destination>
+                  <source-user><member>any</member></source-user>
+                  <category><member>any</member></category>
+                  <application><member>any</member></application>
+                  <service><member>application-default</member></service>
+                  <source-hip><member>any</member></source-hip>
+                  <destination-hip><member>any</member></destination-hip>
+                  <action>allow</action>
+                  <log-start>no</log-start>
+                  <log-end>yes</log-end>
+                </entry>
+                <entry name="Allow from user to server">
+                  <to><member>Server-Network</member></to>
+                  <from><member>Default-LAN-Side</member></from>
+                  <source><member>any</member></source>
+                  <destination><member>any</member></destination>
+                  <source-user><member>any</member></source-user>
+                  <category><member>any</member></category>
+                  <application><member>any</member></application>
+                  <service><member>any</member></service>
+                  <source-hip><member>any</member></source-hip>
+                  <destination-hip><member>any</member></destination-hip>
+                  <action>allow</action>
+                  <log-start>no</log-start>
+                  <log-end>yes</log-end>
+                </entry>
+              </rules>
+            </security>
+            <nat>
+              <rules>
+                <entry name="Internet Outgoing NAT Policy">
+                  <source-translation>
+                    <dynamic-ip-and-port>
+                      <interface-address>
+                        <interface>ethernet1/1</interface>
+                      </interface-address>
+                    </dynamic-ip-and-port>
+                  </source-translation>
+                  <to><member>Internet-Side</member></to>
+                  <from>
+                    <member>Default-LAN-Side</member>
+                    <member>MGT-Net</member>
+                    <member>Server-Network</member>
+                  </from>
+                  <source><member>any</member></source>
+                  <destination><member>any</member></destination>
+                  <service>any</service>
+                  <description>Internet Outgoing NAT Policy</description>
+                  <to-interface>any</to-interface>
+                </entry>
+                <entry name="NAT-WebApp-Inbound">
+                  <to><member>Internet-Side</member></to>
+                  <from><member>Internet-Side</member></from>
+                  <source><member>any</member></source>
+                  <destination><member>Web-App-Public-Host</member></destination>
+                  <service>any</service>
+                  <description>NAT rule for inbound web application traffic.</description>
+                  <to-interface>any</to-interface>
+                  <destination-translation>
+                    <translated-address>Server-Delta</translated-address>
+                  </destination-translation>
+                </entry>
+                <entry name="NAT-WebApp-HTTP">
+                  <to><member>Internet-Side</member></to>
+                  <from><member>Internet-Side</member></from>
+                  <source><member>any</member></source>
+                  <destination><member>Web-App-Public-Host</member></destination>
+                  <service>service-http</service>
+                  <description>NAT rule for HTTP web application with port translation.</description>
+                  <to-interface>any</to-interface>
+                  <destination-translation>
+                    <translated-port>80</translated-port>
+                    <translated-address>Server-Delta</translated-address>
+                  </destination-translation>
+                  <disabled>yes</disabled>
+                </entry>
+              </rules>
+            </nat>
+            <default-security-rules>
+              <rules>
+                <entry name="interzone-default">
+                  <action>deny</action>
+                  <log-start>no</log-start>
+                  <log-end>yes</log-end>
+                </entry>
+                <entry name="intrazone-default">
+                  <action>allow</action>
+                  <log-start>no</log-start>
+                  <log-end>yes</log-end>
+                  <profile-setting>
+                    <group><member>Acme-Security-Profile</member></group>
+                  </profile-setting>
+                </entry>
+              </rules>
+            </default-security-rules>
+          </rulebase>
+          <address>
+            <entry name="ISP-WAN-Link">
+              <ip-netmask>198.51.100.9/27</ip-netmask>
+              <description>Acme Corp WAN Connection</description>
+            </entry>
+            <entry name="AC-GW">
+              <ip-netmask>10.10.10.1/24</ip-netmask>
+            </entry>
+            <entry name="MGT-GW">
+              <ip-netmask>172.31.255.1/25</ip-netmask>
+              <description>Management Network</description>
+            </entry>
+            <entry name="ISP-Gateway">
+              <ip-netmask>198.51.100.1</ip-netmask>
+              <description>Default Route</description>
+            </entry>
+            <entry name="AC-Network">
+              <ip-netmask>10.10.10.0/24</ip-netmask>
+            </entry>
+            <entry name="MGT-Network">
+              <ip-netmask>172.31.255.0/25</ip-netmask>
+            </entry>
+            <entry name="Cloud-Panorama">
+              <fqdn>panorama.mgmt.example.com</fqdn>
+            </entry>
+            <entry name="ldap.idp.example.com">
+              <fqdn>ldap.idp.example.com</fqdn>
+            </entry>
+            <entry name="ldap-mfa.idp.example.com">
+              <fqdn>ldap-mfa.idp.example.com</fqdn>
+            </entry>
+            <entry name="Server-Alpha">
+              <ip-netmask>192.168.0.4/32</ip-netmask>
+            </entry>
+            <entry name="Server-Beta">
+              <ip-netmask>192.168.0.5/32</ip-netmask>
+            </entry>
+            <entry name="Server-Gamma">
+              <ip-netmask>192.168.0.7/32</ip-netmask>
+            </entry>
+            <entry name="Server-Delta">
+              <ip-netmask>192.168.0.8/32</ip-netmask>
+            </entry>
+            <entry name="Server-Epsilon">
+              <ip-netmask>192.168.0.9/32</ip-netmask>
+            </entry>
+            <entry name="Server-Zeta">
+              <ip-netmask>192.168.0.13/32</ip-netmask>
+            </entry>
+            <entry name="Server-Eta">
+              <ip-netmask>192.168.0.14/32</ip-netmask>
+            </entry>
+            <entry name="Server-Theta">
+              <ip-netmask>192.168.0.15/32</ip-netmask>
+            </entry>
+            <entry name="Server-Iota">
+              <ip-netmask>192.168.0.17/32</ip-netmask>
+            </entry>
+            <entry name="Server-Kappa">
+              <ip-netmask>192.168.0.141/32</ip-netmask>
+            </entry>
+            <entry name="AC-Server-GW">
+              <ip-netmask>192.168.0.1/24</ip-netmask>
+            </entry>
+            <entry name="AC-Server-Network">
+              <ip-netmask>192.168.0.0/24</ip-netmask>
+            </entry>
+            <entry name="BackupCloud-IP-203.0.113.0">
+              <ip-netmask>203.0.113.0/26</ip-netmask>
+              <description>Backup Cloud IP addresses</description>
+            </entry>
+            <entry name="BackupCloud-IP-203.0.113.64">
+              <ip-netmask>203.0.113.64/26</ip-netmask>
+              <description>Backup Cloud IP addresses</description>
+            </entry>
+            <entry name="BackupCloud-IP-203.0.113.128">
+              <ip-netmask>203.0.113.128/26</ip-netmask>
+              <description>Backup Cloud IP addresses</description>
+            </entry>
+            <entry name="BackupCloud-IP-203.0.113.192">
+              <ip-netmask>203.0.113.192/26</ip-netmask>
+              <description>Backup Cloud IP addresses</description>
+            </entry>
+            <entry name="BackupCloud-IP-192.0.2.0">
+              <ip-netmask>192.0.2.0/26</ip-netmask>
+              <description>Backup Cloud IP addresses</description>
+            </entry>
+            <entry name="BackupCloud-IP-192.0.2.64">
+              <ip-netmask>192.0.2.64/26</ip-netmask>
+              <description>Backup Cloud IP addresses</description>
+            </entry>
+            <entry name="BackupCloud-IP-192.0.2.128">
+              <ip-netmask>192.0.2.128/25</ip-netmask>
+              <description>Backup Cloud IP addresses</description>
+            </entry>
+            <entry name="BackupCloud-IP-192.0.2.192">
+              <ip-netmask>192.0.2.192/26</ip-netmask>
+              <description>Backup Cloud IP addresses</description>
+            </entry>
+            <entry name="NAS-Cloud-AWS">
+              <ip-netmask>203.0.113.10/32</ip-netmask>
+            </entry>
+            <entry name="NAS-Cloud-EU">
+              <ip-netmask>203.0.113.11/32</ip-netmask>
+            </entry>
+            <entry name="Web-App-Public">
+              <ip-netmask>198.51.100.10/27</ip-netmask>
+            </entry>
+            <entry name="Web-App-Public-Host">
+              <ip-netmask>198.51.100.10/32</ip-netmask>
+            </entry>
+          </address>
+          <profile-group>
+            <entry name="Internet">
+              <virus><member>default</member></virus>
+              <spyware><member>default</member></spyware>
+              <vulnerability><member>default</member></vulnerability>
+              <url-filtering><member>default</member></url-filtering>
+              <file-blocking><member>basic file blocking</member></file-blocking>
+              <wildfire-analysis><member>default</member></wildfire-analysis>
+            </entry>
+            <entry name="Acme-Security-Profile">
+              <virus><member>default</member></virus>
+              <spyware><member>strict-1</member></spyware>
+              <vulnerability><member>strict</member></vulnerability>
+              <url-filtering><member>default-1</member></url-filtering>
+              <file-blocking><member>basic file blocking</member></file-blocking>
+              <wildfire-analysis><member>default</member></wildfire-analysis>
+            </entry>
+            <entry name="Acme-Security-Internal">
+              <virus><member>default</member></virus>
+              <spyware><member>strict</member></spyware>
+              <vulnerability><member>strict</member></vulnerability>
+              <url-filtering><member>default</member></url-filtering>
+              <file-blocking><member>AC-basic file blocking</member></file-blocking>
+              <wildfire-analysis><member>default</member></wildfire-analysis>
+            </entry>
+          </profile-group>
+          <address-group>
+            <entry name="AC-Servers">
+              <static>
+                <member>Server-Iota</member>
+                <member>Server-Gamma</member>
+                <member>Server-Epsilon</member>
+                <member>Server-Zeta</member>
+                <member>Server-Kappa</member>
+                <member>Server-Alpha</member>
+                <member>Server-Eta</member>
+                <member>Server-Beta</member>
+                <member>Server-Theta</member>
+                <member>Server-Delta</member>
+              </static>
+            </entry>
+            <entry name="BackupCloud IP Addresses">
+              <static>
+                <member>BackupCloud-IP-203.0.113.0</member>
+                <member>BackupCloud-IP-203.0.113.64</member>
+                <member>BackupCloud-IP-203.0.113.128</member>
+                <member>BackupCloud-IP-203.0.113.192</member>
+                <member>BackupCloud-IP-192.0.2.0</member>
+                <member>BackupCloud-IP-192.0.2.64</member>
+                <member>BackupCloud-IP-192.0.2.128</member>
+                <member>BackupCloud-IP-192.0.2.192</member>
+              </static>
+              <description>Backup Cloud IP addresses</description>
+            </entry>
+            <entry name="NAS-Cloud-Servers">
+              <static>
+                <member>NAS-Cloud-AWS</member>
+                <member>NAS-Cloud-EU</member>
+              </static>
+            </entry>
+          </address-group>
+          <profiles>
+            <custom-url-category>
+              <entry name="NAS-Cloud-Domains">
+                <list>
+                  <member>*.box.com/</member>
+                  <member>*.app.box.com/</member>
+                  <member>*.ent.box.com/</member>
+                  <member>*.box.net/</member>
+                  <member>*.boxcdn.net/</member>
+                  <member>*.boxcloud.com/</member>
+                </list>
+                <type>URL List</type>
+                <description>NAS Cloud Domains used for Cloud Services</description>
+              </entry>
+              <entry name="CloudStorage">
+                <list>
+                  <member>*.cloudstorage.example.com/</member>
+                </list>
+                <type>URL List</type>
+              </entry>
+            </custom-url-category>
+            <file-blocking>
+              <entry name="AC-basic file blocking">
+                <rules>
+                  <entry name="Block high risk file types">
+                    <application><member>any</member></application>
+                    <file-type>
+                      <member>bat</member>
+                      <member>chm</member>
+                      <member>class</member>
+                      <member>cpl</member>
+                      <member>hlp</member>
+                      <member>hta</member>
+                      <member>ocx</member>
+                      <member>PE</member>
+                      <member>pif</member>
+                      <member>rar</member>
+                      <member>scr</member>
+                      <member>torrent</member>
+                      <member>vbe</member>
+                      <member>wsf</member>
+                    </file-type>
+                    <direction>both</direction>
+                    <action>block</action>
+                  </entry>
+                  <entry name="Continue prompt encrypted files">
+                    <application><member>any</member></application>
+                    <file-type>
+                      <member>7z</member>
+                      <member>dll</member>
+                      <member>encrypted-7z</member>
+                      <member>encrypted-rar</member>
+                      <member>encrypted-zip</member>
+                      <member>exe</member>
+                      <member>jar</member>
+                    </file-type>
+                    <direction>both</direction>
+                    <action>continue</action>
+                  </entry>
+                  <entry name="Log all other file types">
+                    <application><member>any</member></application>
+                    <file-type><member>any</member></file-type>
+                    <direction>both</direction>
+                    <action>alert</action>
+                  </entry>
+                </rules>
+              </entry>
+            </file-blocking>
+            <url-filtering>
+              <entry name="default-1">
+                <credential-enforcement>
+                  <mode><disabled/></mode>
+                  <log-severity>medium</log-severity>
+                </credential-enforcement>
+                <alert>
+                  <member>artificial-intelligence</member>
+                  <member>cryptocurrency</member>
+                  <member>high-risk</member>
+                  <member>medium-risk</member>
+                  <member>newly-registered-domain</member>
+                  <member>real-time-detection</member>
+                </alert>
+                <block>
+                  <member>abused-drugs</member>
+                  <member>adult</member>
+                  <member>command-and-control</member>
+                  <member>gambling</member>
+                  <member>hacking</member>
+                  <member>malware</member>
+                  <member>phishing</member>
+                  <member>ransomware</member>
+                  <member>weapons</member>
+                </block>
+              </entry>
+            </url-filtering>
+            <spyware>
+              <entry name="strict-1">
+                <rules>
+                  <entry name="simple-critical">
+                    <action><reset-both/></action>
+                    <severity><member>critical</member></severity>
+                    <threat-name>any</threat-name>
+                    <category>any</category>
+                    <packet-capture>disable</packet-capture>
+                  </entry>
+                  <entry name="simple-high">
+                    <action><reset-both/></action>
+                    <severity><member>high</member></severity>
+                    <threat-name>any</threat-name>
+                    <category>any</category>
+                    <packet-capture>disable</packet-capture>
+                  </entry>
+                  <entry name="simple-medium">
+                    <action><reset-both/></action>
+                    <severity><member>medium</member></severity>
+                    <threat-name>any</threat-name>
+                    <category>any</category>
+                    <packet-capture>disable</packet-capture>
+                  </entry>
+                  <entry name="simple-informational">
+                    <action><default/></action>
+                    <severity><member>informational</member></severity>
+                    <threat-name>any</threat-name>
+                    <category>any</category>
+                    <packet-capture>disable</packet-capture>
+                  </entry>
+                  <entry name="simple-low">
+                    <action><alert/></action>
+                    <severity><member>low</member></severity>
+                    <threat-name>any</threat-name>
+                    <category>any</category>
+                    <packet-capture>disable</packet-capture>
+                  </entry>
+                </rules>
+                <botnet-domains>
+                  <lists>
+                    <entry name="default-paloalto-dns">
+                      <action><sinkhole/></action>
+                      <packet-capture>disable</packet-capture>
+                    </entry>
+                  </lists>
+                  <sinkhole>
+                    <ipv4-address>pan-sinkhole-default-ip</ipv4-address>
+                    <ipv6-address>::1</ipv6-address>
+                  </sinkhole>
+                </botnet-domains>
+              </entry>
+            </spyware>
+          </profiles>
+          <external-list>
+            <entry name="panw-bulletproof-ip-list">
+              <type><predefined-ip><url>panw-bulletproof-ip-list</url></predefined-ip></type>
+            </entry>
+            <entry name="panw-highrisk-ip-list">
+              <type><predefined-ip><url>panw-highrisk-ip-list</url></predefined-ip></type>
+            </entry>
+            <entry name="panw-known-ip-list">
+              <type><predefined-ip><url>panw-known-ip-list</url></predefined-ip></type>
+            </entry>
+            <entry name="panw-torexit-ip-list">
+              <type><predefined-ip><url>panw-torexit-ip-list</url></predefined-ip></type>
+            </entry>
+          </external-list>
+        </entry>
+      </vsys>
+    </entry>
+  </devices>
+</config>`,
+  },
 };

@@ -17,13 +17,21 @@ const PROVIDERS = [
   { id: 'custom', name: 'Custom OpenAI-Compatible', defaultModel: '' },
 ];
 
-export default function LLMSettings({ onClose }) {
+export default function LLMSettings({ onClose, initialTab }) {
+  const [activeTab, setActiveTab] = useState(initialTab || 'llm');
   const [provider, setProvider] = useState('claude');
   const [apiKey, setApiKey] = useState('');
   const [model, setModel] = useState('claude-sonnet-4-6');
   const [baseUrl, setBaseUrl] = useState('');
   const [temperature, setTemperature] = useState(0.2);
   const [systemPrompt, setSystemPrompt] = useState(DEFAULT_SYSTEM_PROMPT);
+
+  // MCP state
+  const [mcpUrl, setMcpUrl] = useState('');
+  const [mcpConnected, setMcpConnected] = useState(false);
+  const [mcpTesting, setMcpTesting] = useState(false);
+  const [mcpTestResult, setMcpTestResult] = useState('');
+  const [mcpDevices, setMcpDevices] = useState([]);
 
   // Load saved settings from localStorage on mount
   useEffect(() => {
@@ -41,13 +49,56 @@ export default function LLMSettings({ onClose }) {
     } catch {
       // Ignore parse errors
     }
+    try {
+      const mcpSaved = localStorage.getItem('mcp-settings');
+      if (mcpSaved) {
+        const mcpSettings = JSON.parse(mcpSaved);
+        setMcpUrl(mcpSettings.url || '');
+      }
+    } catch { /* ignore */ }
   }, []);
 
   /** Save settings to localStorage */
   const handleSave = () => {
     const settings = { provider, apiKey, model, baseUrl, temperature, systemPrompt };
     localStorage.setItem('llm-settings', JSON.stringify(settings));
+    const mcpSettings = { url: mcpUrl };
+    localStorage.setItem('mcp-settings', JSON.stringify(mcpSettings));
     onClose();
+  };
+
+  /** Test MCP connection */
+  const handleMcpTest = async () => {
+    if (!mcpUrl.trim()) {
+      setMcpTestResult('Enter an MCP server URL first.');
+      return;
+    }
+    setMcpTesting(true);
+    setMcpTestResult('');
+    setMcpDevices([]);
+    try {
+      const resp = await fetch(mcpUrl.replace(/\/$/, '') + '/health', { method: 'GET' });
+      if (resp.ok) {
+        setMcpConnected(true);
+        setMcpTestResult('Connected successfully.');
+        // Try to list devices
+        try {
+          const devResp = await fetch(mcpUrl.replace(/\/$/, '') + '/devices', { method: 'GET' });
+          if (devResp.ok) {
+            const devData = await devResp.json();
+            setMcpDevices(Array.isArray(devData) ? devData : devData.devices || []);
+          }
+        } catch { /* devices endpoint optional */ }
+      } else {
+        setMcpConnected(false);
+        setMcpTestResult(`Connection failed: HTTP ${resp.status}`);
+      }
+    } catch (err) {
+      setMcpConnected(false);
+      setMcpTestResult(`Connection failed: ${err.message}`);
+    } finally {
+      setMcpTesting(false);
+    }
   };
 
   /** Update defaults when provider changes */
@@ -80,8 +131,8 @@ export default function LLMSettings({ onClose }) {
         maxHeight: '85vh',
         overflow: 'auto',
       }} onClick={(e) => e.stopPropagation()}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-          <h2 style={{ fontSize: '16px' }}>LLM Configuration</h2>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+          <h2 style={{ fontSize: '16px' }}>Settings</h2>
           <button
             onClick={onClose}
             style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '18px' }}
@@ -90,6 +141,97 @@ export default function LLMSettings({ onClose }) {
           </button>
         </div>
 
+        {/* Tab bar */}
+        <div style={{ display: 'flex', gap: 0, marginBottom: 16, borderBottom: '1px solid var(--border-color)' }}>
+          <button
+            onClick={() => setActiveTab('llm')}
+            style={{
+              padding: '8px 16px', background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 500,
+              color: activeTab === 'llm' ? 'var(--accent)' : 'var(--text-secondary)',
+              borderBottom: activeTab === 'llm' ? '2px solid var(--accent)' : '2px solid transparent',
+            }}
+          >
+            LLM Configuration
+          </button>
+          <button
+            onClick={() => setActiveTab('mcp')}
+            style={{
+              padding: '8px 16px', background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 500,
+              color: activeTab === 'mcp' ? 'var(--accent)' : 'var(--text-secondary)',
+              borderBottom: activeTab === 'mcp' ? '2px solid var(--accent)' : '2px solid transparent',
+            }}
+          >
+            MCP Connection
+          </button>
+        </div>
+
+        {activeTab === 'mcp' && (
+          <>
+            <SettingsField label="MCP Server URL">
+              <input
+                type="text"
+                value={mcpUrl}
+                onChange={(e) => setMcpUrl(e.target.value)}
+                placeholder="http://localhost:8080"
+                style={inputStyle}
+              />
+              <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                URL of the MCP server that connects to your SRX devices.
+              </div>
+            </SettingsField>
+
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 16 }}>
+              <button
+                className="btn btn-secondary btn-sm"
+                onClick={handleMcpTest}
+                disabled={mcpTesting}
+              >
+                {mcpTesting ? 'Testing...' : 'Test Connection'}
+              </button>
+              {mcpTestResult && (
+                <span style={{
+                  fontSize: 11,
+                  color: mcpConnected ? 'var(--success)' : 'var(--error)',
+                }}>
+                  {mcpTestResult}
+                </span>
+              )}
+            </div>
+
+            {/* Connected SRX devices list */}
+            <SettingsField label="Connected SRX Devices">
+              {mcpDevices.length > 0 ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  {mcpDevices.map((dev, i) => (
+                    <div key={i} style={{
+                      display: 'flex', alignItems: 'center', gap: 8,
+                      padding: '6px 10px', background: 'var(--bg-tertiary)',
+                      borderRadius: 'var(--radius)', fontSize: 12,
+                    }}>
+                      <span style={{
+                        width: 8, height: 8, borderRadius: '50%',
+                        background: dev.status === 'connected' ? 'var(--success)' : 'var(--text-muted)',
+                      }} />
+                      <span style={{ fontWeight: 500 }}>{dev.hostname || dev.name || dev.ip || `Device ${i + 1}`}</span>
+                      {dev.model && <span style={{ color: 'var(--text-muted)' }}>({dev.model})</span>}
+                      {dev.ip && <span style={{ color: 'var(--text-muted)', marginLeft: 'auto', fontFamily: 'var(--font-mono)', fontSize: 11 }}>{dev.ip}</span>}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div style={{
+                  padding: '16px', textAlign: 'center', background: 'var(--bg-tertiary)',
+                  borderRadius: 'var(--radius)', fontSize: 12, color: 'var(--text-muted)',
+                }}>
+                  {mcpConnected ? 'No devices reported by MCP server.' : 'Test connection to discover devices.'}
+                </div>
+              )}
+            </SettingsField>
+          </>
+        )}
+
+        {activeTab === 'llm' && (
+        <>
         {/* Provider selector */}
         <SettingsField label="Provider">
           <select
@@ -188,6 +330,8 @@ export default function LLMSettings({ onClose }) {
             </button>
           </div>
         </SettingsField>
+        </>
+        )}
 
         {/* Buttons */}
         <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '20px' }}>

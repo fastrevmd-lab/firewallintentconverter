@@ -310,11 +310,51 @@ export default function InterviewPanel({
             values={selectedRule.src_addresses}
             onChange={(v) => handleFieldChange('src_addresses', v)}
           />
+          {isSrx ? (
+            <div className="srx-toggle-row" style={{ padding: '2px 0' }}>
+              <div>
+                <div className="srx-toggle-label">Negate source</div>
+                <div className="srx-toggle-sublabel">Match all EXCEPT listed addresses</div>
+              </div>
+              <label className="srx-toggle">
+                <input type="checkbox" checked={selectedRule.negate_source || false} onChange={() => handleToggle('negate_source')} />
+                <span className="srx-toggle-track" />
+              </label>
+            </div>
+          ) : (
+            <div className="detail-field">
+              <span className="field-label">Negate Source</span>
+              <label className="toggle-label">
+                <input type="checkbox" checked={selectedRule.negate_source || false} onChange={() => handleToggle('negate_source')} />
+                <span>{selectedRule.negate_source ? 'Yes (all EXCEPT listed)' : 'No'}</span>
+              </label>
+            </div>
+          )}
           <EditableChipsField
             label="Destination"
             values={selectedRule.dst_addresses}
             onChange={(v) => handleFieldChange('dst_addresses', v)}
           />
+          {isSrx ? (
+            <div className="srx-toggle-row" style={{ padding: '2px 0' }}>
+              <div>
+                <div className="srx-toggle-label">Negate destination</div>
+                <div className="srx-toggle-sublabel">Match all EXCEPT listed addresses</div>
+              </div>
+              <label className="srx-toggle">
+                <input type="checkbox" checked={selectedRule.negate_destination || false} onChange={() => handleToggle('negate_destination')} />
+                <span className="srx-toggle-track" />
+              </label>
+            </div>
+          ) : (
+            <div className="detail-field">
+              <span className="field-label">Negate Dest</span>
+              <label className="toggle-label">
+                <input type="checkbox" checked={selectedRule.negate_destination || false} onChange={() => handleToggle('negate_destination')} />
+                <span>{selectedRule.negate_destination ? 'Yes (all EXCEPT listed)' : 'No'}</span>
+              </label>
+            </div>
+          )}
         </div>
 
         {/* Applications / Services */}
@@ -438,25 +478,26 @@ export default function InterviewPanel({
             />
           ) : (
             <>
-              {(selectedRule.profile_group || !hasSecurityProfiles(selectedRule)) && (
-                <EditableField
-                  label="Profile Group"
-                  value={selectedRule.profile_group || ''}
-                  onChange={(v) => handleFieldChange('profile_group', v)}
-                  placeholder="None"
-                />
-              )}
-              {['virus', 'url-filtering', 'spyware'].map(pType => (
-                <div className="detail-field" key={pType}>
-                  <span className="field-label">{formatProfileLabel(pType)}</span>
-                  <input
-                    className="field-edit-input"
-                    value={(selectedRule.security_profiles || {})[pType] || ''}
-                    onChange={(e) => handleProfileChange(pType, e.target.value)}
-                    placeholder="none"
-                  />
+              {selectedRule.profile_group && (
+                <div className="detail-field">
+                  <span className="field-label">Profile Group</span>
+                  <span className="field-value-badge">{selectedRule.profile_group}</span>
                 </div>
-              ))}
+              )}
+              {['virus', 'wildfire-analysis', 'url-filtering', 'file-blocking', 'spyware', 'vulnerability'].map(pType => {
+                const val = (selectedRule.security_profiles || {})[pType] || '';
+                return (
+                  <div className="detail-field" key={pType}>
+                    <span className="field-label">{formatProfileLabel(pType)}</span>
+                    <input
+                      className="field-edit-input"
+                      value={val}
+                      onChange={(e) => handleProfileChange(pType, e.target.value)}
+                      placeholder="none"
+                    />
+                  </div>
+                );
+              })}
             </>
           )}
           {selectedRule._secIntelAddresses?.length > 0 && (

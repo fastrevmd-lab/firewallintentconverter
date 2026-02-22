@@ -406,6 +406,29 @@ html, body, #root {
   white-space: nowrap;
 }
 
+/* Negate chip (NOT indicator in table cells) */
+.negate-chip {
+  background: rgba(248, 113, 113, 0.2);
+  color: var(--error);
+  font-weight: 600;
+  font-size: 9px;
+  letter-spacing: 0.5px;
+  border: 1px solid rgba(248, 113, 113, 0.3);
+}
+
+/* Negate icon/label in SRX table */
+.srx-cell-icon.negate {
+  background: rgba(248, 113, 113, 0.2);
+  color: var(--error);
+  font-weight: 700;
+}
+.negate-label {
+  color: var(--error) !important;
+  font-weight: 600;
+  font-size: 10px !important;
+  letter-spacing: 0.5px;
+}
+
 /* Action badges */
 .action-permit {
   color: var(--success);
@@ -810,6 +833,16 @@ html, body, #root {
   background: var(--accent-glow);
 }
 
+/* Push buttons in tab bar */
+.push-btn {
+  font-size: 10px !important;
+  padding: 4px 8px !important;
+  opacity: 0.8;
+}
+.push-btn:hover {
+  opacity: 1;
+}
+
 /* --- Center Panel Tab Bar --- */
 .center-tab-bar {
   display: flex;
@@ -817,6 +850,7 @@ html, body, #root {
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border-color);
   padding: 0;
+  flex-wrap: wrap;
 }
 
 .center-tab-btn {
@@ -1382,6 +1416,19 @@ html, body, #root {
 .model-badge:hover {
   border-color: var(--accent) !important;
   background: var(--accent-glow) !important;
+}
+
+/* Profile group source badge */
+.field-value-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 3px;
+  background: var(--accent-glow);
+  border: 1px solid rgba(0, 210, 211, 0.25);
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
 }
 
 /* --- Editable Detail Fields (InterviewPanel) --- */

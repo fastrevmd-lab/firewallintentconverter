@@ -75,6 +75,8 @@ export default function App() {
   const [loadingMessage, setLoadingMessage] = useState('');
   const [selectedRule, setSelectedRule] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [showConvertConfirm, setShowConvertConfirm] = useState(false);
+  const [showPushToast, setShowPushToast] = useState('');
   const [bottomTab, setBottomTab] = useState('output');
   const [error, setError] = useState(null);
 
@@ -183,6 +185,17 @@ export default function App() {
   }, [configText]);
 
   // ------------------------------------------------------------------
+  // Convert button click — warn if not all policies accepted
+  // ------------------------------------------------------------------
+  const handleConvertClick = useCallback((format = 'set') => {
+    if (!allRulesAccepted) {
+      setShowConvertConfirm(true);
+      return;
+    }
+    handleConvert(format);
+  }, [allRulesAccepted]);
+
+  // ------------------------------------------------------------------
   // Convert handler: sends intermediate config to /api/convert
   // ------------------------------------------------------------------
   const handleConvert = useCallback(async (format = 'set') => {
@@ -250,6 +263,8 @@ export default function App() {
         dst_zones: [],
         src_addresses: [],
         dst_addresses: [],
+        negate_source: false,
+        negate_destination: false,
         applications: [],
         services: [],
         log_start: false,
@@ -440,8 +455,8 @@ export default function App() {
           )}
           <button
             className="settings-btn"
-            onClick={() => setShowSettings(true)}
-            title="LLM Settings"
+            onClick={() => setShowSettings('llm')}
+            title="Settings"
           >
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <circle cx="12" cy="12" r="3" />
@@ -549,10 +564,7 @@ export default function App() {
                       <button
                         className="btn btn-secondary btn-sm"
                         onClick={handleReviewClick}
-                        style={{
-                          margin: '6px 4px',
-                          opacity: allRulesAccepted ? 1 : 0.5,
-                        }}
+                        style={{ margin: '6px 2px', opacity: allRulesAccepted ? 1 : 0.5 }}
                         title={
                           allRulesAccepted
                             ? 'Start full ruleset review with LLM'
@@ -563,11 +575,35 @@ export default function App() {
                       </button>
                       <button
                         className="btn btn-primary btn-sm"
-                        onClick={() => handleConvert('set')}
+                        onClick={() => handleConvertClick('set')}
                         disabled={isLoading}
-                        style={{ margin: '6px 12px 6px 4px' }}
+                        style={{ margin: '6px 2px' }}
                       >
                         Convert to SRX
+                      </button>
+                      <button
+                        className="btn btn-secondary btn-sm push-btn"
+                        onClick={() => setShowSettings('mcp')}
+                        style={{ margin: '6px 2px' }}
+                        title="Push config to SRX via MCP"
+                      >
+                        Push via MCP
+                      </button>
+                      <button
+                        className="btn btn-secondary btn-sm push-btn"
+                        onClick={() => setShowPushToast('SDC')}
+                        style={{ margin: '6px 2px' }}
+                        title="Push to Security Director Cloud"
+                      >
+                        Push to SDC
+                      </button>
+                      <button
+                        className="btn btn-secondary btn-sm push-btn"
+                        onClick={() => setShowPushToast('Mist')}
+                        style={{ margin: '6px 2px 6px 2px' }}
+                        title="Push to Juniper Mist"
+                      >
+                        Push to Mist
                       </button>
                     </>
                   )}
@@ -733,7 +769,67 @@ export default function App() {
 
       {/* --- Modals --- */}
       {showSettings && (
-        <LLMSettings onClose={() => setShowSettings(false)} />
+        <LLMSettings
+          initialTab={showSettings === 'mcp' ? 'mcp' : 'llm'}
+          onClose={() => setShowSettings(false)}
+        />
+      )}
+
+      {/* Convert confirmation — not all policies accepted */}
+      {showConvertConfirm && (
+        <div className="modal-overlay" onClick={() => setShowConvertConfirm(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ width: 440 }}>
+            <div className="modal-header" style={{ borderBottomColor: 'rgba(234, 179, 8, 0.3)' }}>
+              <h2 style={{ color: 'var(--warning)' }}>Unaccepted Policies</h2>
+              <button className="modal-close" onClick={() => setShowConvertConfirm(false)}>x</button>
+            </div>
+            <div className="modal-body">
+              <p style={{ marginBottom: 8 }}>
+                <strong>{reviewProgress.total - reviewProgress.accepted}</strong> of {reviewProgress.total} policies
+                have not been accepted yet.
+              </p>
+              <p style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                Converting without reviewing all policies may produce output that hasn't been fully validated.
+              </p>
+            </div>
+            <div className="modal-footer" style={{ gap: 8 }}>
+              <button className="btn btn-secondary" onClick={() => setShowConvertConfirm(false)}>
+                Go Back
+              </button>
+              <button className="btn btn-primary" onClick={() => { setShowConvertConfirm(false); handleConvert('set'); }}>
+                Convert Anyway
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Push coming-soon toasts */}
+      {showPushToast && (
+        <div className="modal-overlay" onClick={() => setShowPushToast('')}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ width: 400 }}>
+            <div className="modal-header">
+              <h2>Push to {showPushToast}</h2>
+              <button className="modal-close" onClick={() => setShowPushToast('')}>x</button>
+            </div>
+            <div className="modal-body" style={{ textAlign: 'center', padding: '24px 16px' }}>
+              <div style={{ fontSize: 32, marginBottom: 12, opacity: 0.4 }}>
+                {showPushToast === 'SDC' ? '\uD83D\uDEE1\uFE0F' : '\u2601\uFE0F'}
+              </div>
+              <p style={{ fontWeight: 600, marginBottom: 8 }}>
+                Feature Coming Soon
+              </p>
+              <p style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                {showPushToast === 'SDC'
+                  ? 'Push to Security Director Cloud via SDC API — coming in a future release.'
+                  : 'Push to Juniper Mist Cloud via Mist API — coming in a future release.'}
+              </p>
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-primary" onClick={() => setShowPushToast('')}>OK</button>
+            </div>
+          </div>
+        </div>
       )}
 
       {showModelSelector && intermediateConfig && (

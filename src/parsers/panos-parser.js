@@ -108,6 +108,17 @@ export function parsePanosConfig(configText) {
   const natRules = parseNatRules(vsys, warnings);
   const externalLists = parseExternalLists(vsys, warnings);
 
+  // Resolve profile group references → expand into individual security_profiles
+  const profileGroupDefs = parseProfileGroupDefinitions(vsys);
+  for (const policy of securityPolicies) {
+    if (policy.profile_group && Object.keys(policy.security_profiles).length === 0) {
+      const groupDef = profileGroupDefs[policy.profile_group];
+      if (groupDef) {
+        policy.security_profiles = { ...groupDef };
+      }
+    }
+  }
+
   // Flag rules that reference EDL block lists for SecIntel mapping
   flagSecIntelRules(securityPolicies, externalLists, warnings);
 
@@ -450,6 +461,10 @@ function parseSecurityRules(vsys, warnings) {
     const description = entry.description || '';
     const tags = extractMembers(entry.tag);
 
+    // Negate flags
+    const negateSource = entry['negate-source'] === 'yes' || entry['negate-source'] === true;
+    const negateDest = entry['negate-destination'] === 'yes' || entry['negate-destination'] === true;
+
     // Logging
     const logStart = entry['log-start'] === 'yes' || entry['log-start'] === true;
     const logEnd = entry['log-end'] === 'yes' || entry['log-end'] === true || entry['log-end'] === undefined;
@@ -534,12 +549,32 @@ function parseSecurityRules(vsys, warnings) {
       ));
     }
 
+    // Flag negate usage
+    if (negateSource) {
+      warnings.push(createWarning(
+        'warning',
+        `security-rule/${name}`,
+        `Rule "${name}" negates source addresses — SRX uses "source-address ... except" or "source-exclude-list"`,
+        'Verify the SRX policy correctly excludes the specified source addresses'
+      ));
+    }
+    if (negateDest) {
+      warnings.push(createWarning(
+        'warning',
+        `security-rule/${name}`,
+        `Rule "${name}" negates destination addresses — SRX uses "destination-address ... except" or "destination-exclude-list"`,
+        'Verify the SRX policy correctly excludes the specified destination addresses'
+      ));
+    }
+
     return {
       name,
       src_zones: srcZones,
       dst_zones: dstZones,
       src_addresses: srcAddresses,
       dst_addresses: dstAddresses,
+      negate_source: negateSource,
+      negate_destination: negateDest,
       applications,
       services,
       action,
@@ -650,6 +685,44 @@ function buildSecurityProfileObjects(policies) {
   }
 
   return [...seen.values()];
+}
+
+// ---------------------------------------------------------------------------
+// Profile Group Definitions Parser
+// ---------------------------------------------------------------------------
+
+/**
+ * Parses the <profile-group> section from PAN-OS config.
+ * Returns a map of group name → { virus: 'default', spyware: 'strict', ... }
+ */
+function parseProfileGroupDefinitions(vsys) {
+  const pgContainer = vsys['profile-group'];
+  if (!pgContainer) return {};
+
+  const entries = extractEntries(pgContainer);
+  const groups = {};
+  const profileTypes = ['virus', 'spyware', 'vulnerability', 'url-filtering', 'file-blocking', 'wildfire-analysis'];
+
+  for (const entry of entries) {
+    const name = entry['@_name'];
+    if (!name) continue;
+
+    const profiles = {};
+    for (const pType of profileTypes) {
+      if (entry[pType]) {
+        const members = extractMembers(entry[pType]);
+        if (members.length > 0) {
+          profiles[pType] = members[0];
+        }
+      }
+    }
+
+    if (Object.keys(profiles).length > 0) {
+      groups[name] = profiles;
+    }
+  }
+
+  return groups;
 }
 
 // ---------------------------------------------------------------------------

@@ -276,6 +276,7 @@ export default function PolicyTable({
   const renderSrxSourceDest = (policy, type) => {
     const zones = type === 'src' ? policy.src_zones : policy.dst_zones;
     const addrs = type === 'src' ? policy.src_addresses : policy.dst_addresses;
+    const isNegated = type === 'src' ? policy.negate_source : policy.negate_destination;
     const MAX_SHOW = 2;
     // URL filtering profile — show under destinations
     const urlFilter = type === 'dst' ? (policy.security_profiles || {})['url-filtering'] : null;
@@ -295,6 +296,13 @@ export default function PolicyTable({
               <span className="srx-cell-value">{z}</span>
             </div>
           ))
+        )}
+        {/* Negate indicator */}
+        {isNegated && (
+          <div className="srx-cell-row">
+            <span className="srx-cell-icon negate">!</span>
+            <span className="srx-cell-value negate-label">EXCEPT</span>
+          </div>
         )}
         {/* Addresses */}
         {(addrs || []).length === 0 ? (
@@ -519,8 +527,8 @@ export default function PolicyTable({
               </td>
               <td>{renderEditableCell(policy, 'src_zones', renderCellValues(policy.src_zones))}</td>
               <td>{renderEditableCell(policy, 'dst_zones', renderCellValues(policy.dst_zones))}</td>
-              <td>{renderEditableCell(policy, 'src_addresses', renderCellValues(policy.src_addresses))}</td>
-              <td>{renderEditableCell(policy, 'dst_addresses', renderCellValues(policy.dst_addresses))}</td>
+              <td>{renderEditableCell(policy, 'src_addresses', <>{policy.negate_source && <span className="cell-chip negate-chip">NOT</span>}{renderCellValues(policy.src_addresses)}</>)}</td>
+              <td>{renderEditableCell(policy, 'dst_addresses', <>{policy.negate_destination && <span className="cell-chip negate-chip">NOT</span>}{renderCellValues(policy.dst_addresses)}</>)}</td>
               <td>{renderEditableCell(policy, 'applications', renderCellValues([...policy.applications, ...policy.services.filter(s => s !== 'application-default')]))}</td>
               <td>{renderProfileCell(policy)}</td>
               <td>

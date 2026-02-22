@@ -11,10 +11,16 @@
 // ---------------------------------------------------------------------------
 
 export const SRX_LICENSE_TIERS = {
+  Base: {
+    name: 'Base (No License)',
+    short: 'Base',
+    description: 'Stateful firewall only — no subscriptions',
+    features: ['stateful-firewall'],
+  },
   A1: {
     name: 'A1 (AppSecure 1)',
     short: 'A1',
-    description: 'Base - AppID, basic IPS, stateful firewall',
+    description: 'Base + AppID, basic IPS, stateful firewall',
     features: ['appid', 'basic-ips', 'stateful-firewall'],
   },
   A2: {

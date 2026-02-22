@@ -583,14 +583,14 @@ Rule: "${rule.name}"
   Action: ${rule.action}
   From zones: ${(rule.src_zones || []).join(', ') || 'any'}
   To zones: ${(rule.dst_zones || []).join(', ') || 'any'}
-  Source addresses: ${(rule.src_addresses || []).join(', ') || 'any'}
-  Destination addresses: ${(rule.dst_addresses || []).join(', ') || 'any'}
+  Source addresses: ${(rule.src_addresses || []).join(', ') || 'any'}${rule.negate_source ? ' [NEGATED — match all EXCEPT these]' : ''}
+  Destination addresses: ${(rule.dst_addresses || []).join(', ') || 'any'}${rule.negate_destination ? ' [NEGATED — match all EXCEPT these]' : ''}
   Applications: ${(rule.applications || []).join(', ') || 'any'}
   Services: ${(rule.services || []).join(', ') || 'any'}
   Logging: start=${rule.log_start}, end=${rule.log_end}
   Disabled: ${rule.disabled}
   Description: ${rule.description || '(none)'}
-  Security profiles: ${profileSummary}
+  Security profiles: ${profileSummary}${rule.profile_group ? ` (from group: ${rule.profile_group})` : ''}
   Tags: ${(rule.tags || []).join(', ') || '(none)'}
 ${srxContext ? `
 === SRX TRANSLATION (current user edits) ===

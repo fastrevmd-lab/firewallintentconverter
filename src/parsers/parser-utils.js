@@ -162,28 +162,40 @@ export function mapPanosAppToJunos(panosApp) {
 /**
  * Maps a PAN-OS security profile type to the corresponding SRX feature and profile name.
  *
- * PAN-OS profiles map to SRX as follows:
- *   virus, wildfire-analysis → UTM anti-virus
- *   url-filtering            → UTM web-filtering
- *   file-blocking            → UTM content-filtering
- *   spyware, vulnerability   → IDP
+ * Security profiles map to SRX as follows:
+ *   virus, wildfire-analysis       → UTM anti-virus
+ *   url-filtering                  → UTM web-filtering
+ *   file-blocking                  → UTM content-filtering
+ *   spyware, vulnerability         → IDP
+ *   application-control (FortiGate) → AppFW (manual)
+ *   email-filter (FortiGate)       → UTM anti-spam
+ *   dlp (FortiGate)                → DLP (ICAP)
  *
- * @param {string} profileType - PAN-OS profile type (e.g. 'virus', 'spyware')
- * @param {string} profileName - PAN-OS profile name (e.g. 'default', 'strict')
+ * @param {string} profileType - profile type (e.g. 'virus', 'application-control')
+ * @param {string} profileName - profile name (e.g. 'default', 'strict')
  * @returns {{ srxFeature: string, srxType: string, srxProfile: string }}
  */
-export function mapPanosProfileToSrx(profileType, profileName) {
+export function mapProfileToSrx(profileType, profileName) {
   const safeName = sanitizeJunosName(profileName);
   const mapping = {
+    // PAN-OS originated
     'virus':              { srxFeature: 'utm', srxType: 'anti-virus',        srxProfile: `junos-av-${safeName}` },
     'wildfire-analysis':  { srxFeature: 'utm', srxType: 'anti-virus',        srxProfile: `junos-av-${safeName}` },
     'url-filtering':      { srxFeature: 'utm', srxType: 'web-filtering',     srxProfile: `junos-wf-${safeName}` },
     'file-blocking':      { srxFeature: 'utm', srxType: 'content-filtering', srxProfile: `junos-cf-${safeName}` },
     'spyware':            { srxFeature: 'idp', srxType: 'idp-policy',        srxProfile: `idp-${safeName}` },
     'vulnerability':      { srxFeature: 'idp', srxType: 'idp-policy',        srxProfile: `idp-${safeName}` },
+    // FortiGate originated
+    'application-control': { srxFeature: 'appfw', srxType: 'application-firewall', srxProfile: `appfw-${safeName}` },
+    'email-filter':        { srxFeature: 'utm',   srxType: 'anti-spam',            srxProfile: `junos-as-${safeName}` },
+    'dlp':                 { srxFeature: 'none',  srxType: 'dlp',                  srxProfile: safeName },
+    'dns-security':        { srxFeature: 'utm',   srxType: 'anti-spam',            srxProfile: `dns-${safeName}` },
   };
   return mapping[profileType] || { srxFeature: 'unknown', srxType: profileType, srxProfile: safeName };
 }
+
+// Backward-compatible alias
+export const mapPanosProfileToSrx = mapProfileToSrx;
 
 /**
  * Detects the source vendor/format from raw config text.

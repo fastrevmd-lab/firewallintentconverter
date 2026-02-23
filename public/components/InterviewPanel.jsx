@@ -486,7 +486,7 @@ export default function InterviewPanel({
                   <span className="field-value-badge">{selectedRule.profile_group}</span>
                 </div>
               )}
-              {['virus', 'wildfire-analysis', 'url-filtering', 'file-blocking', 'spyware', 'vulnerability'].map(pType => {
+              {(VENDOR_PROFILE_TYPES[viewMode] || VENDOR_PROFILE_TYPES.panos).map(pType => {
                 const val = (selectedRule.security_profiles || {})[pType] || '';
                 return (
                   <div className="detail-field" key={pType}>
@@ -607,7 +607,15 @@ export default function InterviewPanel({
   );
 }
 
-/** Format PAN-OS profile type to friendly label */
+/** Vendor-aware profile type lists for the detail panel */
+const VENDOR_PROFILE_TYPES = {
+  panos:     ['virus', 'wildfire-analysis', 'url-filtering', 'file-blocking', 'spyware', 'vulnerability'],
+  fortigate: ['virus', 'url-filtering', 'vulnerability', 'application-control', 'dns-security', 'email-filter', 'dlp', 'decryption'],
+  cisco:     ['virus', 'url-filtering', 'vulnerability', 'spyware'],
+  srx:       ['virus', 'url-filtering', 'spyware', 'vulnerability'],
+};
+
+/** Format profile type to friendly label */
 function formatProfileLabel(type) {
   const labels = {
     'virus': 'Antivirus',
@@ -616,6 +624,15 @@ function formatProfileLabel(type) {
     'file-blocking': 'File Blocking',
     'spyware': 'Anti-Spyware',
     'vulnerability': 'Vulnerability Protection',
+    // FortiGate-originated
+    'application-control': 'Application Control',
+    'email-filter': 'Email Filter',
+    'dlp': 'DLP',
+    'dns-security': 'DNS Filter',
+    'decryption': 'SSL Inspection',
+    'waf': 'WAF',
+    'casb': 'CASB',
+    'voip': 'VoIP',
   };
   return labels[type] || type;
 }
@@ -707,8 +724,11 @@ const SRX_SUBSCRIPTION_TOGGLES = [
   { key: 'content-security', label: 'Content Security', sub: 'UTM Content Filtering',      profiles: ['url-filtering', 'file-blocking'] },
   { key: 'decrypt',          label: 'Decrypt',          sub: 'SSL/TLS Inspection',         srxField: '_srx_decrypt' },
   { key: 'flow-av',          label: 'Flow-based AV',    sub: 'Flow-mode Antivirus',        srxField: '_srx_flow_av' },
-  { key: 'antimalware',      label: 'Anti-malware',     sub: 'Antivirus / WildFire',       profiles: ['virus', 'wildfire-analysis'] },
+  { key: 'antimalware',      label: 'Anti-virus',       sub: 'UTM Anti-virus',             profiles: ['virus', 'wildfire-analysis'] },
   { key: 'secintel',         label: 'SecIntel',         sub: 'Security Intelligence',      srxField: '_srx_secintel', initFromSecIntel: true },
+  { key: 'anti-spam',        label: 'Anti-spam',        sub: 'UTM Anti-spam',              profiles: ['email-filter'] },
+  { key: 'appsecure',        label: 'AppSecure',        sub: 'Application Firewall',       profiles: ['application-control'] },
+  { key: 'dns-sec',          label: 'DNS Security',     sub: 'DNS Security',               profiles: ['dns-security'] },
   { key: 'secure-web-proxy', label: 'Secure Web Proxy', sub: 'Explicit/Transparent Proxy', srxField: '_srx_secure_web_proxy' },
   { key: 'icap-redirect',    label: 'ICAP Redirect',    sub: 'ICAP Content Adaptation',    srxField: '_srx_icap_redirect' },
 ];

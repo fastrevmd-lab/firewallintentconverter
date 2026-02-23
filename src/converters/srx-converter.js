@@ -18,7 +18,7 @@
  * (clean / warning / unsupported) for the warnings panel.
  */
 
-import { sanitizeJunosName, mapPanosAppToJunos, mapPanosProfileToSrx, createWarning } from '../parsers/parser-utils.js';
+import { sanitizeJunosName, mapPanosAppToJunos, mapProfileToSrx, createWarning } from '../parsers/parser-utils.js';
 
 // ---------------------------------------------------------------------------
 // Main Converter Entry Point
@@ -379,7 +379,7 @@ function convertUtmPolicies(policies, warnings) {
   const utmPolicyMap = {};
   if (!policies || policies.length === 0) return { utmCommands, utmPolicyMap };
 
-  const utmTypes = ['virus', 'wildfire-analysis', 'url-filtering', 'file-blocking'];
+  const utmTypes = ['virus', 'wildfire-analysis', 'url-filtering', 'file-blocking', 'email-filter', 'application-control', 'dlp'];
 
   // Collect unique UTM profile combinations per rule
   const comboMap = new Map(); // serialized combo → { profiles, policyName, rules[] }
@@ -415,7 +415,18 @@ function convertUtmPolicies(policies, warnings) {
     const pName = combo.policyName;
 
     for (const [pType, pValue] of Object.entries(combo.profiles)) {
-      const mapped = mapPanosProfileToSrx(pType, pValue);
+      const mapped = mapProfileToSrx(pType, pValue);
+
+      // AppFW and DLP don't map to SRX UTM — emit informational comments
+      if (mapped.srxFeature === 'appfw') {
+        utmCommands.push(`# NOTE: FortiGate application-control "${pValue}" — configure SRX AppFW rule-set manually`);
+        continue;
+      }
+      if (mapped.srxFeature === 'none') {
+        utmCommands.push(`# NOTE: FortiGate DLP profile "${pValue}" — SRX DLP requires ICAP integration`);
+        continue;
+      }
+
       if (mapped.srxFeature !== 'utm') continue;
 
       // Emit feature profile definition once
@@ -437,6 +448,8 @@ function convertUtmPolicies(policies, warnings) {
         utmCommands.push(`set security utm utm-policy ${pName} web-filtering http-profile ${mapped.srxProfile}`);
       } else if (mapped.srxType === 'content-filtering') {
         utmCommands.push(`set security utm utm-policy ${pName} content-filtering rule-set ${mapped.srxProfile}`);
+      } else if (mapped.srxType === 'anti-spam') {
+        utmCommands.push(`set security utm utm-policy ${pName} anti-spam smtp-profile ${mapped.srxProfile}`);
       }
     }
   }

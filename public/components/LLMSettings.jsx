@@ -10,11 +10,23 @@ import React, { useState, useEffect } from 'react';
 import { DEFAULT_SYSTEM_PROMPT } from '../utils/llm-client.js';
 
 const PROVIDERS = [
-  { id: 'claude', name: 'Claude (Anthropic)', defaultModel: 'claude-sonnet-4-6' },
-  { id: 'openai', name: 'OpenAI', defaultModel: 'gpt-4o' },
-  { id: 'ollama', name: 'Ollama (Local)', defaultModel: 'llama3' },
-  { id: 'lmstudio', name: 'LM Studio (Local)', defaultModel: 'local-model' },
-  { id: 'custom', name: 'Custom OpenAI-Compatible', defaultModel: '' },
+  { id: 'claude', name: 'Claude (Anthropic)', defaultModel: 'claude-sonnet-4-6', models: [
+    { id: 'claude-opus-4-6', name: 'Claude Opus 4.6 (Most Capable)' },
+    { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6 (Balanced)' },
+    { id: 'claude-haiku-4-5-20251001', name: 'Claude Haiku 4.5 (Fast)' },
+  ]},
+  { id: 'openai', name: 'OpenAI', defaultModel: 'gpt-4o', models: [
+    { id: 'gpt-4o', name: 'GPT-4o (Recommended)' },
+    { id: 'gpt-4o-mini', name: 'GPT-4o Mini (Fast)' },
+    { id: 'gpt-4.1', name: 'GPT-4.1' },
+    { id: 'gpt-4.1-mini', name: 'GPT-4.1 Mini' },
+    { id: 'gpt-4.1-nano', name: 'GPT-4.1 Nano (Fastest)' },
+    { id: 'o3', name: 'o3 (Reasoning)' },
+    { id: 'o4-mini', name: 'o4-mini (Reasoning, Fast)' },
+  ]},
+  { id: 'ollama', name: 'Ollama (Local)', defaultModel: 'llama3', models: [] },
+  { id: 'lmstudio', name: 'LM Studio (Local)', defaultModel: 'local-model', models: [] },
+  { id: 'custom', name: 'Custom OpenAI-Compatible', defaultModel: '', models: [] },
 ];
 
 export default function LLMSettings({ onClose, initialTab }) {
@@ -276,13 +288,32 @@ export default function LLMSettings({ onClose, initialTab }) {
 
         {/* Model */}
         <SettingsField label="Model">
-          <input
-            type="text"
-            value={model}
-            onChange={(e) => setModel(e.target.value)}
-            placeholder="Model name..."
-            style={inputStyle}
-          />
+          {(() => {
+            const providerData = PROVIDERS.find(p => p.id === provider);
+            const modelList = providerData?.models || [];
+            if (modelList.length > 0) {
+              return (
+                <select
+                  value={model}
+                  onChange={(e) => setModel(e.target.value)}
+                  style={selectStyle}
+                >
+                  {modelList.map(m => (
+                    <option key={m.id} value={m.id}>{m.name}</option>
+                  ))}
+                </select>
+              );
+            }
+            return (
+              <input
+                type="text"
+                value={model}
+                onChange={(e) => setModel(e.target.value)}
+                placeholder="Model name..."
+                style={inputStyle}
+              />
+            );
+          })()}
         </SettingsField>
 
         {/* Temperature */}

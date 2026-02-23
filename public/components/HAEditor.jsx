@@ -238,9 +238,10 @@ export default function HAEditor({ haConfig, onHAUpdate, viewMode, targetModel }
             <button className="btn-icon btn-icon-danger" onClick={handleDisable} title="Disable HA">x</button>
           </div>
 
-          {isSrx4700 && haType === 'mnha' && (
-            <div style={{ padding: '6px 12px', background: 'rgba(59, 130, 246, 0.1)', borderBottom: '1px solid rgba(59, 130, 246, 0.2)', fontSize: 11, color: '#60a5fa' }}>
-              SRX4700 requires Multinode High Availability (MNHA) — chassis cluster is not supported.
+          {haType === 'mnha' && (
+            <div style={{ padding: '6px 12px', background: 'rgba(59, 130, 246, 0.1)', borderBottom: '1px solid rgba(59, 130, 246, 0.2)', fontSize: 11, color: '#60a5fa', lineHeight: 1.4 }}>
+              {isSrx4700 && <>SRX4700 requires Multinode High Availability (MNHA) — chassis cluster is not supported. </>}
+              Only 2-node MNHA is supported at this time.
             </div>
           )}
 

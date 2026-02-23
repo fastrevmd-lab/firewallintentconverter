@@ -147,7 +147,7 @@ Click **Convert to SRX** to generate the output. Switch between **Set Commands**
 - **Security profiles** — UTM policy generation from AV, web filter, IPS profiles; IDP policy from vulnerability profiles; SecIntel from EDL/threat feeds
 - **Static routes** — Virtual router routes, VRF/routing-instance support, blackhole routes
 - **VPN / IPsec** — IKE proposals/policies/gateways, IPsec proposals/policies/VPNs, traffic selectors, proxy IDs
-- **HA → Chassis Cluster / MNHA** — Active/passive and active/active HA to SRX chassis cluster with redundancy groups, or Multinode High Availability (MNHA) for SRX4700 and supported models (SRX1600, SRX4120, SRX4300). MNHA generates `set chassis high-availability` commands with ICL, liveness detection, and services redundancy groups. SRX4700 targets automatically require MNHA
+- **HA → Chassis Cluster / MNHA** — Active/passive and active/active HA to SRX chassis cluster with redundancy groups, or Multinode High Availability (MNHA) for SRX4700 and supported models (SRX1500, SRX1600, SRX4100/4120/4200/4300, SRX4600, SRX5400/5600/5800, vSRX). MNHA generates `set chassis high-availability` commands with ICL, liveness detection, and services redundancy groups. SRX4700 targets automatically require MNHA. Only 2-node MNHA is supported at this time
 - **Screens / DDoS** — Zone protection profiles, DoS policies, threat detection → SRX screen ids-option
 - **Syslog** — Syslog server forwarding, facility/severity mapping, TCP/TLS transport
 - **DHCP** — DHCP server pools, relay helpers, address assignment

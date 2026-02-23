@@ -1,7 +1,10 @@
-# Firewall to Intent Converter
+<p align="center">
+  <img src="static/logo.png" alt="Intent Converter" height="80">
+</p>
 
+<h1 align="center"><span style="color: #005b5a;">Firewall to Intent Converter</span></h1>
 
-A browser-based tool that converts firewall configurations into an intermediate format for review, editing, and conversion to Juniper SRX. Supports **PAN-OS XML**, **Junos SRX**, **FortiGate / FortiOS**, and **Cisco ASA / FTD** as source formats. Paste or upload a config, review and edit the parsed rules through an interactive UI, optionally get AI-powered best-practice suggestions, then export as SRX set commands or XML.
+<p align="center">A browser-based tool that converts firewall configurations into an intermediate format for review, editing, and conversion to Juniper SRX. Supports <b>PAN-OS XML</b>, <b>Junos SRX</b>, <b>FortiGate / FortiOS</b>, and <b>Cisco ASA / FTD</b> as source formats. Paste or upload a config, review and edit the parsed rules through an interactive UI, optionally get AI-powered best-practice suggestions, then export as SRX set commands or XML.</p>
 # Quick Start
 
 ### Prerequisites
@@ -101,13 +104,14 @@ Click **Convert to SRX** to generate the output. Switch between **Set Commands**
 - **Profile group expansion** — PAN-OS profile group references are automatically resolved into individual security profiles
 
 ### Interactive Editing
-- **Tabbed center panel** — Switch between Security Policies/Rules, Security Zones, Address Book/Objects, and NAT editors
+- **Tabbed center panel** — Switch between Security Policies/Rules, Security Zones, Address Book/Objects (with Addresses, Groups, Services, and Schedules sub-tabs), and NAT editors
 - **Inline table editing** — Double-click any cell in the policy table to edit directly
 - **Right panel rule details** — Full editable form for the selected rule: action, zones, addresses, applications, services, logging, security profiles, tags, description
+- **Schedule editor** — View, edit, add, and delete schedules from the Objects > Schedules tab. Each schedule shows its type (recurring/onetime), days, time range, and which rules reference it
 - **Add / delete rules** — Create new rules or remove existing ones from the UI
 
 ### Hardware Awareness
-- **Model selector** — Pick source firewall model (PAN-OS, SRX, FortiGate, or Cisco, including EOS/legacy models) and target SRX model from a built-in hardware database with port counts and throughput specs
+- **Model selector** — Pick source firewall model (PAN-OS, SRX, FortiGate, or Cisco, including EOS/legacy models) and target SRX model from a built-in hardware database with port counts and throughput specs. Throughput numbers are best-effort from publicly available data
 - **Auto-detection** — Heuristics detect the likely source model from interface naming in the config (PAN-OS `ethernet`, SRX `ge-`/`xe-`/`et-`, FortiGate `port`/`wan`/`internal`/`dmz`, Cisco `GigabitEthernet`/`Ethernet1/`/`TenGigabitEthernet` formats)
 - **FortiGate models** — Full F-series (40F through 4400F), G-series (70G through 900G), and EOS E-series (30E through 500E) with port counts and throughput specs
 - **Cisco models** — Firepower 1000 series (FPR-1010 through FPR-1150), 2100 series (FPR-2110 through FPR-2140), 3100 series (FPR-3105 through FPR-3140), 4100 series (FPR-4112 through FPR-4145), 4200 series (FPR-4215 through FPR-4245), virtual (ASAv, FTDv), and EOS ASA 5500-X series (ASA-5506-X through ASA-5555-X)

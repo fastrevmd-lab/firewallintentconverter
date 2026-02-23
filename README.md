@@ -121,6 +121,7 @@ Click **Convert to SRX** to generate the output. Switch between **Set Commands**
 - **EOS SRX models** — Legacy/End-of-Sale SRX models (SRX100, SRX210, SRX240, SRX550, SRX650, SRX1400, SRX3400, SRX3600, etc.) available as source models for migration projects
 - **Interface mapper** — Per-zone mapping of source interfaces to SRX interfaces with auto-mapping, tunnel, and loopback support
 - **SRX subscriptions** — Select the target SRX subscription level (Base, A1 Advanced Data Protection, A2 Advanced Edge Protection, P1 Premium Data Protection, P2 Premium Edge Protection) to gate feature availability and inform LLM reviews. Includes footnote explaining SDC (Security Director Cloud) and ATP (Advanced Threat Protection) capabilities
+- **SRX datasheet links** — Quick-access popup with links to official HPE Juniper SRX spec sheets for all current models, grouped by tier (Branch, Enterprise, Data Center, Chassis-Based, Virtual)
 
 ### Rule Review Workflow
 - **Review status tracking** — Every rule starts as *Unreviewed* and can progress through *LLM Reviewed* to *Accepted*. Disabled rules show a *Disabled* label. Status labels are color-coded in the policy table
@@ -146,7 +147,7 @@ Click **Convert to SRX** to generate the output. Switch between **Set Commands**
 - **Security profiles** — UTM policy generation from AV, web filter, IPS profiles; IDP policy from vulnerability profiles; SecIntel from EDL/threat feeds
 - **Static routes** — Virtual router routes, VRF/routing-instance support, blackhole routes
 - **VPN / IPsec** — IKE proposals/policies/gateways, IPsec proposals/policies/VPNs, traffic selectors, proxy IDs
-- **HA → Chassis Cluster** — Active/passive and active/active HA to SRX chassis cluster with redundancy groups
+- **HA → Chassis Cluster / MNHA** — Active/passive and active/active HA to SRX chassis cluster with redundancy groups, or Multinode High Availability (MNHA) for SRX4700 and supported models (SRX1600, SRX4120, SRX4300). MNHA generates `set chassis high-availability` commands with ICL, liveness detection, and services redundancy groups. SRX4700 targets automatically require MNHA
 - **Screens / DDoS** — Zone protection profiles, DoS policies, threat detection → SRX screen ids-option
 - **Syslog** — Syslog server forwarding, facility/severity mapping, TCP/TLS transport
 - **DHCP** — DHCP server pools, relay helpers, address assignment

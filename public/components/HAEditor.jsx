@@ -25,6 +25,25 @@ export default function HAEditor({ haConfig, onHAUpdate, viewMode, targetModel }
   }, [isSrx4700, haConfig?.enabled]);
 
   const handleChange = (field, value) => {
+    if (field === 'ha_type' && value === 'mnha' && !haConfig.local_id) {
+      // Switching to MNHA — populate defaults for MNHA fields
+      onHAUpdate({
+        ...haConfig,
+        ha_type: 'mnha',
+        local_id: 1,
+        local_ip: haConfig.local_ip || '',
+        peer_id: 2,
+        peer_ip: haConfig.peer_ip || haConfig.peer_ip || '',
+        icl_interface: '',
+        vpn_profile: 'IPSEC_VPN_ICL',
+        liveness_interval: 400,
+        liveness_multiplier: 5,
+        deployment_type: 'routing',
+        activeness_priority: haConfig.priority || 200,
+        preemption: haConfig.preempt ?? true,
+      });
+      return;
+    }
     onHAUpdate({ ...haConfig, [field]: value });
   };
 

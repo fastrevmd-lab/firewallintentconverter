@@ -19,7 +19,7 @@ export const SAMPLE_CONFIGS = {
   basic: {
     vendor: 'panos',
     label: 'Basic (6 rules)',
-    description: 'Small office: 2 zones, 5 address objects, 6 security rules, 1 source NAT',
+    description: 'Small office: 2 zones, 5 address objects, 6 security rules, 1 source NAT, schedule',
     xml: `<?xml version="1.0"?>
 <config version="10.1.0" urldb="paloaltonetworks">
   <devices>
@@ -233,6 +233,7 @@ export const SAMPLE_CONFIGS = {
                   <action>allow</action>
                   <log-start>no</log-start>
                   <log-end>yes</log-end>
+                  <schedule>business-hours</schedule>
                 </entry>
                 <entry name="deny-all">
                   <from>
@@ -285,6 +286,21 @@ export const SAMPLE_CONFIGS = {
               </rules>
             </nat>
           </rulebase>
+          <schedule>
+            <entry name="business-hours">
+              <schedule-type>
+                <recurring>
+                  <weekly>
+                    <monday>08:00-18:00</monday>
+                    <tuesday>08:00-18:00</tuesday>
+                    <wednesday>08:00-18:00</wednesday>
+                    <thursday>08:00-18:00</thursday>
+                    <friday>08:00-18:00</friday>
+                  </weekly>
+                </recurring>
+              </schedule-type>
+            </entry>
+          </schedule>
         </entry>
       </vsys>
       <network>
@@ -2675,10 +2691,17 @@ set class-of-service interfaces ge-0/0/0 shaping-rate 100m`,
   fortigate_basic: {
     vendor: 'fortigate',
     label: 'FortiGate Basic (8 rules)',
-    description: 'FortiGate config: 3 zones, address objects, 8 firewall policies, VIP, security profiles',
+    description: 'FortiGate config: 3 zones, multi-VDOM, address objects, 8 firewall policies, VIP, application-list, security profiles',
     xml: `config system global
     set hostname "FG-60F-Branch01"
     set timezone "US/Pacific"
+end
+
+config vdom
+    edit "root"
+    next
+    edit "GUEST"
+    next
 end
 
 config system ha
@@ -2734,6 +2757,12 @@ config system interface
         set ip 10.1.2.1 255.255.255.0
         set type physical
         set alias "LAN-Servers"
+    next
+    edit "guest-wifi"
+        set vdom "GUEST"
+        set ip 10.1.100.1 255.255.255.0
+        set type physical
+        set alias "Guest-WiFi-SSID"
     next
 end
 
@@ -2961,6 +2990,22 @@ config firewall schedule recurring
     next
 end
 
+config application list
+    edit "branch-app-ctrl"
+        set comment "Branch office application control"
+        config entries
+            edit 1
+                set application 15832 15835
+                set action pass
+            next
+            edit 2
+                set category 2
+                set action block
+            next
+        end
+    next
+end
+
 config firewall policy
     edit 1
         set name "LAN-to-Internet"
@@ -2976,7 +3021,7 @@ config firewall policy
         set av-profile "default"
         set webfilter-profile "default"
         set ips-sensor "default"
-        set application-list "default"
+        set application-list "branch-app-ctrl"
         set ssl-ssh-profile "certificate-inspection"
         set logtraffic all
         set nat enable
@@ -3098,10 +3143,23 @@ end`,
   cisco_basic: {
     vendor: 'cisco_asa',
     label: 'Basic (8 rules)',
-    description: 'Cisco ASA: 3 zones, object networks, object-groups, 8 ACL rules, NAT',
+    description: 'Cisco ASA: 3 zones, multi-context, object networks, object-groups, 8 ACL rules, NAT',
     xml: `ASA Version 9.16
 !
 hostname FW-EDGE-01
+!
+mode multiple
+admin-context admin
+!
+context admin
+ allocate-interface GigabitEthernet1/1
+ allocate-interface GigabitEthernet1/2
+ allocate-interface GigabitEthernet1/3
+ config-url disk0:/admin.cfg
+!
+context DMZ-CTX
+ allocate-interface GigabitEthernet1/4
+ config-url disk0:/dmz.cfg
 !
 failover
 failover lan unit primary

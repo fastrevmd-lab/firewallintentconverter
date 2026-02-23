@@ -21,7 +21,7 @@
  * it's removed from other dropdowns.
  */
 import React, { useState, useMemo } from 'react';
-import { PANOS_MODELS, SRX_MODELS } from '../data/hardware-db.js';
+import { PANOS_MODELS, SRX_MODELS, getSrx4700Ports } from '../data/hardware-db.js';
 
 /** SRX tunnel interface types for the dropdown */
 const SRX_TUNNEL_TYPES = [
@@ -50,15 +50,25 @@ export default function InterfaceMapper({
   intermediateConfig,
   sourceModel,
   targetModel,
+  portProfile,
   interfaceMappings: existingMappings,
   onMappingComplete,
   onClose,
 }) {
+  /** Resolve target model data, applying SRX4700 port profile override if applicable */
+  const targetModelData = useMemo(() => {
+    const raw = targetModel ? SRX_MODELS[targetModel] : null;
+    if (!raw) return null;
+    if (raw.hasPortProfiles && portProfile) {
+      return { ...raw, ports: getSrx4700Ports(portProfile) };
+    }
+    return raw;
+  }, [targetModel, portProfile]);
+
   // Initialize mappings from existing or build fresh
   const [mappings, setMappings] = useState(() => {
     if (existingMappings && Object.keys(existingMappings).length > 0) {
       // Filter out stale mappings that reference ports not on the current target model
-      const targetModelData = targetModel ? SRX_MODELS[targetModel] : null;
       const validPortNames = targetModelData ? new Set(targetModelData.ports.map(p => p.name)) : null;
       const cleaned = {};
       for (const [panos, srx] of Object.entries(existingMappings)) {
@@ -73,7 +83,7 @@ export default function InterfaceMapper({
         return cleaned;
       }
     }
-    return buildDefaultMappings(intermediateConfig, targetModel);
+    return buildDefaultMappings(intermediateConfig, targetModelData);
   });
 
   // Track tunnel type selections separately (prefix before the unit)
@@ -113,7 +123,6 @@ export default function InterfaceMapper({
   });
 
   const sourceModelData = sourceModel ? PANOS_MODELS[sourceModel] : null;
-  const targetModelData = targetModel ? SRX_MODELS[targetModel] : null;
   const targetPorts = targetModelData?.ports || [];
 
   // Get all PAN-OS interfaces from zones
@@ -205,15 +214,30 @@ export default function InterfaceMapper({
     onMappingComplete(finalMappings);
   };
 
+  /** Extract max speed from a multi-rate string like "1/2.5/5/10G" → 10 */
+  const maxSpeedGbps = (speedStr) => {
+    const speedOrder = { '1G': 1, '2.5G': 2.5, '5G': 5, '10G': 10, '25G': 25, '40G': 40, '50G': 50, '100G': 100, '400G': 400 };
+    if (speedOrder[speedStr]) return speedOrder[speedStr];
+    // Multi-rate: "1/2.5/5/10G" or "40/100G"
+    const parts = speedStr.replace(/G$/i, '').split('/');
+    return Math.max(...parts.map(Number).filter(n => !isNaN(n)));
+  };
+
+  /** CSS-safe speed class from multi-rate string: "1/2.5/5/10G" → "speed-10G" */
+  const speedClass = (speedStr) => {
+    const gbps = maxSpeedGbps(speedStr);
+    return `speed-${gbps}G`;
+  };
+
   /** Check if port speeds are compatible */
   const getCompatibility = (sourcePort, targetPort) => {
     if (!sourcePort || !targetPort) return 'unknown';
     // Tunnel-to-tunnel is always fine
     if (sourcePort.type === 'tunnel' || sourcePort.type === 'loopback') return 'match';
     if (sourcePort.speed === targetPort.speed) return 'match';
-    const speedOrder = { '1G': 1, '2.5G': 2, '10G': 3, '25G': 4, '40G': 5, '50G': 6, '100G': 7, '400G': 8 };
-    const srcSpeed = speedOrder[sourcePort.speed] || 0;
-    const tgtSpeed = speedOrder[targetPort.speed] || 0;
+    const srcSpeed = maxSpeedGbps(sourcePort.speed);
+    const tgtSpeed = maxSpeedGbps(targetPort.speed);
+    if (srcSpeed === tgtSpeed) return 'match';
     if (tgtSpeed >= srcSpeed) return 'upgrade';
     return 'downgrade';
   };
@@ -269,7 +293,7 @@ export default function InterfaceMapper({
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                           <code>{panosIface}</code>
                           {srcPort && (
-                            <span className={`port-badge speed-${srcPort.speed}`}>
+                            <span className={`port-badge ${speedClass(srcPort.speed)}`}>
                               {srcPort.type === 'tunnel' ? 'Tunnel' : srcPort.type === 'loopback' ? 'Loopback' : `${srcPort.speed} ${srcPort.type}`}
                             </span>
                           )}
@@ -337,7 +361,7 @@ export default function InterfaceMapper({
                               })}
                             </select>
                             {tgtPort && tgtPort.type !== 'tunnel' && (
-                              <span className={`port-badge speed-${tgtPort.speed}`} style={{ marginLeft: 6 }}>
+                              <span className={`port-badge ${speedClass(tgtPort.speed)}`} style={{ marginLeft: 6 }}>
                                 {tgtPort.speed} {tgtPort.type}
                               </span>
                             )}
@@ -392,9 +416,8 @@ export default function InterfaceMapper({
  * Builds a default mapping by assigning SRX ports in order.
  * Tunnel interfaces get st0.X, loopbacks get lo0.X.
  */
-function buildDefaultMappings(intermediateConfig, targetModel) {
+function buildDefaultMappings(intermediateConfig, targetModelData) {
   const mappings = {};
-  const targetModelData = targetModel ? SRX_MODELS[targetModel] : null;
 
   const availablePorts = targetModelData ? [...targetModelData.ports] : [];
   const usedPorts = new Set();

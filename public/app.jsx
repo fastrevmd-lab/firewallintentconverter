@@ -52,6 +52,7 @@ export default function App() {
   const [sourceModel, setSourceModel] = useState('');
   const [targetModel, setTargetModel] = useState('');
   const [srxLicense, setSrxLicense] = useState('');
+  const [portProfile, setPortProfile] = useState(null);
   const [interfaceMappings, setInterfaceMappings] = useState({});
   const [sourceVendor, setSourceVendor] = useState('panos'); // 'panos' | 'srx' | 'fortigate' | 'cisco_asa'
 
@@ -418,15 +419,16 @@ export default function App() {
   // Model / mapping handlers
   // ------------------------------------------------------------------
 
-  const handleModelSelection = useCallback(({ sourceModel: src, targetModel: tgt, srxLicense: lic }) => {
+  const handleModelSelection = useCallback(({ sourceModel: src, targetModel: tgt, srxLicense: lic, portProfile: pp }) => {
     setSourceModel(src || '');
-    // Clear interface mappings if target model changed
-    if (tgt !== targetModel) {
+    // Clear interface mappings if target model or port profile changed
+    if (tgt !== targetModel || pp !== portProfile) {
       setInterfaceMappings({});
     }
     setTargetModel(tgt || '');
     setSrxLicense(lic || '');
-  }, [targetModel]);
+    setPortProfile(pp || null);
+  }, [targetModel, portProfile]);
 
   const handleModelContinue = useCallback(() => {
     setShowModelSelector(false);
@@ -1054,6 +1056,7 @@ export default function App() {
           intermediateConfig={intermediateConfig}
           sourceModel={sourceModel}
           targetModel={targetModel}
+          portProfile={portProfile}
           interfaceMappings={interfaceMappings}
           onMappingComplete={handleMappingComplete}
           onClose={() => setShowInterfaceMapper(false)}

@@ -25,6 +25,9 @@ import {
   getThroughputDisplay,
   THROUGHPUT_LABELS,
   METRIC_PREFIX,
+  SRX4700_PORT_PROFILES,
+  SRX4700_DEFAULT_PROFILE,
+  getSrx4700Ports,
 } from '../data/hardware-db.js';
 import { SRX_LICENSE_TIERS } from '../utils/srx-view-transforms.js';
 
@@ -41,6 +44,7 @@ export default function ModelSelector({
   const [selectedSource, setSelectedSource] = useState(sourceModel || '');
   const [selectedTarget, setSelectedTarget] = useState(targetModel || '');
   const [selectedLicense, setSelectedLicense] = useState(srxLicense || '');
+  const [selectedPortProfile, setSelectedPortProfile] = useState(SRX4700_DEFAULT_PROFILE);
   const [detection, setDetection] = useState(null);
   const [throughputMetric, setThroughputMetric] = useState('l7');
   const [recommendedSrx, setRecommendedSrx] = useState(null); // { model, recommended }
@@ -83,7 +87,12 @@ export default function ModelSelector({
 
   const sourceModelsDb = isSrxSource ? SRX_SOURCE_MODELS : isFortigateSource ? FORTIGATE_SOURCE_MODELS : isCiscoSource ? CISCO_SOURCE_MODELS : PANOS_MODELS;
   const sourceInfo = sourceModelsDb[selectedSource];
-  const targetInfo = SRX_MODELS[selectedTarget];
+  const targetRaw = SRX_MODELS[selectedTarget];
+  // Override ports when an SRX4700 port profile is selected
+  const targetInfo = useMemo(() => {
+    if (!targetRaw?.hasPortProfiles) return targetRaw;
+    return { ...targetRaw, ports: getSrx4700Ports(selectedPortProfile) };
+  }, [targetRaw, selectedPortProfile]);
 
   // Group models by tier for dropdown optgroups
   const sourceGroups = useMemo(() => groupByTier(sourceModelsDb), [isSrxSource, isFortigateSource, isCiscoSource]);
@@ -101,6 +110,7 @@ export default function ModelSelector({
       sourceModel: selectedSource || null,
       targetModel: selectedTarget || null,
       srxLicense: selectedLicense || null,
+      portProfile: targetRaw?.hasPortProfiles ? selectedPortProfile : null,
     });
     onContinue();
   };
@@ -215,6 +225,52 @@ export default function ModelSelector({
               <ModelInfoCard model={targetInfo} vendor="srx" metric={throughputMetric} />
             )}
           </div>
+
+          {/* SRX4700 Port Profile Selector */}
+          {targetRaw?.hasPortProfiles && (
+            <div className="model-section" style={{ marginTop: 16 }}>
+              <h3 className="model-section-title">Port Profile</h3>
+              <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: '0 0 8px', lineHeight: 1.4 }}>
+                The SRX4700 supports configurable port profiles per PIC. Each PIC uses the same profile. Totals shown are for both PICs combined.
+              </p>
+              <div className="license-tier-grid" style={{ gridTemplateColumns: '1fr' }}>
+                {Object.entries(SRX4700_PORT_PROFILES).map(([key, profile]) => {
+                  const ports = getSrx4700Ports(key);
+                  const groups = {};
+                  for (const p of ports) {
+                    const k = `${p.speed} ${p.type}`;
+                    groups[k] = (groups[k] || 0) + 1;
+                  }
+                  return (
+                    <label
+                      key={key}
+                      className={`license-tier-card${selectedPortProfile === key ? ' active' : ''}`}
+                      style={{ padding: '8px 12px' }}
+                    >
+                      <input
+                        type="radio"
+                        name="portProfile"
+                        value={key}
+                        checked={selectedPortProfile === key}
+                        onChange={() => setSelectedPortProfile(key)}
+                      />
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+                        <div>
+                          <div className="license-tier-name" style={{ fontSize: 13 }}>{profile.label}</div>
+                          <div className="license-tier-desc" style={{ fontSize: 11 }}>{profile.description}</div>
+                        </div>
+                        <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
+                          {Object.entries(groups).map(([k, count]) => (
+                            <span key={k} className="port-badge" style={{ fontSize: 10 }}>{count}x {k}</span>
+                          ))}
+                        </div>
+                      </div>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {/* SRX Subscriptions */}
           {selectedTarget && (

@@ -38,6 +38,69 @@ function genSrxPorts(ifPrefix, fpc, pic, start, end, type, speed) {
 }
 
 // ---------------------------------------------------------------------------
+// SRX4700 Port Profiles — configurable via chassis fpc port-profile
+// Each profile defines port layout per PIC (both PICs are identical).
+// ---------------------------------------------------------------------------
+export const SRX4700_PORT_PROFILES = {
+  'D-2X400G-4X100G-4X50G': {
+    label: '2x400G + 4x100G + 4x50G',
+    description: 'Max 400G density — two 400G, four 100G, four 50G',
+    perPic: (fpc, pic) => [
+      ...genSrxPorts('et', fpc, pic, 0, 0, 'QSFP56-DD', '400G'),
+      ...genSrxPorts('et', fpc, pic, 1, 1, 'QSFP56-DD', '400G'),
+      ...genSrxPorts('et', fpc, pic, 2, 3, 'QSFP28', '100G'),
+      ...genSrxPorts('et', fpc, pic, 6, 7, 'SFP56', '50G'),
+    ],
+  },
+  'D-2X400G-2X100G-8X50G': {
+    label: '2x400G + 2x100G + 8x50G',
+    description: 'Balanced 400G — two 400G, two 100G, eight 50G',
+    perPic: (fpc, pic) => [
+      ...genSrxPorts('et', fpc, pic, 0, 0, 'QSFP56-DD', '400G'),
+      ...genSrxPorts('et', fpc, pic, 1, 1, 'QSFP56-DD', '400G'),
+      ...genSrxPorts('et', fpc, pic, 2, 2, 'QSFP28', '100G'),
+      ...genSrxPorts('et', fpc, pic, 6, 9, 'SFP56', '50G'),
+    ],
+  },
+  'D-12X100G-4X50G': {
+    label: '12x100G + 4x50G',
+    description: 'Max 100G density — twelve 100G, four 50G',
+    perPic: (fpc, pic) => [
+      ...genSrxPorts('et', fpc, pic, 0, 5, 'QSFP28', '100G'),
+      ...genSrxPorts('et', fpc, pic, 6, 7, 'SFP56', '50G'),
+    ],
+  },
+  'D-6X100G-16X50G': {
+    label: '6x100G + 16x50G',
+    description: 'Max 50G density — six 100G, sixteen 50G',
+    perPic: (fpc, pic) => [
+      ...genSrxPorts('et', fpc, pic, 0, 2, 'QSFP28', '100G'),
+      ...genSrxPorts('et', fpc, pic, 6, 13, 'SFP56', '50G'),
+    ],
+  },
+  'D-8X100G-12X50G': {
+    label: '8x100G + 12x50G',
+    description: 'Balanced — eight 100G, twelve 50G',
+    perPic: (fpc, pic) => [
+      ...genSrxPorts('et', fpc, pic, 0, 3, 'QSFP28', '100G'),
+      ...genSrxPorts('et', fpc, pic, 6, 11, 'SFP56', '50G'),
+    ],
+  },
+};
+
+export const SRX4700_DEFAULT_PROFILE = 'D-6X100G-16X50G';
+
+/** Generate SRX4700 ports for a given profile key (both PICs on FPC 1) */
+export function getSrx4700Ports(profileKey) {
+  const profile = SRX4700_PORT_PROFILES[profileKey || SRX4700_DEFAULT_PROFILE];
+  if (!profile) return [];
+  return [
+    ...profile.perPic(1, 0),
+    ...profile.perPic(1, 1),
+  ];
+}
+
+// ---------------------------------------------------------------------------
 // PAN-OS Firewall Models
 // ---------------------------------------------------------------------------
 
@@ -675,12 +738,12 @@ export const SRX_MODELS = {
     description: 'Next-gen enterprise edge firewall with MACsec',
     throughput: { l4: '12 Gbps', l7: '7.5 Gbps', threat: '8 Gbps' },
     ports: [
-      // PIC 0: 16x RJ-45 (1G copper)
+      // PIC 0: 16x RJ-45 BASE-T (1G copper)
       ...genSrxPorts('ge', 0, 0, 0, 15, 'copper', '1G'),
-      // PIC 1: 2x SFP28 (25G)
-      ...genSrxPorts('et', 0, 1, 0, 1, 'SFP28', '25G'),
-      // PIC 2: 4x SFP+ (10G)
-      ...genSrxPorts('xe', 0, 2, 0, 3, 'SFP+', '10G'),
+      // PIC 1: 2x SFP28 (1/10/25G)
+      ...genSrxPorts('et', 0, 1, 0, 1, 'SFP28', '1/10/25G'),
+      // PIC 2: 4x SFP+ (1/10G)
+      ...genSrxPorts('xe', 0, 2, 0, 3, 'SFP+', '1/10G'),
     ],
   },
 
@@ -704,14 +767,14 @@ export const SRX_MODELS = {
     description: 'Next-gen data center firewall with MACsec',
     throughput: { l4: '28 Gbps', l7: '14 Gbps', threat: '20 Gbps' },
     ports: [
-      // PIC 0: 8x multirate RJ-45 (1/2.5/5/10G)
-      ...genSrxPorts('ge', 0, 0, 0, 7, 'copper', '10G'),
+      // PIC 0: 8x multirate BASE-T RJ-45 (1/2.5/5/10G)
+      ...genSrxPorts('mge', 0, 0, 0, 7, 'copper', '1/2.5/5/10G'),
       // PIC 1: 8x SFP+ (1/10G)
-      ...genSrxPorts('xe', 0, 1, 0, 7, 'SFP+', '10G'),
+      ...genSrxPorts('xe', 0, 1, 0, 7, 'SFP+', '1/10G'),
       // PIC 2: 4x SFP28 (1/10/25G)
-      ...genSrxPorts('et', 0, 2, 0, 3, 'SFP28', '25G'),
+      ...genSrxPorts('et', 0, 2, 0, 3, 'SFP28', '1/10/25G'),
       // PIC 3: 2x QSFP28 (40/100G)
-      ...genSrxPorts('et', 0, 3, 0, 1, 'QSFP28', '100G'),
+      ...genSrxPorts('et', 0, 3, 0, 1, 'QSFP28', '40/100G'),
     ],
   },
 
@@ -734,14 +797,14 @@ export const SRX_MODELS = {
     description: 'High-performance data center firewall with MACsec',
     throughput: { l4: '90 Gbps', l7: '83 Gbps', threat: '83 Gbps' },
     ports: [
-      // PIC 0: 8x multirate RJ-45 (1/2.5/5/10G)
-      ...genSrxPorts('ge', 0, 0, 0, 7, 'copper', '10G'),
+      // PIC 0: 8x multirate BASE-T RJ-45 (1/2.5/5/10G)
+      ...genSrxPorts('mge', 0, 0, 0, 7, 'copper', '1/2.5/5/10G'),
       // PIC 1: 8x SFP+ (1/10G)
-      ...genSrxPorts('xe', 0, 1, 0, 7, 'SFP+', '10G'),
+      ...genSrxPorts('xe', 0, 1, 0, 7, 'SFP+', '1/10G'),
       // PIC 2: 4x SFP28 (1/10/25G)
-      ...genSrxPorts('et', 0, 2, 0, 3, 'SFP28', '25G'),
+      ...genSrxPorts('et', 0, 2, 0, 3, 'SFP28', '1/10/25G'),
       // PIC 3: 6x QSFP28 (40/100G)
-      ...genSrxPorts('et', 0, 3, 0, 5, 'QSFP28', '100G'),
+      ...genSrxPorts('et', 0, 3, 0, 5, 'QSFP28', '40/100G'),
     ],
   },
 
@@ -751,9 +814,10 @@ export const SRX_MODELS = {
     description: 'High-performance data center firewall',
     throughput: { l4: '400 Gbps', l7: '20 Gbps', threat: '20 Gbps' },
     ports: [
-      ...genSrxPorts('ge', 0, 0, 0, 1, 'copper', '1G'),
-      ...genSrxPorts('xe', 0, 0, 0, 23, 'SFP+', '10G'),
-      ...genSrxPorts('et', 0, 0, 0, 5, 'QSFP+', '40G'),
+      // FPC 1, PIC 0: 4x QSFP28/QSFP+ (40/100G)
+      ...genSrxPorts('et', 1, 0, 0, 3, 'QSFP28', '40/100G'),
+      // FPC 1, PIC 1: 8x SFP+ (1/10G)
+      ...genSrxPorts('xe', 1, 1, 0, 7, 'SFP+', '1/10G'),
     ],
   },
 
@@ -761,36 +825,20 @@ export const SRX_MODELS = {
     name: 'SRX4700-700',
     tier: 'datacenter',
     current: true,
+    hasPortProfiles: true,
     description: '1U datacenter firewall, Trio ASIC, MACsec, 700G L4 license',
     throughput: { l4: '700 Gbps', l7: '160 Gbps', threat: '60 Gbps' },
-    ports: [
-      // PIC 0: 1x QSFP56-DD (400G) + 5x QSFP28 (100G) + 8x SFP56 (50G)
-      ...genSrxPorts('et', 0, 0, 0, 0, 'QSFP56-DD', '400G'),
-      ...genSrxPorts('et', 0, 0, 1, 5, 'QSFP28', '100G'),
-      ...genSrxPorts('et', 0, 0, 6, 13, 'SFP56', '50G'),
-      // PIC 1: identical layout
-      ...genSrxPorts('et', 0, 1, 0, 0, 'QSFP56-DD', '400G'),
-      ...genSrxPorts('et', 0, 1, 1, 5, 'QSFP28', '100G'),
-      ...genSrxPorts('et', 0, 1, 6, 13, 'SFP56', '50G'),
-    ],
+    ports: getSrx4700Ports(SRX4700_DEFAULT_PROFILE),
   },
 
   'SRX4700': {
     name: 'SRX4700',
     tier: 'datacenter',
     current: true,
+    hasPortProfiles: true,
     description: 'Highest throughput 1U firewall, Trio ASIC, MACsec, full license',
     throughput: { l4: '1.4 Tbps', l7: '160 Gbps', threat: '60 Gbps' },
-    ports: [
-      // PIC 0: 1x QSFP56-DD (400G) + 5x QSFP28 (100G) + 8x SFP56 (50G)
-      ...genSrxPorts('et', 0, 0, 0, 0, 'QSFP56-DD', '400G'),
-      ...genSrxPorts('et', 0, 0, 1, 5, 'QSFP28', '100G'),
-      ...genSrxPorts('et', 0, 0, 6, 13, 'SFP56', '50G'),
-      // PIC 1: identical layout
-      ...genSrxPorts('et', 0, 1, 0, 0, 'QSFP56-DD', '400G'),
-      ...genSrxPorts('et', 0, 1, 1, 5, 'QSFP28', '100G'),
-      ...genSrxPorts('et', 0, 1, 6, 13, 'SFP56', '50G'),
-    ],
+    ports: getSrx4700Ports(SRX4700_DEFAULT_PROFILE),
   },
 
   // ---- Chassis-Based ----

@@ -1095,10 +1095,13 @@ html, body, #root {
 .port-badge.speed-10G {
   border-left: 2px solid var(--info);
 }
-.port-badge.speed-25G, .port-badge.speed-40G {
+.port-badge.speed-2.5G, .port-badge.speed-5G {
+  border-left: 2px solid var(--success);
+}
+.port-badge.speed-25G, .port-badge.speed-40G, .port-badge.speed-50G {
   border-left: 2px solid var(--warning);
 }
-.port-badge.speed-100G {
+.port-badge.speed-100G, .port-badge.speed-400G {
   border-left: 2px solid var(--error);
 }
 

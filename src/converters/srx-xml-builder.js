@@ -10,7 +10,7 @@
  * Phase 2+: Full XML with NAT, routing, VPN, UTM.
  */
 
-import { sanitizeJunosName, mapPanosAppToJunos, mapPanosProfileToSrx } from '../parsers/parser-utils.js';
+import { sanitizeJunosName, mapPanosAppToJunos, mapProfileToSrx } from '../parsers/parser-utils.js';
 
 /**
  * Builds a Junos XML configuration from the intermediate config.
@@ -435,7 +435,7 @@ function computeUtmMap(policies) {
   const utmProfiles = []; // { policyName, profiles: { type → mapped } }
   if (!policies) return { utmPolicyMap, utmProfiles };
 
-  const utmTypes = ['virus', 'wildfire-analysis', 'url-filtering', 'file-blocking'];
+  const utmTypes = ['virus', 'wildfire-analysis', 'url-filtering', 'file-blocking', 'email-filter', 'application-control', 'dlp'];
   const comboMap = new Map();
   let idx = 0;
 
@@ -453,7 +453,7 @@ function computeUtmMap(policies) {
       const pName = `utm-policy-${idx}`;
       const mapped = {};
       for (const [pt, pv] of Object.entries(utmP)) {
-        mapped[pt] = mapPanosProfileToSrx(pt, pv);
+        mapped[pt] = mapProfileToSrx(pt, pv);
       }
       comboMap.set(key, { policyName: pName, profiles: mapped });
       utmProfiles.push({ policyName: pName, profiles: mapped });
@@ -509,6 +509,8 @@ function buildUtmXml(utmProfiles, lines) {
         lines.push(`        <web-filtering><profile name="${escapeXml(mapped.srxProfile)}" type="juniper-enhanced"/></web-filtering>`);
       } else if (mapped.srxType === 'content-filtering') {
         lines.push(`        <content-filtering><profile name="${escapeXml(mapped.srxProfile)}"/></content-filtering>`);
+      } else if (mapped.srxType === 'anti-spam') {
+        lines.push(`        <anti-spam><profile name="${escapeXml(mapped.srxProfile)}"/></anti-spam>`);
       }
     }
   }
@@ -525,6 +527,8 @@ function buildUtmXml(utmProfiles, lines) {
         lines.push(`        <web-filtering><http-profile>${escapeXml(mapped.srxProfile)}</http-profile></web-filtering>`);
       } else if (mapped.srxType === 'content-filtering') {
         lines.push(`        <content-filtering><rule-set>${escapeXml(mapped.srxProfile)}</rule-set></content-filtering>`);
+      } else if (mapped.srxType === 'anti-spam') {
+        lines.push(`        <anti-spam><smtp-profile>${escapeXml(mapped.srxProfile)}</smtp-profile></anti-spam>`);
       }
     }
     lines.push('      </utm-policy>');

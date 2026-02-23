@@ -610,10 +610,10 @@ function parseSecurityPolicies(tree, warnings) {
     if (entry['av-profile']) securityProfiles.virus = getString(entry['av-profile']);
     if (entry['webfilter-profile']) securityProfiles['url-filtering'] = getString(entry['webfilter-profile']);
     if (entry['ips-sensor']) securityProfiles.vulnerability = getString(entry['ips-sensor']);
-    if (entry['application-list']) securityProfiles['wildfire-analysis'] = getString(entry['application-list']);
+    if (entry['application-list']) securityProfiles['application-control'] = getString(entry['application-list']);
     if (entry['dnsfilter-profile']) securityProfiles['dns-security'] = getString(entry['dnsfilter-profile']);
-    if (entry['emailfilter-profile']) securityProfiles['data-filtering'] = getString(entry['emailfilter-profile']);
-    if (entry['dlp-profile']) securityProfiles['file-blocking'] = getString(entry['dlp-profile']);
+    if (entry['emailfilter-profile']) securityProfiles['email-filter'] = getString(entry['emailfilter-profile']);
+    if (entry['dlp-profile']) securityProfiles['dlp'] = getString(entry['dlp-profile']);
     if (entry['ssl-ssh-profile']) securityProfiles.decryption = getString(entry['ssl-ssh-profile']);
     if (entry['waf-profile']) securityProfiles.waf = getString(entry['waf-profile']);
     if (entry['casb-profile']) securityProfiles.casb = getString(entry['casb-profile']);
@@ -898,10 +898,10 @@ function getProfileLabel(profileType) {
     virus: 'Antivirus',
     'url-filtering': 'Web Filter',
     vulnerability: 'IPS',
-    'wildfire-analysis': 'App Control',
+    'application-control': 'App Control',
     'dns-security': 'DNS Filter',
-    'data-filtering': 'Email Filter',
-    'file-blocking': 'DLP',
+    'email-filter': 'Email Filter',
+    'dlp': 'DLP',
     decryption: 'SSL Inspection',
     waf: 'WAF',
     casb: 'CASB',
@@ -915,10 +915,10 @@ function mapProfileToSrxFeature(profileType) {
     virus: 'utm',
     'url-filtering': 'utm',
     vulnerability: 'idp',
-    'wildfire-analysis': 'appfw',
+    'application-control': 'appfw',
     'dns-security': 'utm',
-    'data-filtering': 'utm',
-    'file-blocking': 'utm',
+    'email-filter': 'utm',
+    'dlp': 'none',
     decryption: 'ssl-proxy',
     waf: 'utm',
   };
@@ -930,10 +930,10 @@ function mapProfileToSrxType(profileType) {
     virus: 'utm-policy',
     'url-filtering': 'utm-policy',
     vulnerability: 'idp-policy',
-    'wildfire-analysis': 'application-firewall',
+    'application-control': 'application-firewall',
     'dns-security': 'utm-policy',
-    'data-filtering': 'utm-policy',
-    'file-blocking': 'utm-policy',
+    'email-filter': 'anti-spam',
+    'dlp': 'dlp',
     decryption: 'ssl-proxy',
   };
   return map[profileType] || 'utm-policy';

@@ -1,4 +1,4 @@
-# Firewall to Intent Converter 
+# Firewall to Intent Converter
 
 
 A browser-based tool that converts firewall configurations into an intermediate format for review, editing, and conversion to Juniper SRX. Supports **PAN-OS XML**, **Junos SRX**, **FortiGate / FortiOS**, and **Cisco ASA / FTD** as source formats. Paste or upload a config, review and edit the parsed rules through an interactive UI, optionally get AI-powered best-practice suggestions, then export as SRX set commands or XML.
@@ -81,12 +81,13 @@ Click **Convert to SRX** to generate the output. Switch between **Set Commands**
 - **FortiGate / FortiOS parser** — Parses FortiOS `config`/`edit`/`set`/`next`/`end` block format including firewall policies, address objects, address groups, service objects, service groups, zones, VIPs (destination NAT), IP pools, central SNAT maps, and security profiles (AV, web filter, IPS, application control, SSL inspection, DNS filter, DLP, email filter)
 - **Cisco ASA / FTD parser** — Parses Cisco ASA/FTD configuration including interfaces (nameif, security-level, IP), object network/service definitions, object-group network/service/protocol groups, extended access-lists with remarks, access-group bindings, and object NAT (dynamic/static). Zones are derived from interface nameif + security-level
 - **Auto-detection** — Automatically identifies the source format (PAN-OS XML, Junos SRX, FortiOS, or Cisco ASA) and routes to the correct parser
-- **SRX output** — Generates Juniper SRX `set` commands or hierarchical XML, including zones, address books, application mappings, security policies, NAT rule-sets, and schedulers
+- **SRX output** — Generates Juniper SRX `set` commands or hierarchical XML, including zones, address books, application mappings, security policies, NAT rule-sets, schedulers, and UTM profiles (anti-virus, web-filtering, content-filtering, anti-spam). FortiGate Application Control emits an AppFW comment; FortiGate DLP notes ICAP integration requirement
 - **Implicit rules** — Automatically generates vendor-specific implicit rules (PAN-OS intra-zone allow + interzone deny, FortiGate intrazone per-zone + default deny, Cisco ASA security-level permits for unbound interfaces + default deny, SRX default deny). Implicit rules are visually distinguished in the UI (dimmed, italic, with "Implicit" chip) and tagged `added_by_fpic`
 - **FQDN support** — Parses FQDN/dns-name address objects from all vendors and converts to SRX `dns-name`. Cisco ASA `fqdn v4`/`v6` maps to SRX `ipv4-only`/`ipv6-only`. FortiGate wildcard-fqdn (`*.example.com`) generates a warning since SRX does not support wildcard dns-name
 - **ICMP details** — Preserves ICMP type/code through the full pipeline (parser → intermediate → converter). Generates SRX `icmp-type`/`icmp-code` instead of `destination-port` for ICMP services
 - **Schedule support** — Parses schedules from all vendors (FortiGate recurring/onetime, PAN-OS schedule objects, Cisco ASA time-ranges, SRX schedulers) and converts to SRX `set schedulers scheduler` commands with `scheduler-name` references on policies
 - **Nested object groups** — Correctly resolves nested address groups and service groups, emitting `address-set` (not `address`) and `application-set` (not `application`) references for group members that are themselves groups
+- **Vendor-native security profiles** — FortiGate profiles (Application Control, Email Filter, DLP, DNS Filter) use FortiGate-native field names in the intermediate schema and display with correct FortiGate terminology. SRX view shows correct Junos terms (Anti-virus instead of WildFire, Anti-spam, AppSecure, DNS Security). PAN-OS profiles (WildFire, File Blocking) remain unchanged
 - **Application mapping** — Automatically maps PAN-OS application names to Junos equivalents (e.g., `web-browsing` → `junos-http`)
 - **Sanitization** — One-click replacement of sensitive data (IPs, hostnames, keys) with placeholders before sharing or sending to an LLM. Originals are restored on export
 
@@ -94,7 +95,7 @@ Click **Convert to SRX** to generate the output. Switch between **Set Commands**
 - **"from" / "to" toggle** — Switch between source view ("from PAN-OS", "from SRX", "from FortiGate", or "from Cisco ASA") and target view ("to SRX") above the tab bar
 - **SRX-style table** — When source is SRX (or viewing the "to SRX" tab), policies display in a zone-grouped table with SRX terminology (permit/deny/reject, security-zone, address-book)
 - **PAN-OS-style table** — When source is PAN-OS, the "from" tab shows the familiar PAN-OS table layout with allow/deny actions
-- **FortiGate-style table** — When source is FortiGate, the "from" tab shows a FortiOS-style policy table with FortiGate terminology (ACCEPT/DENY, From/To interfaces, Schedule, NAT toggle, security profile icons for AV/WF/IPS/App/SSL)
+- **FortiGate-style table** — When source is FortiGate, the "from" tab shows a FortiOS-style policy table with FortiGate terminology (ACCEPT/DENY, From/To interfaces, Schedule, NAT toggle, security profile icons for AV/WF/IPS/App/SSL/DNS/EM/DLP)
 - **Cisco ASDM-style table** — When source is Cisco ASA/FTD, the "from" tab shows a Cisco ASDM-style access control table with ACE numbering, Permit/Deny actions, ACL name badges, security level indicators, protocol chips, interface labels, log status, and hit counts
 - **Negate support** — Source/destination address negation flags (PAN-OS `negate-source`/`negate-destination`, SRX `except`) displayed and editable in both views
 - **Profile group expansion** — PAN-OS profile group references are automatically resolved into individual security profiles

@@ -186,6 +186,10 @@ export default function PolicyTable({
       const shortLabels = {
         'virus': 'AV', 'wildfire-analysis': 'WF', 'url-filtering': 'URL',
         'file-blocking': 'FB', 'spyware': 'AS', 'vulnerability': 'VP',
+        // FortiGate-originated
+        'application-control': 'App', 'email-filter': 'EM', 'dlp': 'DLP',
+        'dns-security': 'DNS', 'decryption': 'SSL', 'waf': 'WAF',
+        'casb': 'CASB', 'voip': 'VoIP',
       };
       for (const [pType, pName] of profileEntries) {
         const label = shortLabels[pType] || pType;
@@ -238,10 +242,10 @@ export default function PolicyTable({
       rows.push({ label: 'Flow-based AV', cls: 'antimalware', value: 'enabled' });
     }
 
-    // Anti-malware = virus + wildfire
+    // Anti-virus = virus + wildfire (SRX term — no WildFire on SRX)
     if (sp.virus || sp['wildfire-analysis']) {
       const parts = [sp.virus, sp['wildfire-analysis']].filter(Boolean).join(', ');
-      rows.push({ label: 'Anti-malware', cls: 'antimalware', value: parts });
+      rows.push({ label: 'Anti-virus', cls: 'antimalware', value: parts });
     }
 
     // SecIntel
@@ -257,6 +261,26 @@ export default function PolicyTable({
     // ICAP Redirect
     if (policy._srx_icap_redirect) {
       rows.push({ label: 'ICAP Redirect', cls: 'fileblock', value: 'enabled' });
+    }
+
+    // Anti-spam (from FortiGate email filter)
+    if (sp['email-filter']) {
+      rows.push({ label: 'Anti-spam', cls: 'urlfilter', value: sp['email-filter'] });
+    }
+
+    // AppSecure (from FortiGate app control)
+    if (sp['application-control']) {
+      rows.push({ label: 'AppSecure', cls: 'ips', value: sp['application-control'] });
+    }
+
+    // DLP (informational — requires ICAP on SRX)
+    if (sp['dlp']) {
+      rows.push({ label: 'DLP (ICAP)', cls: 'fileblock', value: sp['dlp'] });
+    }
+
+    // DNS Security (from FortiGate DNS filter)
+    if (sp['dns-security']) {
+      rows.push({ label: 'DNS Security', cls: 'secintel', value: sp['dns-security'] });
     }
 
     if (rows.length === 0) {
@@ -709,11 +733,11 @@ export default function PolicyTable({
     if (sp.virus) profiles.push({ key: 'av', label: 'AV', title: `Antivirus: ${sp.virus}`, cls: 'fg-prof-av' });
     if (sp['url-filtering']) profiles.push({ key: 'wf', label: 'WF', title: `Web Filter: ${sp['url-filtering']}`, cls: 'fg-prof-wf' });
     if (sp.vulnerability) profiles.push({ key: 'ips', label: 'IPS', title: `IPS: ${sp.vulnerability}`, cls: 'fg-prof-ips' });
-    if (sp['wildfire-analysis']) profiles.push({ key: 'app', label: 'App', title: `App Control: ${sp['wildfire-analysis']}`, cls: 'fg-prof-app' });
+    if (sp['application-control']) profiles.push({ key: 'app', label: 'App', title: `App Control: ${sp['application-control']}`, cls: 'fg-prof-app' });
     if (sp.decryption) profiles.push({ key: 'ssl', label: 'SSL', title: `SSL Inspection: ${sp.decryption}`, cls: 'fg-prof-ssl' });
     if (sp['dns-security']) profiles.push({ key: 'dns', label: 'DNS', title: `DNS Filter: ${sp['dns-security']}`, cls: 'fg-prof-dns' });
-    if (sp['data-filtering']) profiles.push({ key: 'email', label: 'EM', title: `Email Filter: ${sp['data-filtering']}`, cls: 'fg-prof-email' });
-    if (sp['file-blocking']) profiles.push({ key: 'dlp', label: 'DLP', title: `DLP: ${sp['file-blocking']}`, cls: 'fg-prof-dlp' });
+    if (sp['email-filter']) profiles.push({ key: 'email', label: 'EM', title: `Email Filter: ${sp['email-filter']}`, cls: 'fg-prof-email' });
+    if (sp['dlp']) profiles.push({ key: 'dlp', label: 'DLP', title: `DLP: ${sp['dlp']}`, cls: 'fg-prof-dlp' });
 
     if (profiles.length === 0 && policy.profile_group) {
       return <span className="fg-profile-group" title={`Profile Group: ${policy.profile_group}`}>{policy.profile_group}</span>;

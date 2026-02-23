@@ -114,6 +114,9 @@ export default function ModelSelector({
         </div>
 
         <div className="modal-body">
+          <p style={{ fontSize: 10, color: 'var(--text-muted)', margin: '0 0 10px', lineHeight: 1.4 }}>
+            Throughput numbers are best effort based on publicly available data. Do your own research.
+          </p>
           {/* Throughput metric toggle */}
           <div className="throughput-toggle">
             <span className="throughput-toggle-label">Show throughput as:</span>

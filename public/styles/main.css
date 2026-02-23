@@ -21,7 +21,8 @@
 
   /* Accent */
   --accent: #4dd0c8;
-  --accent-dim: #2a9d8f;
+  --accent-dim: #005b5a;
+  --accent-text: #005b5a;
   --accent-glow: rgba(77, 208, 200, 0.15);
 
   /* Text */
@@ -103,6 +104,11 @@ html, body, #root {
   gap: 10px;
 }
 
+.brand-logo {
+  height: 56px;
+  width: auto;
+}
+
 .navbar-brand h1 {
   font-size: 16px;
   font-weight: 600;
@@ -111,7 +117,7 @@ html, body, #root {
 }
 
 .navbar-brand .brand-accent {
-  color: #2a9d8f;
+  color: #005b5a;
   font-weight: 700;
 }
 
@@ -139,7 +145,7 @@ html, body, #root {
 }
 
 .stat-badge .stat-value {
-  color: var(--accent);
+  color: var(--accent-text);
   font-weight: 600;
 }
 
@@ -625,7 +631,7 @@ html, body, #root {
 }
 
 .output-code .keyword {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 /* --- Warnings Panel --- */
@@ -702,7 +708,7 @@ html, body, #root {
 .summary-card .summary-value {
   font-size: 20px;
   font-weight: 700;
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .summary-card .summary-label {
@@ -1021,7 +1027,7 @@ html, body, #root {
 }
 
 .model-select optgroup {
-  color: var(--accent);
+  color: var(--accent-text);
   font-style: normal;
 }
 
@@ -1031,7 +1037,7 @@ html, body, #root {
   border-radius: var(--radius);
   padding: 8px 12px;
   font-size: 12px;
-  color: var(--accent);
+  color: var(--accent-text);
   margin-bottom: 8px;
   display: flex;
   align-items: center;
@@ -1454,7 +1460,7 @@ html, body, #root {
   border-radius: 3px;
   background: var(--accent-glow);
   border: 1px solid rgba(0, 210, 211, 0.25);
-  color: var(--accent);
+  color: var(--accent-text);
   font-family: var(--font-mono);
   font-size: 11px;
   font-weight: 500;
@@ -1620,12 +1626,12 @@ html, body, #root {
 }
 
 .model-info-row.throughput-active .model-info-label {
-  color: var(--accent);
+  color: var(--accent-text);
   font-weight: 600;
 }
 
 .model-info-row.throughput-active .model-info-value {
-  color: var(--accent);
+  color: var(--accent-text);
   font-weight: 600;
 }
 
@@ -1682,8 +1688,8 @@ html, body, #root {
 
 /* Virtual port badge color */
 .port-badge.speed-virtual {
-  border-left: 2px solid var(--accent);
-  color: var(--accent);
+  border-left: 2px solid var(--accent-text);
+  color: var(--accent-text);
 }
 
 /* --- Sanitize Button --- */
@@ -1752,7 +1758,7 @@ html, body, #root {
 }
 
 .llm-warning-content strong {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 /* --- Responsive: 1440x900 --- */
@@ -1840,7 +1846,7 @@ html, body, #root {
 .suggestion-field-name {
   font-family: var(--font-mono);
   font-size: 11px;
-  color: var(--accent);
+  color: var(--accent-text);
   font-weight: 600;
   margin-bottom: 4px;
 }
@@ -1881,7 +1887,7 @@ html, body, #root {
   background: var(--accent-glow);
   border: 1px solid rgba(77, 208, 200, 0.3);
   border-radius: 3px;
-  color: var(--accent);
+  color: var(--accent-text);
   cursor: pointer;
   transition: all 0.15s;
 }
@@ -2030,7 +2036,7 @@ html, body, #root {
 /* --- Security Profile Chips (PolicyTable) --- */
 .profile-chip {
   background: rgba(77, 208, 200, 0.12);
-  color: var(--accent);
+  color: var(--accent-text);
   border: 1px solid rgba(77, 208, 200, 0.25);
   font-weight: 600;
   font-size: 10px;
@@ -2069,7 +2075,7 @@ html, body, #root {
   border-radius: 4px;
   padding: 6px 10px;
   font-size: 11px;
-  color: var(--accent);
+  color: var(--accent-text);
   margin-top: 4px;
 }
 
@@ -2202,7 +2208,7 @@ html, body, #root {
 
 /* License badge in navbar */
 .license-badge {
-  color: var(--accent) !important;
+  color: var(--accent-text) !important;
   font-family: var(--font-mono);
 }
 
@@ -2241,7 +2247,7 @@ html, body, #root {
 
 .app-svc-chip.secintel {
   background: rgba(77, 208, 200, 0.15);
-  color: var(--accent);
+  color: var(--accent-text);
   border: 1px solid rgba(77, 208, 200, 0.3);
 }
 
@@ -2320,7 +2326,7 @@ html, body, #root {
 }
 .srx-cell-icon.addr {
   background: rgba(77, 208, 200, 0.2);
-  color: var(--accent);
+  color: var(--accent-text);
 }
 .srx-cell-icon.app {
   background: rgba(167, 139, 250, 0.2);
@@ -2398,7 +2404,7 @@ html, body, #root {
   white-space: nowrap;
 }
 .srx-sub-label.ips { color: var(--info); }
-.srx-sub-label.secintel { color: var(--accent); }
+.srx-sub-label.secintel { color: var(--accent-text); }
 .srx-sub-label.antimalware { color: var(--success); }
 .srx-sub-label.urlfilter { color: var(--warning); }
 .srx-sub-label.fileblock { color: var(--status-interview); }
@@ -2608,7 +2614,7 @@ html, body, #root {
 .fg-nat-on {
   font-size: 11px;
   font-weight: 600;
-  color: var(--accent);
+  color: var(--accent-text);
 }
 .fg-nat-off {
   font-size: 11px;
@@ -2652,7 +2658,7 @@ html, body, #root {
 }
 .fg-profile-group {
   font-size: 11px;
-  color: var(--accent);
+  color: var(--accent-text);
   font-weight: 500;
 }
 
@@ -2792,7 +2798,7 @@ html, body, #root {
   font-size: 9px;
   font-weight: 600;
   text-transform: uppercase;
-  color: var(--accent);
+  color: var(--accent-text);
   letter-spacing: 0.3px;
   padding-bottom: 1px;
 }

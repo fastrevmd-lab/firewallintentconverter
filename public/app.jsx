@@ -408,6 +408,7 @@ export default function App() {
       {/* --- Top Navigation Bar --- */}
       <nav className="navbar">
         <div className="navbar-brand">
+          <img src="/logo.png" alt="Intent Converter" className="brand-logo" />
           <h1>
             Firewall Policy to <span className="brand-accent">Intent Converter</span>
           </h1>

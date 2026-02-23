@@ -54,11 +54,12 @@ export function parseFortigateConfig(configText) {
   const schedules = parseSchedules(tree, warnings);
   const profileGroups = parseProfileGroups(tree, warnings);
 
-  // Promote schedules to intermediate format
+  // Promote schedules to intermediate format (normalize day names to short form)
+  const dayShortMap = { monday: 'Mon', tuesday: 'Tue', wednesday: 'Wed', thursday: 'Thu', friday: 'Fri', saturday: 'Sat', sunday: 'Sun' };
   const intermediateSchedules = Object.values(schedules).map(s => ({
     name: s.name,
     type: s.type,
-    days: s.day || [],
+    days: (s.day || []).map(d => dayShortMap[d.toLowerCase()] || d),
     start: s.start || '',
     end: s.end || '',
   }));

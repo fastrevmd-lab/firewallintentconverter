@@ -471,6 +471,7 @@ export const SAMPLE_CONFIGS = {
                   <service><member>application-default</member></service>
                   <action>allow</action>
                   <log-end>yes</log-end>
+                  <schedule>business-hours</schedule>
                 </entry>
                 <entry name="trust-to-untrust-mail">
                   <from><member>trust</member></from>
@@ -572,6 +573,21 @@ export const SAMPLE_CONFIGS = {
               </rules>
             </nat>
           </rulebase>
+          <schedule>
+            <entry name="business-hours">
+              <schedule-type>
+                <recurring>
+                  <weekly>
+                    <monday>08:00-18:00</monday>
+                    <tuesday>08:00-18:00</tuesday>
+                    <wednesday>08:00-18:00</wednesday>
+                    <thursday>08:00-18:00</thursday>
+                    <friday>08:00-18:00</friday>
+                  </weekly>
+                </recurring>
+              </schedule-type>
+            </entry>
+          </schedule>
         </entry>
       </vsys>
     </entry>
@@ -2226,6 +2242,7 @@ set security policies from-zone trust to-zone dmz policy trust-to-dmz match dest
 set security policies from-zone trust to-zone dmz policy trust-to-dmz match application any
 set security policies from-zone trust to-zone dmz policy trust-to-dmz then permit
 set security policies from-zone trust to-zone dmz policy trust-to-dmz then log session-close
+set security policies from-zone trust to-zone dmz policy trust-to-dmz scheduler-name weekday-business
 
 set security policies from-zone dmz to-zone trust policy dmz-to-db match source-address app-server-1
 set security policies from-zone dmz to-zone trust policy dmz-to-db match destination-address db-server-1
@@ -2250,7 +2267,13 @@ set security nat source rule-set trust-to-untrust rule source-nat-rule match sou
 set security nat source rule-set trust-to-untrust rule source-nat-rule then source-nat interface
 
 set applications application custom-app-8080 protocol tcp
-set applications application custom-app-8080 destination-port 8080`,
+set applications application custom-app-8080 destination-port 8080
+
+set schedulers scheduler weekday-business monday start-time 08:00:00 stop-time 18:00:00
+set schedulers scheduler weekday-business tuesday start-time 08:00:00 stop-time 18:00:00
+set schedulers scheduler weekday-business wednesday start-time 08:00:00 stop-time 18:00:00
+set schedulers scheduler weekday-business thursday start-time 08:00:00 stop-time 18:00:00
+set schedulers scheduler weekday-business friday start-time 08:00:00 stop-time 18:00:00`,
   },
 
   // =========================================================================
@@ -2407,6 +2430,14 @@ config firewall vip
     next
 end
 
+config firewall schedule recurring
+    edit "office-hours"
+        set day monday tuesday wednesday thursday friday
+        set start 08:00
+        set end 18:00
+    next
+end
+
 config firewall policy
     edit 1
         set name "LAN-to-Internet"
@@ -2486,7 +2517,7 @@ config firewall policy
         set action accept
         set srcaddr "LAN-Subnet"
         set dstaddr "DMZ-Servers"
-        set schedule "always"
+        set schedule "office-hours"
         set service "Web-Services"
         set logtraffic all
         set comments "LAN access to DMZ servers"
@@ -2601,6 +2632,9 @@ object-group service MGMT-SERVICES tcp
  port-object eq ssh
  port-object eq 3389
 !
+time-range BUSINESS-HOURS
+ periodic weekdays 08:00 to 18:00
+!
 access-list outside_access_in extended remark Allow inbound web traffic to DMZ
 access-list outside_access_in extended permit tcp any object web-server object-group WEB-SERVICES log
 access-list outside_access_in extended remark Allow inbound mail
@@ -2614,8 +2648,8 @@ access-list inside_access_in extended remark Allow DNS
 access-list inside_access_in extended permit udp object internal-net any eq domain
 access-list inside_access_in extended remark Allow internal to DMZ servers
 access-list inside_access_in extended permit tcp object internal-net object-group DMZ-SERVERS object-group WEB-SERVICES
-access-list inside_access_in extended remark Allow MGMT to servers
-access-list inside_access_in extended permit tcp 10.1.1.0 255.255.255.0 object-group DMZ-SERVERS object-group MGMT-SERVICES
+access-list inside_access_in extended remark Allow MGMT to servers (business hours only)
+access-list inside_access_in extended permit tcp 10.1.1.0 255.255.255.0 object-group DMZ-SERVERS object-group MGMT-SERVICES time-range BUSINESS-HOURS
 access-list inside_access_in extended remark Deny all other internal
 access-list inside_access_in extended deny ip any any log
 !

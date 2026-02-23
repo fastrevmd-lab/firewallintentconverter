@@ -20,6 +20,8 @@ export default function ObjectEditor({ intermediateConfig, onConfigUpdate, viewM
   const groups = intermediateConfig?.address_groups || [];
   const services = intermediateConfig?.service_objects || [];
   const secProfiles = intermediateConfig?.security_profile_objects || [];
+  const schedules = intermediateConfig?.schedules || [];
+  const policies = intermediateConfig?.security_policies || [];
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -49,6 +51,12 @@ export default function ObjectEditor({ intermediateConfig, onConfigUpdate, viewM
         >
           {isSrx ? 'UTM / IDP Policies' : 'Security Profiles'} ({secProfiles.length})
         </button>
+        <button
+          className={`sub-tab-btn ${subTab === 'schedules' ? 'active' : ''}`}
+          onClick={() => setSubTab('schedules')}
+        >
+          {isSrx ? 'Schedulers' : 'Schedules'} ({schedules.length})
+        </button>
       </div>
 
       {/* Content */}
@@ -75,6 +83,14 @@ export default function ObjectEditor({ intermediateConfig, onConfigUpdate, viewM
           <SecurityProfileTable
             items={secProfiles}
             onUpdate={(items) => onConfigUpdate('security_profile_objects', items)}
+          />
+        )}
+        {subTab === 'schedules' && (
+          <ScheduleTable
+            items={schedules}
+            policies={policies}
+            onUpdate={(items) => onConfigUpdate('schedules', items)}
+            isSrx={isSrx}
           />
         )}
       </div>
@@ -460,6 +476,148 @@ function SecurityProfileTable({ items, onUpdate }) {
       </table>
       <div style={{ padding: '8px 12px' }}>
         <button className="btn btn-secondary btn-sm" onClick={handleAdd}>+ Add Profile</button>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Schedules Table
+// ---------------------------------------------------------------------------
+
+const DAY_OPTIONS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+function ScheduleTable({ items, policies, onUpdate, isSrx }) {
+  const handleChange = (index, field, value) => {
+    const updated = items.map((item, i) =>
+      i === index ? { ...item, [field]: value } : item
+    );
+    onUpdate(updated);
+  };
+
+  const handleAdd = () => {
+    onUpdate([...items, {
+      name: `schedule-${items.length + 1}`,
+      type: 'recurring',
+      days: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'],
+      start: '08:00',
+      end: '17:00',
+    }]);
+  };
+
+  const handleDelete = (index) => {
+    onUpdate(items.filter((_, i) => i !== index));
+  };
+
+  // Build map of schedule name → attached rule names
+  const attachedRules = {};
+  for (const p of policies) {
+    if (p.schedule) {
+      if (!attachedRules[p.schedule]) attachedRules[p.schedule] = [];
+      attachedRules[p.schedule].push(p.name);
+    }
+  }
+
+  return (
+    <div>
+      <table className="editor-table">
+        <thead>
+          <tr>
+            <th style={{ width: 160 }}>Name</th>
+            <th style={{ width: 90 }}>Type</th>
+            <th style={{ width: 180 }}>{isSrx ? 'Days' : 'Days / Date'}</th>
+            <th style={{ width: 100 }}>Start</th>
+            <th style={{ width: 100 }}>End</th>
+            <th>Attached Rules</th>
+            <th style={{ width: 36 }}></th>
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((item, i) => (
+            <tr key={i}>
+              <td>
+                <input
+                  className="cell-input"
+                  value={item.name}
+                  onChange={(e) => handleChange(i, 'name', e.target.value)}
+                />
+              </td>
+              <td>
+                <select
+                  className="cell-select"
+                  value={item.type}
+                  onChange={(e) => handleChange(i, 'type', e.target.value)}
+                >
+                  <option value="recurring">Recurring</option>
+                  <option value="onetime">One-time</option>
+                </select>
+              </td>
+              <td>
+                {item.type === 'recurring' ? (
+                  <div style={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+                    {DAY_OPTIONS.map(d => (
+                      <label key={d} style={{ fontSize: 10, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <input
+                          type="checkbox"
+                          checked={(item.days || []).includes(d)}
+                          onChange={(e) => {
+                            const days = item.days || [];
+                            const next = e.target.checked
+                              ? [...days, d]
+                              : days.filter(x => x !== d);
+                            handleChange(i, 'days', next);
+                          }}
+                          style={{ width: 12, height: 12 }}
+                        />
+                        {d}
+                      </label>
+                    ))}
+                  </div>
+                ) : (
+                  <input
+                    className="cell-input"
+                    value={(item.days || []).join(', ') || ''}
+                    onChange={(e) => handleChange(i, 'days', [])}
+                    placeholder="N/A"
+                    disabled
+                    style={{ opacity: 0.5 }}
+                  />
+                )}
+              </td>
+              <td>
+                <input
+                  className="cell-input"
+                  value={item.start || ''}
+                  onChange={(e) => handleChange(i, 'start', e.target.value)}
+                  placeholder={item.type === 'recurring' ? 'HH:MM' : 'YYYY/MM/DD HH:MM'}
+                />
+              </td>
+              <td>
+                <input
+                  className="cell-input"
+                  value={item.end || ''}
+                  onChange={(e) => handleChange(i, 'end', e.target.value)}
+                  placeholder={item.type === 'recurring' ? 'HH:MM' : 'YYYY/MM/DD HH:MM'}
+                />
+              </td>
+              <td>
+                {(attachedRules[item.name] || []).length > 0 ? (
+                  (attachedRules[item.name]).map((r, j) => (
+                    <span key={j} className="cell-chip" style={{ fontSize: 10 }}>{r}</span>
+                  ))
+                ) : (
+                  <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>none</span>
+                )}
+              </td>
+              <td>
+                <button className="btn-icon btn-icon-danger" onClick={() => handleDelete(i)} title="Delete">x</button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div style={{ padding: '8px 12px' }}>
+        <button className="btn btn-secondary btn-sm" onClick={handleAdd}>+ Add Schedule</button>
       </div>
     </div>
   );

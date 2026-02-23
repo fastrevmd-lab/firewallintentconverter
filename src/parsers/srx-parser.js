@@ -917,10 +917,11 @@ function parseSchedulers(setCommands, warnings) {
     }
   }
 
+  const dayShortMap = { monday: 'Mon', tuesday: 'Tue', wednesday: 'Wed', thursday: 'Thu', friday: 'Fri', saturday: 'Sat', sunday: 'Sun', daily: 'Daily', weekdays: 'Weekdays', weekend: 'Weekend' };
   return Object.entries(schedMap).map(([name, s]) => ({
     name,
     type: s.type === 'unknown' ? 'recurring' : s.type,
-    days: [...s.days],
+    days: [...s.days].map(d => dayShortMap[d.toLowerCase()] || d),
     start: s.start,
     end: s.end,
   }));

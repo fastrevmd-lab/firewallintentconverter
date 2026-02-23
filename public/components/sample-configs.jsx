@@ -24,6 +24,35 @@ export const SAMPLE_CONFIGS = {
 <config version="10.1.0" urldb="paloaltonetworks">
   <devices>
     <entry name="localhost.localdomain">
+      <deviceconfig>
+        <high-availability>
+          <enabled>yes</enabled>
+          <group>
+            <group-id>1</group-id>
+            <mode><active-passive><passive-link-state>auto</passive-link-state></active-passive></mode>
+            <peer-ip>10.0.1.2</peer-ip>
+            <election-option>
+              <device-priority>100</device-priority>
+              <preemptive>yes</preemptive>
+            </election-option>
+          </group>
+          <interface>
+            <ha1><ip-address>10.10.0.1/24</ip-address><port>dedicated-ha1</port></ha1>
+            <ha2><ip-address>10.10.1.1/24</ip-address><port>dedicated-ha2</port></ha2>
+          </interface>
+        </high-availability>
+        <system>
+          <syslog>
+            <server-profile>
+              <entry name="syslog-profile">
+                <server>
+                  <entry name="syslog-srv-1"><server>10.0.0.100</server><port>514</port><transport>UDP</transport><facility>LOG_USER</facility></entry>
+                </server>
+              </entry>
+            </server-profile>
+          </syslog>
+        </system>
+      </deviceconfig>
       <vsys>
         <entry name="vsys1">
           <zone>
@@ -40,6 +69,7 @@ export const SAMPLE_CONFIGS = {
                   <member>ethernet1/2</member>
                 </layer3>
               </network>
+              <zone-protection-profile>zpp-untrust</zone-protection-profile>
             </entry>
           </zone>
           <address>
@@ -257,9 +287,19 @@ export const SAMPLE_CONFIGS = {
           </rulebase>
         </entry>
       </vsys>
-    </entry>
-    <network>
-      <virtual-router>
+      <network>
+        <profiles>
+          <zone-protection-profile>
+            <entry name="zpp-untrust">
+              <flood>
+                <tcp-syn><enable>yes</enable><red><alarm-rate>10000</alarm-rate><activate-rate>1000</activate-rate></red></tcp-syn>
+                <icmp><enable>yes</enable><red><alarm-rate>5000</alarm-rate></red></icmp>
+                <udp><enable>yes</enable><red><alarm-rate>5000</alarm-rate></red></udp>
+              </flood>
+            </entry>
+          </zone-protection-profile>
+        </profiles>
+        <virtual-router>
         <entry name="default">
           <interface>
             <member>ethernet1/1</member>
@@ -288,8 +328,80 @@ export const SAMPLE_CONFIGS = {
             </ip>
           </routing-table>
         </entry>
-      </virtual-router>
-    </network>
+        </virtual-router>
+        <ike>
+          <crypto-profile>
+            <ike-crypto-profiles>
+              <entry name="ike-crypto-aes256">
+                <encryption><member>aes-256-cbc</member></encryption>
+                <hash><member>sha256</member></hash>
+                <dh-group><member>group14</member></dh-group>
+                <lifetime><hours>8</hours></lifetime>
+              </entry>
+            </ike-crypto-profiles>
+            <ipsec-crypto-profiles>
+              <entry name="ipsec-crypto-aes256">
+                <esp>
+                  <encryption><member>aes-256-cbc</member></encryption>
+                  <authentication><member>sha256</member></authentication>
+                </esp>
+                <dh-group>group14</dh-group>
+                <lifetime><hours>1</hours></lifetime>
+              </entry>
+            </ipsec-crypto-profiles>
+          </crypto-profile>
+          <gateway>
+            <entry name="branch-gw">
+              <authentication><pre-shared-key><key>SANITIZED</key></pre-shared-key></authentication>
+              <peer-address><ip>203.0.113.50</ip></peer-address>
+              <local-address><interface>ethernet1/2</interface></local-address>
+            </entry>
+          </gateway>
+        </ike>
+        <tunnel>
+          <ipsec>
+            <entry name="branch-tunnel">
+              <auto-key>
+                <ike-gateway><entry name="branch-gw"/></ike-gateway>
+                <ipsec-crypto-profile>ipsec-crypto-aes256</ipsec-crypto-profile>
+                <proxy-id>
+                  <entry name="proxy-branch">
+                    <local>10.1.0.0/16</local>
+                    <remote>192.168.0.0/16</remote>
+                  </entry>
+                </proxy-id>
+              </auto-key>
+              <tunnel-interface>tunnel.1</tunnel-interface>
+            </entry>
+          </ipsec>
+        </tunnel>
+        <dhcp>
+          <interface>
+            <entry name="ethernet1/1">
+              <server>
+                <ip-pool><member>10.1.1.100-10.1.1.200</member></ip-pool>
+                <option>
+                  <gateway>10.1.1.1</gateway>
+                  <dns-server><primary>8.8.8.8</primary><secondary>8.8.4.4</secondary></dns-server>
+                  <lease><timeout>43200</timeout></lease>
+                </option>
+              </server>
+            </entry>
+          </interface>
+        </dhcp>
+        <qos>
+          <profile>
+            <entry name="qos-egress">
+              <aggregate-bandwidth><egress-max>100000</egress-max></aggregate-bandwidth>
+              <class>
+                <entry name="class-realtime"><priority>real-time</priority><guaranteed-bandwidth>40000</guaranteed-bandwidth><maximum-bandwidth>60000</maximum-bandwidth></entry>
+                <entry name="class-business"><priority>high</priority><guaranteed-bandwidth>30000</guaranteed-bandwidth><maximum-bandwidth>50000</maximum-bandwidth></entry>
+              </class>
+            </entry>
+          </profile>
+        </qos>
+      </network>
+    </entry>
   </devices>
 </config>`,
   },
@@ -622,10 +734,9 @@ export const SAMPLE_CONFIGS = {
           </schedule>
         </entry>
       </vsys>
-    </entry>
-    <network>
-      <virtual-router>
-        <entry name="vr-branch">
+      <network>
+        <virtual-router>
+          <entry name="vr-branch">
           <interface>
             <member>ethernet1/1</member>
             <member>ethernet1/2</member>
@@ -654,8 +765,9 @@ export const SAMPLE_CONFIGS = {
             </ip>
           </routing-table>
         </entry>
-      </virtual-router>
-    </network>
+        </virtual-router>
+      </network>
+    </entry>
   </devices>
 </config>`,
   },
@@ -1040,15 +1152,14 @@ export const SAMPLE_CONFIGS = {
           </rulebase>
         </entry>
       </vsys>
-    </entry>
-    <network>
-      <virtual-router>
-        <entry name="default">
-          <interface>
-            <member>ethernet1/1</member>
-            <member>ethernet1/2</member>
-            <member>ethernet1/3</member>
-            <member>ethernet1/4</member>
+      <network>
+        <virtual-router>
+          <entry name="default">
+            <interface>
+              <member>ethernet1/1</member>
+              <member>ethernet1/2</member>
+              <member>ethernet1/3</member>
+              <member>ethernet1/4</member>
           </interface>
           <routing-table>
             <ip>
@@ -1098,8 +1209,9 @@ export const SAMPLE_CONFIGS = {
             </ip>
           </routing-table>
         </entry>
-      </virtual-router>
-    </network>
+        </virtual-router>
+      </network>
+    </entry>
   </devices>
 </config>`,
   },
@@ -1292,13 +1404,12 @@ export const SAMPLE_CONFIGS = {
           </rulebase>
         </entry>
       </vsys>
-    </entry>
-    <network>
-      <virtual-router>
-        <entry name="default">
-          <interface>
-            <member>ethernet1/1</member>
-            <member>ethernet1/2</member>
+      <network>
+        <virtual-router>
+          <entry name="default">
+            <interface>
+              <member>ethernet1/1</member>
+              <member>ethernet1/2</member>
             <member>ethernet1/5</member>
           </interface>
           <routing-table>
@@ -1323,8 +1434,9 @@ export const SAMPLE_CONFIGS = {
             </ip>
           </routing-table>
         </entry>
-      </virtual-router>
-    </network>
+        </virtual-router>
+      </network>
+    </entry>
   </devices>
 </config>`,
   },
@@ -2343,15 +2455,14 @@ export const SAMPLE_CONFIGS = {
           </external-list>
         </entry>
       </vsys>
-    </entry>
-    <network>
-      <virtual-router>
-        <entry name="default">
-          <interface>
-            <member>ethernet1/1</member>
-            <member>ethernet1/2</member>
-            <member>ethernet1/3</member>
-            <member>ethernet1/4</member>
+      <network>
+        <virtual-router>
+          <entry name="default">
+            <interface>
+              <member>ethernet1/1</member>
+              <member>ethernet1/2</member>
+              <member>ethernet1/3</member>
+              <member>ethernet1/4</member>
             <member>ethernet1/5</member>
           </interface>
           <routing-table>
@@ -2385,8 +2496,9 @@ export const SAMPLE_CONFIGS = {
             </ip>
           </routing-table>
         </entry>
-      </virtual-router>
-    </network>
+        </virtual-router>
+      </network>
+    </entry>
   </devices>
 </config>`,
   },
@@ -2401,10 +2513,50 @@ export const SAMPLE_CONFIGS = {
     xml: `set version 21.4R3-S5.4
 set system host-name srx550-branch01
 
+set chassis cluster cluster-id 1
+set chassis cluster redundancy-group 0 node 0 priority 200
+set chassis cluster redundancy-group 0 node 1 priority 100
+set chassis cluster redundancy-group 1 node 0 priority 200
+set chassis cluster redundancy-group 1 node 1 priority 100
+set interfaces fab0 fabric-options member-interfaces ge-0/0/5
+set interfaces fab1 fabric-options member-interfaces ge-5/0/5
+
 set security zones security-zone trust interfaces ge-0/0/0.0
 set security zones security-zone trust interfaces ge-0/0/1.0
 set security zones security-zone untrust interfaces ge-0/0/2.0
+set security zones security-zone untrust screen untrust-screen
 set security zones security-zone dmz interfaces ge-0/0/3.0
+
+set security screen ids-option untrust-screen icmp ping-death
+set security screen ids-option untrust-screen tcp syn-flood alarm-threshold 1024
+set security screen ids-option untrust-screen tcp syn-flood attack-threshold 200
+set security screen ids-option untrust-screen tcp syn-flood timeout 20
+set security screen ids-option untrust-screen tcp land
+set security screen ids-option untrust-screen ip spoofing
+set security screen ids-option untrust-screen ip source-route-option
+set security screen ids-option untrust-screen limit-session source-ip-based 100
+
+set security ike proposal ike-branch-prop authentication-method pre-shared-keys
+set security ike proposal ike-branch-prop dh-group group14
+set security ike proposal ike-branch-prop encryption-algorithm aes-256-cbc
+set security ike proposal ike-branch-prop authentication-algorithm sha-256
+set security ike proposal ike-branch-prop lifetime-seconds 28800
+set security ike policy ike-branch-pol proposals ike-branch-prop
+set security ike policy ike-branch-pol pre-shared-key ascii-text "SANITIZED"
+set security ike gateway gw-branch address 203.0.113.50
+set security ike gateway gw-branch ike-policy ike-branch-pol
+set security ike gateway gw-branch external-interface ge-0/0/2.0
+set security ipsec proposal ipsec-branch-prop protocol esp
+set security ipsec proposal ipsec-branch-prop encryption-algorithm aes-256-cbc
+set security ipsec proposal ipsec-branch-prop authentication-algorithm hmac-sha-256-128
+set security ipsec proposal ipsec-branch-prop lifetime-seconds 3600
+set security ipsec policy ipsec-branch-pol perfect-forward-secrecy keys group14
+set security ipsec policy ipsec-branch-pol proposals ipsec-branch-prop
+set security ipsec vpn vpn-branch ike gateway gw-branch
+set security ipsec vpn vpn-branch ike ipsec-policy ipsec-branch-pol
+set security ipsec vpn vpn-branch bind-interface st0.0
+set security ipsec vpn vpn-branch traffic-selector ts1 local-ip 192.168.0.0/16
+set security ipsec vpn vpn-branch traffic-selector ts1 remote-ip 10.0.0.0/8
 
 set security address-book global address web-server-1 10.10.10.10/32
 set security address-book global address web-server-2 10.10.10.11/32
@@ -2480,7 +2632,30 @@ set routing-options static route 172.16.0.0/12 discard
 
 set routing-instances MGMT-VRF instance-type virtual-router
 set routing-instances MGMT-VRF interface ge-0/0/4.0
-set routing-instances MGMT-VRF routing-options static route 0.0.0.0/0 next-hop 10.99.0.1`,
+set routing-instances MGMT-VRF routing-options static route 0.0.0.0/0 next-hop 10.99.0.1
+
+set system syslog host 10.0.0.100 any any
+set system syslog host 10.0.0.101 any any
+set system syslog host 10.0.0.101 transport protocol tcp
+set system syslog host 10.0.0.101 port 1514
+set system syslog file messages any notice
+set system syslog file messages authorization info
+
+set forwarding-options helpers bootp interface ge-0/0/1.0 server 10.2.2.1
+set forwarding-options helpers bootp interface ge-0/0/1.0 server 10.2.2.2
+set access address-assignment pool lan-pool family inet network 10.10.10.0/24
+set access address-assignment pool lan-pool family inet range r1 low 10.10.10.100
+set access address-assignment pool lan-pool family inet range r1 high 10.10.10.200
+set access address-assignment pool lan-pool family inet dhcp-attributes router 10.10.10.1
+set access address-assignment pool lan-pool family inet dhcp-attributes name-server 8.8.8.8
+set system services dhcp-local-server group lan-pool interface ge-0/0/1.0
+
+set class-of-service schedulers voice-sched transmit-rate 1m
+set class-of-service schedulers voice-sched priority strict-high
+set class-of-service schedulers data-sched transmit-rate 10m
+set class-of-service schedulers data-sched buffer-size percent 30
+set class-of-service interfaces ge-0/0/0 scheduler-map branch-sched-map
+set class-of-service interfaces ge-0/0/0 shaping-rate 100m`,
   },
 
   // =========================================================================
@@ -2493,6 +2668,29 @@ set routing-instances MGMT-VRF routing-options static route 0.0.0.0/0 next-hop 1
     xml: `config system global
     set hostname "FG-60F-Branch01"
     set timezone "US/Pacific"
+end
+
+config system ha
+    set mode a-p
+    set group-id 10
+    set group-name "FG-Branch-HA"
+    set priority 200
+    set hbdev "port5" 50
+    set override enable
+    set monitor "wan1" "wan2"
+end
+
+config log syslogd setting
+    set server "10.0.0.100"
+    set port 514
+    set facility local7
+    set mode udp
+end
+
+config log syslogd2 setting
+    set server "10.0.0.101"
+    set port 1514
+    set mode reliable
 end
 
 config system interface
@@ -2565,6 +2763,85 @@ config router static
         set dst 192.168.100.0 255.255.255.0
         set blackhole enable
         set comment "Null route for bogon"
+    next
+end
+
+config system dhcp server
+    edit 1
+        set interface "internal1"
+        set default-gateway 10.1.1.1
+        set netmask 255.255.255.0
+        set dns-server1 8.8.8.8
+        set dns-server2 8.8.4.4
+        set lease-time 43200
+        config ip-range
+            edit 1
+                set start-ip 10.1.1.100
+                set end-ip 10.1.1.200
+            next
+        end
+    next
+end
+
+config firewall shaping-profile
+    edit "branch-qos"
+        config shaping-entries
+            edit 1
+                set class-id 2
+                set priority high
+                set guaranteed-bandwidth-percentage 40
+                set maximum-bandwidth-percentage 80
+            next
+            edit 2
+                set class-id 3
+                set priority medium
+                set guaranteed-bandwidth-percentage 20
+                set maximum-bandwidth-percentage 60
+            next
+        end
+    next
+end
+
+config firewall DoS-policy
+    edit 1
+        set interface "wan1"
+        set srcaddr "all"
+        set dstaddr "all"
+        set service "ALL"
+        config anomaly
+            edit "tcp_syn_flood"
+                set status enable
+                set threshold 2000
+            next
+            edit "udp_flood"
+                set status enable
+                set threshold 2000
+            next
+            edit "icmp_flood"
+                set status enable
+                set threshold 100
+            next
+        end
+    next
+end
+
+config vpn ipsec phase1-interface
+    edit "Branch-VPN"
+        set interface "wan1"
+        set ike-version 2
+        set proposal aes256-sha256
+        set remote-gw 203.0.113.50
+        set psksecret SANITIZED
+    next
+end
+config vpn ipsec phase2-interface
+    edit "Branch-VPN-P2"
+        set phase1name "Branch-VPN"
+        set proposal aes256-sha256
+        set pfs enable
+        set dhgrp 14
+        set src-subnet 10.1.0.0 255.255.0.0
+        set dst-subnet 192.168.0.0 255.255.0.0
     next
 end
 
@@ -2815,6 +3092,13 @@ end`,
 !
 hostname FW-EDGE-01
 !
+failover
+failover lan unit primary
+failover lan interface FAILOVER GigabitEthernet0/6
+failover link STATEFUL GigabitEthernet0/7
+failover interface ip FAILOVER 10.0.99.1 255.255.255.252 standby 10.0.99.2
+failover interface ip STATEFUL 10.0.99.5 255.255.255.252 standby 10.0.99.6
+!
 interface GigabitEthernet1/1
  nameif inside
  security-level 100
@@ -2891,9 +3175,50 @@ access-list inside_access_in extended deny ip any any log
 access-group outside_access_in in interface outside
 access-group inside_access_in in interface inside
 !
+crypto ikev2 policy 10
+ encryption aes-256
+ integrity sha256
+ group 14
+ lifetime 28800
+!
+crypto ipsec ikev2 ipsec-proposal BRANCH-PROPOSAL
+ protocol esp encryption aes-256
+ protocol esp integrity sha-256
+!
+crypto map OUTSIDE_MAP 10 set peer 203.0.113.50
+crypto map OUTSIDE_MAP 10 set ikev2 ipsec-proposal BRANCH-PROPOSAL
+crypto map OUTSIDE_MAP 10 set pfs group14
+crypto map OUTSIDE_MAP interface outside
+!
+tunnel-group 203.0.113.50 type ipsec-l2l
+!
 route outside 0.0.0.0 0.0.0.0 203.0.113.254 1
 route inside 10.0.0.0 255.0.0.0 10.1.1.254 10
 route dmz 172.16.10.0 255.255.255.0 172.16.10.254 1
+!
+threat-detection basic-threat
+threat-detection rate syn-attack rate-interval 600 average-rate 100 burst-rate 200
+threat-detection rate dos-drop rate-interval 600 average-rate 50 burst-rate 100
+threat-detection statistics access-list
+!
+logging host inside 10.0.0.100
+logging host inside 10.0.0.101 6/1514
+logging trap informational
+logging facility 20
+!
+dhcpd address 10.1.1.100-10.1.1.200 inside
+dhcpd dns 8.8.8.8 8.8.4.4
+dhcpd enable inside
+!
+dhcprelay server 10.2.2.1 outside
+dhcprelay server 10.2.2.2 outside
+!
+policy-map global_policy
+ class inspection_default
+  police output 1000000 125000
+  priority
+!
+service-policy global_policy global
 !
 object network internal-net
  nat (inside,outside) dynamic interface

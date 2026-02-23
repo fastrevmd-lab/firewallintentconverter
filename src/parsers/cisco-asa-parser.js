@@ -50,6 +50,8 @@ export function parseCiscoAsaConfig(configText) {
   const timeRanges = parseTimeRanges(blocks);
   const staticRoutes = parseCiscoStaticRoutes(lines, warnings);
   const routingContexts = detectCiscoContexts(lines, warnings);
+  const haConfig = parseCiscoHaConfig(lines, warnings);
+  const screenConfig = parseCiscoScreenConfig(lines, warnings);
 
   // Build zones from interfaces (ASA uses nameif + security-level as zones)
   const zones = buildZones(interfaces);
@@ -68,6 +70,14 @@ export function parseCiscoAsaConfig(configText) {
   // Detect version
   const version = extractVersion(lines);
 
+  // Parse VPN/IPsec tunnel configuration
+  const vpnTunnels = parseCiscoVpnConfig(lines, blocks, warnings);
+
+  // Parse syslog, DHCP, QoS
+  const syslogConfig = parseCiscoSyslogConfig(lines, warnings);
+  const dhcpConfig = parseCiscoDhcpConfig(lines, blocks, warnings);
+  const qosConfig = parseCiscoQosConfig(lines, blocks, warnings);
+
   const intermediateConfig = {
     zones,
     address_objects: addressObjects,
@@ -81,7 +91,12 @@ export function parseCiscoAsaConfig(configText) {
     schedules: timeRanges,
     security_profile_objects: [],
     external_lists: [],
-    vpn_tunnels: [],
+    vpn_tunnels: vpnTunnels,
+    ha_config: haConfig,
+    screen_config: screenConfig,
+    syslog_config: syslogConfig,
+    dhcp_config: dhcpConfig,
+    qos_config: qosConfig,
     routing_contexts: routingContexts,
     static_routes: staticRoutes,
     target_context: null,
@@ -98,8 +113,13 @@ export function parseCiscoAsaConfig(configText) {
       nat_rule_count: natRules.length,
       object_count: addressObjects.length + serviceObjects.length,
       zone_count: zones.length,
+      vpn_tunnel_count: vpnTunnels.length,
+      syslog_server_count: syslogConfig.length,
+      dhcp_config_count: dhcpConfig.length,
+      qos_profile_count: qosConfig.length,
       routing_context_count: routingContexts.length,
       static_route_count: staticRoutes.length,
+      ha_enabled: !!(haConfig && haConfig.enabled),
       multi_vsys: routingContexts.length > 1,
     },
   };
@@ -114,6 +134,113 @@ export function parseCiscoAsaConfig(configText) {
 
 // ---------------------------------------------------------------------------
 // Block Builder
+// ---------------------------------------------------------------------------
+// Screen / DDoS (Threat Detection) Parser
+// ---------------------------------------------------------------------------
+
+/**
+ * Parses Cisco ASA threat-detection commands into the screen_config schema.
+ * threat-detection basic-threat
+ * threat-detection rate dos-drop rate-interval 600 average-rate 100 burst-rate 400
+ * threat-detection rate syn-attack rate-interval 600 average-rate 100 burst-rate 200
+ */
+function parseCiscoScreenConfig(lines, warnings) {
+  const screenConfigs = [];
+
+  let hasBasicThreat = false;
+  const rates = {};
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+
+    if (trimmed === 'threat-detection basic-threat') {
+      hasBasicThreat = true;
+      continue;
+    }
+
+    // threat-detection statistics <type>
+    // We note these but they don't map directly to screen_config fields
+
+    // threat-detection rate <threat-name> rate-interval <sec> average-rate <n> burst-rate <n>
+    const rateMatch = trimmed.match(
+      /^threat-detection\s+rate\s+(\S+)\s+rate-interval\s+(\d+)\s+average-rate\s+(\d+)\s+burst-rate\s+(\d+)/i
+    );
+    if (rateMatch) {
+      rates[rateMatch[1].toLowerCase()] = {
+        rateInterval: parseInt(rateMatch[2]),
+        averageRate: parseInt(rateMatch[3]),
+        burstRate: parseInt(rateMatch[4]),
+      };
+      continue;
+    }
+  }
+
+  if (!hasBasicThreat && Object.keys(rates).length === 0) {
+    return screenConfigs;
+  }
+
+  const screen = {
+    name: 'threat-detection',
+    zone: '',
+    icmp: {
+      flood_threshold: null,
+      ping_death: false,
+      fragment: false,
+    },
+    tcp: {
+      syn_flood_threshold: null,
+      syn_flood_timeout: null,
+      land_attack: false,
+      winnuke: false,
+      tcp_no_flag: false,
+    },
+    udp: {
+      flood_threshold: null,
+    },
+    ip: {
+      spoofing: false,
+      source_route: false,
+      tear_drop: false,
+      record_route: false,
+      timestamp: false,
+    },
+    limit_session: {
+      source_based: null,
+      destination_based: null,
+    },
+    description: hasBasicThreat ? 'Cisco ASA basic threat detection enabled' : 'Cisco ASA threat detection rates',
+  };
+
+  // Map known rate types to screen fields
+  if (rates['syn-attack']) {
+    screen.tcp.syn_flood_threshold = rates['syn-attack'].averageRate;
+    screen.tcp.syn_flood_timeout = rates['syn-attack'].rateInterval;
+  }
+  if (rates['dos-drop']) {
+    // dos-drop is a general DDoS rate — map to UDP flood as closest match
+    screen.udp.flood_threshold = rates['dos-drop'].averageRate;
+  }
+  if (rates['icmp-drop']) {
+    screen.icmp.flood_threshold = rates['icmp-drop'].averageRate;
+  }
+  if (rates['bad-packet-drop']) {
+    screen.ip.tear_drop = true;
+  }
+  if (rates['fw-drop']) {
+    // General firewall drop rate — note as session limit
+    screen.limit_session.source_based = rates['fw-drop'].averageRate;
+  }
+
+  screenConfigs.push(screen);
+
+  warnings.push(createWarning('info', 'screen-config',
+    `Parsed threat-detection config with ${Object.keys(rates).length} rate definition(s)`,
+    'Review screen/DDoS settings in the generated config'));
+
+  return screenConfigs;
+}
+
+
 // ---------------------------------------------------------------------------
 
 /**
@@ -1191,8 +1318,267 @@ function detectCiscoContexts(lines, warnings) {
 }
 
 // ---------------------------------------------------------------------------
+// HA (Failover) Configuration
+// ---------------------------------------------------------------------------
+
+function parseCiscoHaConfig(lines, warnings) {
+  let failoverEnabled = false;
+  let unit = 'primary';
+  let lanInterface = '';
+  let lanPhysical = '';
+  let stateInterface = '';
+  let statePhysical = '';
+  const haInterfaces = [];
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+
+    if (trimmed === 'failover') {
+      failoverEnabled = true;
+      continue;
+    }
+    if (trimmed === 'no failover') {
+      failoverEnabled = false;
+      continue;
+    }
+
+    const unitMatch = trimmed.match(/^failover\s+lan\s+unit\s+(primary|secondary)/i);
+    if (unitMatch) {
+      unit = unitMatch[1].toLowerCase();
+      continue;
+    }
+
+    const lanIfMatch = trimmed.match(/^failover\s+lan\s+interface\s+(\S+)\s+(\S+)/i);
+    if (lanIfMatch) {
+      lanInterface = lanIfMatch[1];
+      lanPhysical = lanIfMatch[2];
+      continue;
+    }
+
+    const stateIfMatch = trimmed.match(/^failover\s+link\s+(\S+)\s+(\S+)/i);
+    if (stateIfMatch) {
+      stateInterface = stateIfMatch[1];
+      statePhysical = stateIfMatch[2];
+      continue;
+    }
+
+    const ipMatch = trimmed.match(/^failover\s+interface\s+ip\s+(\S+)\s+(\d+\.\d+\.\d+\.\d+)\s+(\d+\.\d+\.\d+\.\d+)\s+standby\s+(\d+\.\d+\.\d+\.\d+)/i);
+    if (ipMatch) {
+      haInterfaces.push({
+        name: ipMatch[1],
+        ip: ipMatch[2],
+        netmask: ipMatch[3],
+        interface: ipMatch[1] === lanInterface ? lanPhysical : (ipMatch[1] === stateInterface ? statePhysical : ''),
+      });
+    }
+  }
+
+  if (!failoverEnabled) return null;
+
+  return {
+    enabled: true,
+    mode: 'active-passive',
+    group_id: 0,
+    priority: unit === 'primary' ? 100 : 200,
+    preempt: false,
+    peer_ip: '',
+    ha_interfaces: haInterfaces,
+    monitoring: { link_groups: [], path_groups: [] },
+    description: `Cisco ASA failover (${unit})`,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Version Extraction
 // ---------------------------------------------------------------------------
+
+
+// ---------------------------------------------------------------------------
+// VPN / IPsec Tunnel Parser
+// ---------------------------------------------------------------------------
+
+/**
+ * Parses Cisco ASA VPN/IPsec configuration.
+ */
+function parseCiscoVpnConfig(lines, blocks, warnings) {
+  const vpnTunnels = [];
+
+  // ---- Parse IKE policies ----
+  const ikev2Policies = {};
+  for (const block of blocks) {
+    if (!block.command.startsWith('crypto ikev2 policy ') &&
+        !block.command.startsWith('crypto isakmp policy ')) continue;
+    const isV2 = block.command.startsWith('crypto ikev2');
+    const policyId = isV2 ? block.command.slice(20).trim() : block.command.slice(21).trim();
+    const policy = {
+      name: policyId, encryption: 'aes-256', integrity: 'sha256',
+      group: '14', prf: 'sha256', lifetime: 28800,
+      version: isV2 ? 'v2' : 'v1',
+    };
+    for (const child of block.children) {
+      const trimmed = child.trim();
+      if (trimmed.startsWith('encryption ')) policy.encryption = trimmed.slice(11).trim();
+      else if (trimmed.startsWith('integrity ')) policy.integrity = trimmed.slice(10).trim();
+      else if (trimmed.startsWith('hash ')) policy.integrity = trimmed.slice(5).trim();
+      else if (trimmed.startsWith('group ')) policy.group = trimmed.slice(6).trim();
+      else if (trimmed.startsWith('prf ')) policy.prf = trimmed.slice(4).trim();
+      else if (trimmed.startsWith('lifetime seconds ')) policy.lifetime = parseInt(trimmed.slice(17).trim(), 10) || 28800;
+      else if (trimmed.startsWith('lifetime ')) policy.lifetime = parseInt(trimmed.slice(9).trim(), 10) || 28800;
+    }
+    ikev2Policies[policyId] = policy;
+  }
+
+  // ---- Parse IPsec proposals ----
+  const ipsecProposals = {};
+  for (const block of blocks) {
+    if (!block.command.startsWith('crypto ipsec ikev2 ipsec-proposal ') &&
+        !block.command.startsWith('crypto ipsec transform-set ')) continue;
+    let proposalName;
+    if (block.command.startsWith('crypto ipsec ikev2 ipsec-proposal ')) {
+      proposalName = block.command.slice(34).trim();
+    } else {
+      const cmdParts = block.command.split(/\s+/);
+      proposalName = cmdParts[3] || '';
+    }
+    const proposal = { name: proposalName, encryption: 'aes-256', integrity: 'sha-256' };
+    for (const child of block.children) {
+      const trimmed = child.trim();
+      if (trimmed.startsWith('protocol esp encryption ')) proposal.encryption = trimmed.slice(24).trim();
+      else if (trimmed.startsWith('protocol esp integrity ')) proposal.integrity = trimmed.slice(23).trim();
+    }
+    ipsecProposals[proposalName] = proposal;
+  }
+
+
+  // ---- Parse crypto maps ----
+  const cryptoMaps = {};
+  const cryptoMapInterfaces = {};
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith('crypto map ')) continue;
+    const parts = trimmed.split(/\s+/);
+    if (parts.length < 4) continue;
+    const mapName = parts[2];
+    if (parts[3] === 'interface' && parts.length >= 5) {
+      cryptoMapInterfaces[mapName] = parts[4];
+      continue;
+    }
+    const seqNum = parts[3];
+    if (!/^\d+$/.test(seqNum)) continue;
+    const key = mapName + ':' + seqNum;
+    if (!cryptoMaps[key]) {
+      cryptoMaps[key] = { mapName, seqNum, peer: '', proposal: '', acl: '', pfs: '' };
+    }
+    const rest = parts.slice(4).join(' ');
+    if (rest.startsWith('set peer ')) cryptoMaps[key].peer = rest.slice(9).trim();
+    else if (rest.startsWith('set ikev2 ipsec-proposal ') || rest.startsWith('set transform-set ')) {
+      cryptoMaps[key].proposal = parts[parts.length - 1];
+    }
+    else if (rest.startsWith('match address ')) cryptoMaps[key].acl = rest.slice(14).trim();
+    else if (rest.startsWith('set pfs ')) cryptoMaps[key].pfs = rest.slice(8).trim();
+  }
+
+  // ---- Parse tunnel-groups ----
+  const tunnelGroups = {};
+  for (const block of blocks) {
+    if (!block.command.startsWith('tunnel-group ')) continue;
+    const parts = block.command.split(/\s+/);
+    const tgName = parts[1] || '';
+    const tgType = parts.slice(2).join(' ');
+    if (!tunnelGroups[tgName]) tunnelGroups[tgName] = { type: '', ikeVersion: 'v2' };
+    if (tgType.includes('type ')) tunnelGroups[tgName].type = tgType.replace('type ', '');
+    for (const child of block.children) {
+      const trimmed = child.trim();
+      if (trimmed.includes('pre-shared-key')) {
+        warnings.push(createWarning(
+          'info', 'tunnel-group/' + tgName,
+          'Tunnel-group ' + tgName + ' pre-shared key sanitized',
+          'Pre-shared keys are never included in parsed output'
+        ));
+      }
+      if (trimmed.startsWith('ikev1')) tunnelGroups[tgName].ikeVersion = 'v1';
+      if (trimmed.startsWith('ikev2')) tunnelGroups[tgName].ikeVersion = 'v2';
+    }
+  }
+
+
+  // ---- Build VPN tunnels from crypto maps ----
+  const firstIkePolicy = Object.values(ikev2Policies)[0] || {
+    name: 'default', encryption: 'aes-256', integrity: 'sha256',
+    group: '14', lifetime: 28800, version: 'v2',
+  };
+  for (const [key, cm] of Object.entries(cryptoMaps)) {
+    if (!cm.peer) continue;
+    const tg = tunnelGroups[cm.peer] || { type: 'ipsec-l2l', ikeVersion: 'v2' };
+    const ipsecProp = ipsecProposals[cm.proposal] || {
+      name: cm.proposal || 'default', encryption: 'aes-256', integrity: 'sha-256',
+    };
+    const cmInterface = cryptoMapInterfaces[cm.mapName] || '';
+
+    vpnTunnels.push({
+      name: cm.mapName + '-' + cm.seqNum,
+      ike_gateway: {
+        name: cm.peer, address: cm.peer, local_address: cmInterface,
+        pre_shared_key: 'SANITIZED', ike_version: tg.ikeVersion, proposal: firstIkePolicy.name,
+      },
+      ike_proposal: {
+        name: firstIkePolicy.name, auth_method: 'pre-shared-keys',
+        dh_group: 'group' + firstIkePolicy.group,
+        encryption: normalizeCiscoEncryption(firstIkePolicy.encryption),
+        authentication: normalizeCiscoHash(firstIkePolicy.integrity),
+        lifetime: firstIkePolicy.lifetime,
+      },
+      ipsec_proposal: {
+        name: ipsecProp.name, protocol: 'esp',
+        encryption: normalizeCiscoEncryption(ipsecProp.encryption),
+        authentication: normalizeCiscoHash(ipsecProp.integrity),
+        lifetime: 3600,
+        pfs_group: cm.pfs ? normalizeCiscoPfs(cm.pfs) : 'group14',
+      },
+      proxy_id: cm.acl ? [{ local: '', remote: '', protocol: 'acl:' + cm.acl }] : [],
+      tunnel_interface: '',
+      description: 'Crypto map ' + cm.mapName + ' seq ' + cm.seqNum,
+      _cisco: { aclName: cm.acl, cryptoMap: cm.mapName, seqNum: cm.seqNum },
+    });
+  }
+
+  if (vpnTunnels.length > 0) {
+    warnings.push(createWarning(
+      'info', 'vpn',
+      'Parsed ' + vpnTunnels.length + ' VPN/IPsec tunnel(s)',
+      'VPN tunnel configuration detected and included in intermediate output'
+    ));
+  }
+
+  return vpnTunnels;
+}
+
+function normalizeCiscoEncryption(enc) {
+  if (!enc) return 'aes-256-cbc';
+  const map = {
+    'aes-256': 'aes-256-cbc', 'aes-192': 'aes-192-cbc', 'aes-128': 'aes-128-cbc',
+    'aes': 'aes-128-cbc', '3des': '3des-cbc', 'des': 'des-cbc',
+    'aes-256-gcm': 'aes-256-gcm', 'aes-128-gcm': 'aes-128-gcm',
+  };
+  return map[enc] || enc;
+}
+
+function normalizeCiscoHash(hash) {
+  if (!hash) return 'sha256';
+  const map = {
+    'sha': 'sha1', 'sha1': 'sha1', 'sha256': 'sha256', 'sha-256': 'sha256',
+    'sha384': 'sha384', 'sha-384': 'sha384', 'sha512': 'sha512', 'sha-512': 'sha512',
+    'md5': 'md5',
+  };
+  return map[hash] || hash;
+}
+
+function normalizeCiscoPfs(pfs) {
+  if (!pfs) return 'group14';
+  if (pfs.startsWith('group')) return pfs;
+  return 'group' + pfs;
+}
+
 
 function extractVersion(lines) {
   for (const line of lines) {
@@ -1282,4 +1668,228 @@ function mapWellKnownPort(port) {
     'rdp': '3389',
   };
   return portMap[port.toLowerCase()] || port;
+}
+
+
+// ---------------------------------------------------------------------------
+// Syslog Configuration Parser
+// ---------------------------------------------------------------------------
+
+function parseCiscoSyslogConfig(lines, warnings) {
+  const servers = [];
+  for (const line of lines) {
+    const trimmed = line.trim();
+    // logging host <interface> <ip> [protocol/port]
+    const hostMatch = trimmed.match(/^logging\s+host\s+(?:(\S+)\s+)?(\d+\.\d+\.\d+\.\d+)(?:\s+(\d+)\/(\d+))?/);
+    if (hostMatch) {
+      servers.push({
+        name: `syslog-${hostMatch[2]}`,
+        server: hostMatch[2],
+        port: parseInt(hostMatch[4] || '514', 10),
+        transport: hostMatch[3] === '6' ? 'tcp' : 'udp',
+        facility: '',
+        interface: hostMatch[1] || '',
+      });
+      continue;
+    }
+    // logging host <ip>
+    const simpleHost = trimmed.match(/^logging\s+host\s+(\d+\.\d+\.\d+\.\d+)/);
+    if (simpleHost && !hostMatch) {
+      servers.push({
+        name: `syslog-${simpleHost[1]}`,
+        server: simpleHost[1],
+        port: 514,
+        transport: 'udp',
+        facility: '',
+      });
+    }
+  }
+
+  // Check for logging level
+  for (const line of lines) {
+    const levelMatch = line.trim().match(/^logging\s+trap\s+(\S+)/);
+    if (levelMatch) {
+      for (const srv of servers) {
+        srv.level = levelMatch[1];
+      }
+    }
+    const facilityMatch = line.trim().match(/^logging\s+facility\s+(\d+)/);
+    if (facilityMatch) {
+      for (const srv of servers) {
+        srv.facility = `local${facilityMatch[1]}`;
+      }
+    }
+  }
+
+  if (servers.length > 0) {
+    warnings.push(createWarning('info', 'syslog', `Parsed ${servers.length} syslog server(s)`, 'Syslog/logging server configuration detected'));
+  }
+  return servers;
+}
+
+
+// ---------------------------------------------------------------------------
+// DHCP Configuration Parser
+// ---------------------------------------------------------------------------
+
+function parseCiscoDhcpConfig(lines, blocks, warnings) {
+  const dhcpConfigs = [];
+
+  // Cisco ASA: dhcpd address <start>-<end> <interface>
+  // Cisco ASA: dhcpd dns <dns1> <dns2>
+  // Cisco ASA: dhcpd enable <interface>
+  // Cisco ASA: dhcprelay server <ip> <interface>
+  const dhcpdAddresses = {};
+  const dhcpdDns = [];
+  const dhcpdGateways = {};
+  const dhcpdEnabled = new Set();
+  const relayServers = [];
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+
+    const addrMatch = trimmed.match(/^dhcpd\s+address\s+(\S+)-(\S+)\s+(\S+)/);
+    if (addrMatch) {
+      dhcpdAddresses[addrMatch[3]] = `${addrMatch[1]}-${addrMatch[2]}`;
+      continue;
+    }
+
+    const dnsMatch = trimmed.match(/^dhcpd\s+dns\s+(.+)/);
+    if (dnsMatch) {
+      dhcpdDns.push(...dnsMatch[1].trim().split(/\s+/));
+      continue;
+    }
+
+    const gwMatch = trimmed.match(/^dhcpd\s+option\s+3\s+ip\s+(\S+)\s+(\S+)/);
+    if (gwMatch) {
+      dhcpdGateways[gwMatch[2]] = gwMatch[1];
+      continue;
+    }
+
+    const enableMatch = trimmed.match(/^dhcpd\s+enable\s+(\S+)/);
+    if (enableMatch) {
+      dhcpdEnabled.add(enableMatch[1]);
+      continue;
+    }
+
+    const relayMatch = trimmed.match(/^dhcprelay\s+server\s+(\S+)\s+(\S+)/);
+    if (relayMatch) {
+      relayServers.push({ server: relayMatch[1], interface: relayMatch[2] });
+      continue;
+    }
+  }
+
+  // Build DHCP server configs
+  for (const iface of dhcpdEnabled) {
+    dhcpConfigs.push({
+      type: 'server',
+      interface: iface,
+      pools: dhcpdAddresses[iface] ? [dhcpdAddresses[iface]] : [],
+      gateway: dhcpdGateways[iface] || '',
+      dns_servers: dhcpdDns,
+      lease_time: 86400,
+    });
+  }
+
+  // Build DHCP relay configs
+  const relayByIf = {};
+  for (const r of relayServers) {
+    if (!relayByIf[r.interface]) relayByIf[r.interface] = [];
+    relayByIf[r.interface].push(r.server);
+  }
+  for (const [iface, srvList] of Object.entries(relayByIf)) {
+    dhcpConfigs.push({
+      type: 'relay',
+      interface: iface,
+      servers: srvList,
+    });
+  }
+
+  if (dhcpConfigs.length > 0) {
+    warnings.push(createWarning('info', 'dhcp', `Parsed ${dhcpConfigs.length} DHCP config(s)`, 'DHCP server/relay configuration detected'));
+  }
+  return dhcpConfigs;
+}
+
+
+// ---------------------------------------------------------------------------
+// QoS / Service Policy Configuration Parser
+// ---------------------------------------------------------------------------
+
+function parseCiscoQosConfig(lines, blocks, warnings) {
+  const qosProfiles = [];
+
+  // Cisco ASA: class-map / policy-map / service-policy
+  // policy-map <name> \n  class <class> \n    police output/input <rate>
+  const policyMaps = {};
+  let currentPolicyMap = null;
+  let currentClass = null;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+
+    const pmMatch = trimmed.match(/^policy-map\s+(\S+)/);
+    if (pmMatch) {
+      currentPolicyMap = pmMatch[1];
+      policyMaps[currentPolicyMap] = { name: currentPolicyMap, classes: [] };
+      currentClass = null;
+      continue;
+    }
+
+    if (currentPolicyMap) {
+      const classMatch = trimmed.match(/^class\s+(\S+)/);
+      if (classMatch) {
+        currentClass = { name: classMatch[1], police_rate: 0, police_burst: 0, priority: false };
+        policyMaps[currentPolicyMap].classes.push(currentClass);
+        continue;
+      }
+
+      if (currentClass) {
+        const policeMatch = trimmed.match(/^police\s+(?:output|input)\s+(\d+)(?:\s+(\d+))?/);
+        if (policeMatch) {
+          currentClass.police_rate = parseInt(policeMatch[1], 10);
+          currentClass.police_burst = parseInt(policeMatch[2] || '0', 10);
+          continue;
+        }
+        const prioMatch = trimmed.match(/^priority/);
+        if (prioMatch) {
+          currentClass.priority = true;
+          continue;
+        }
+      }
+
+      // End of policy-map
+      if (trimmed === '!' || trimmed.startsWith('policy-map') || (!trimmed.startsWith(' ') && !trimmed.startsWith('class') && !trimmed.startsWith('police') && !trimmed.startsWith('priority') && trimmed !== '')) {
+        if (trimmed !== '!') {
+          currentPolicyMap = null;
+          currentClass = null;
+        }
+      }
+    }
+
+    // service-policy <name> interface <if>
+    const spMatch = trimmed.match(/^service-policy\s+(\S+)\s+(?:interface\s+)?(\S+)/);
+    if (spMatch) {
+      const pm = policyMaps[spMatch[1]];
+      if (pm) {
+        pm.interface = spMatch[2];
+      }
+    }
+  }
+
+  for (const pm of Object.values(policyMaps)) {
+    if (pm.classes.length > 0) {
+      qosProfiles.push({
+        name: pm.name,
+        type: 'policy-map',
+        interface: pm.interface || '',
+        classes: pm.classes,
+      });
+    }
+  }
+
+  if (qosProfiles.length > 0) {
+    warnings.push(createWarning('info', 'qos', `Parsed ${qosProfiles.length} QoS policy(ies)`, 'QoS/service policy configuration detected'));
+  }
+  return qosProfiles;
 }

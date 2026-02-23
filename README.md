@@ -135,11 +135,36 @@ Click **Convert to SRX** to generate the output. Switch between **Set Commands**
 - **Multi-turn chat** — The full-ruleset review panel maintains conversation history so you can ask follow-up questions
 - **Subscription-aware prompts** — SRX subscription level is included in LLM prompts so suggestions account for available features
 
+### Conversion Features
+- **Security policies** — Zone-based firewall rules with source/dest addresses, applications, services, actions, logging
+- **NAT** — Source NAT, destination NAT, static NAT with zone-pair rule sets
+- **Address & service objects** — Named objects, groups, FQDN addresses
+- **Application mapping** — PAN-OS App-ID → Junos application, custom application placeholders
+- **Security profiles** — UTM policy generation from AV, web filter, IPS profiles; IDP policy from vulnerability profiles; SecIntel from EDL/threat feeds
+- **Static routes** — Virtual router routes, VRF/routing-instance support, blackhole routes
+- **VPN / IPsec** — IKE proposals/policies/gateways, IPsec proposals/policies/VPNs, traffic selectors, proxy IDs
+- **HA → Chassis Cluster** — Active/passive and active/active HA to SRX chassis cluster with redundancy groups
+- **Screens / DDoS** — Zone protection profiles, DoS policies, threat detection → SRX screen ids-option
+- **Syslog** — Syslog server forwarding, facility/severity mapping, TCP/TLS transport
+- **DHCP** — DHCP server pools, relay helpers, address assignment
+- **QoS / CoS** — Traffic shaping profiles, policy maps, scheduler maps, interface CoS bindings
+- **Schedules** — Time-based rule scheduling with day-of-week and time-range support
+
 ### Push & Integration
 - **Push via MCP** — Connect to an MCP server to push configurations directly to SRX devices (configurable in Settings)
 - **Push to SDC** — Security Director Cloud integration (coming soon)
 - **Push to Mist** — Juniper Mist Cloud integration (coming soon)
 - **Convert confirmation** — Warning dialog when converting with unaccepted policies
+
+### Not Supported (Manual Migration Required)
+
+The following features are **not converted** by this tool and must be configured manually on the target SRX:
+
+- **AAA / Authentication** — RADIUS, TACACS+, LDAP server configuration and authentication policies
+- **Dynamic Routing Protocols** — BGP, OSPF, RIP (only static routes are converted)
+- **SSL/TLS Decryption** — SSL proxy, certificate management, PKI configuration
+- **NetFlow / Telemetry** — sFlow, traffic monitoring, streaming telemetry
+- **Management Access** — Admin users, SNMP communities, SSH/API access restrictions
 
 ## Project Structure
 

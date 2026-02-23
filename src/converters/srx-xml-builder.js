@@ -71,6 +71,24 @@ export function buildSrxXml(config, interfaceMappings = {}, targetContext = null
   // Static Routes
   buildStaticRoutesXml(config.static_routes, lines);
 
+  // Chassis Cluster / HA
+  buildHaXml(config.ha_config, lines);
+
+  // Security Screens
+  buildScreenXml(config.screen_config, lines);
+
+  // VPN / IPsec
+  buildVpnXml(config.vpn_tunnels, lines);
+
+  // Syslog
+  buildSyslogXml(config.syslog_config, lines);
+
+  // DHCP
+  buildDhcpXml(config.dhcp_config, lines);
+
+  // QoS / CoS
+  buildQosXml(config.qos_config, lines);
+
   // Applications (includes Customfwic placeholders for unmapped apps)
   buildApplicationsXml(config.service_objects, config.applications, config.service_groups, lines, xmlCustomfwicApps);
 
@@ -81,6 +99,13 @@ export function buildSrxXml(config, interfaceMappings = {}, targetContext = null
   if (secIntelEnabled) {
     buildSecIntelXml(blockLists, lines);
   }
+
+  // Unsupported feature notices
+  lines.push('<!--');
+  lines.push('  NOT CONVERTED — Manual Configuration Required');
+  lines.push('  AAA / Authentication (RADIUS, TACACS+, LDAP) — not converted by this tool.');
+  lines.push('  Configure manually: system authentication-order, access profile, etc.');
+  lines.push('-->');
 
   // Close context wrapper
   if (useContext) {
@@ -985,6 +1010,386 @@ function buildStaticRoutesXml(routes, lines) {
     lines.push('  </routing-instances>');
   }
 }
+
+function buildVpnXml(tunnels, lines) {
+  if (!tunnels || tunnels.length === 0) return;
+
+  // IKE section
+  lines.push('  <security>');
+  lines.push('    <ike>');
+
+  const emittedProposals = new Set();
+  for (const vpn of tunnels) {
+    // IKE proposal
+    if (vpn.ike_proposal && !emittedProposals.has(vpn.ike_proposal.name)) {
+      emittedProposals.add(vpn.ike_proposal.name);
+      lines.push('      <proposal>');
+      lines.push(`        <name>${escapeXml(vpn.ike_proposal.name)}</name>`);
+      lines.push(`        <authentication-method>${vpn.ike_proposal.auth_method || 'pre-shared-keys'}</authentication-method>`);
+      lines.push(`        <dh-group>${vpn.ike_proposal.dh_group || 'group14'}</dh-group>`);
+      lines.push(`        <encryption-algorithm>${vpn.ike_proposal.encryption || 'aes-256-cbc'}</encryption-algorithm>`);
+      lines.push(`        <authentication-algorithm>${vpn.ike_proposal.authentication || 'sha-256'}</authentication-algorithm>`);
+      if (vpn.ike_proposal.lifetime) lines.push(`        <lifetime-seconds>${vpn.ike_proposal.lifetime}</lifetime-seconds>`);
+      lines.push('      </proposal>');
+    }
+
+    // IKE gateway
+    const gwName = vpn.ike_gateway?.name || `gw-${vpn.name}`;
+    lines.push('      <gateway>');
+    lines.push(`        <name>${escapeXml(gwName)}</name>`);
+    if (vpn.ike_gateway?.address) lines.push(`        <address>${vpn.ike_gateway.address}</address>`);
+    lines.push(`        <ike-policy>ike-pol-${escapeXml(vpn.name)}</ike-policy>`);
+    if (vpn.ike_gateway?.ike_version === 'v2') lines.push('        <version>v2-only</version>');
+    lines.push('      </gateway>');
+  }
+  lines.push('    </ike>');
+
+  // IPsec section
+  lines.push('    <ipsec>');
+  const emittedIpsec = new Set();
+  for (const vpn of tunnels) {
+    if (vpn.ipsec_proposal && !emittedIpsec.has(vpn.ipsec_proposal.name)) {
+      emittedIpsec.add(vpn.ipsec_proposal.name);
+      lines.push('      <proposal>');
+      lines.push(`        <name>${escapeXml(vpn.ipsec_proposal.name)}</name>`);
+      lines.push(`        <protocol>${vpn.ipsec_proposal.protocol || 'esp'}</protocol>`);
+      lines.push(`        <encryption-algorithm>${vpn.ipsec_proposal.encryption || 'aes-256-cbc'}</encryption-algorithm>`);
+      lines.push(`        <authentication-algorithm>${vpn.ipsec_proposal.authentication || 'hmac-sha-256-128'}</authentication-algorithm>`);
+      if (vpn.ipsec_proposal.lifetime) lines.push(`        <lifetime-seconds>${vpn.ipsec_proposal.lifetime}</lifetime-seconds>`);
+      lines.push('      </proposal>');
+    }
+
+    // VPN definition
+    lines.push('      <vpn>');
+    lines.push(`        <name>${escapeXml(vpn.name)}</name>`);
+    lines.push(`        <ike><gateway>${escapeXml(vpn.ike_gateway?.name || 'gw-' + vpn.name)}</gateway></ike>`);
+    if (vpn.tunnel_interface) {
+      const bindIf = vpn.tunnel_interface.startsWith('st0') ? vpn.tunnel_interface : 'st0.0';
+      lines.push(`        <bind-interface>${bindIf}</bind-interface>`);
+    }
+    if (vpn.proxy_id && vpn.proxy_id.length > 0) {
+      for (let i = 0; i < vpn.proxy_id.length; i++) {
+        lines.push(`        <traffic-selector><name>ts${i + 1}</name>`);
+        if (vpn.proxy_id[i].local) lines.push(`          <local-ip>${vpn.proxy_id[i].local}</local-ip>`);
+        if (vpn.proxy_id[i].remote) lines.push(`          <remote-ip>${vpn.proxy_id[i].remote}</remote-ip>`);
+        lines.push('        </traffic-selector>');
+      }
+    }
+    lines.push('      </vpn>');
+  }
+  lines.push('    </ipsec>');
+  lines.push('  </security>');
+}
+
+function buildScreenXml(screens, lines) {
+  if (!screens || screens.length === 0) return;
+
+  // Screen definitions go inside <security><screen>
+  lines.push('  <security>');
+  lines.push('    <screen>');
+
+  for (const screen of screens) {
+    const name = screen.name || 'default-screen';
+    lines.push('      <ids-option>');
+    lines.push(`        <name>${escapeXml(name)}</name>`);
+
+    // ICMP
+    if (screen.icmp && (screen.icmp.ping_death || screen.icmp.flood_threshold)) {
+      lines.push('        <icmp>');
+      if (screen.icmp.ping_death) lines.push('          <ping-death/>');
+      if (screen.icmp.flood_threshold) lines.push(`          <flood><threshold>${screen.icmp.flood_threshold}</threshold></flood>`);
+      lines.push('        </icmp>');
+    }
+
+    // TCP
+    if (screen.tcp) {
+      const hasTcp = screen.tcp.syn_flood_threshold || screen.tcp.land_attack || screen.tcp.winnuke || screen.tcp.tcp_no_flag;
+      if (hasTcp) {
+        lines.push('        <tcp>');
+        if (screen.tcp.syn_flood_threshold) {
+          lines.push('          <syn-flood>');
+          lines.push(`            <alarm-threshold>${Math.round(screen.tcp.syn_flood_threshold * 5) || 1024}</alarm-threshold>`);
+          lines.push(`            <attack-threshold>${screen.tcp.syn_flood_threshold}</attack-threshold>`);
+          if (screen.tcp.syn_flood_timeout) lines.push(`            <timeout>${screen.tcp.syn_flood_timeout}</timeout>`);
+          lines.push('          </syn-flood>');
+        }
+        if (screen.tcp.land_attack) lines.push('          <land/>');
+        if (screen.tcp.winnuke) lines.push('          <winnuke/>');
+        if (screen.tcp.tcp_no_flag) lines.push('          <tcp-no-flag/>');
+        lines.push('        </tcp>');
+      }
+    }
+
+    // UDP
+    if (screen.udp && screen.udp.flood_threshold) {
+      lines.push('        <udp>');
+      lines.push(`          <flood><threshold>${screen.udp.flood_threshold}</threshold></flood>`);
+      lines.push('        </udp>');
+    }
+
+    // IP
+    if (screen.ip) {
+      const hasIp = screen.ip.spoofing || screen.ip.source_route || screen.ip.tear_drop;
+      if (hasIp) {
+        lines.push('        <ip>');
+        if (screen.ip.spoofing) lines.push('          <spoofing/>');
+        if (screen.ip.source_route) lines.push('          <source-route-option/>');
+        if (screen.ip.tear_drop) lines.push('          <tear-drop/>');
+        lines.push('        </ip>');
+      }
+    }
+
+    // Session limits
+    if (screen.limit_session) {
+      if (screen.limit_session.source_based || screen.limit_session.destination_based) {
+        lines.push('        <limit-session>');
+        if (screen.limit_session.source_based) lines.push(`          <source-ip-based>${screen.limit_session.source_based}</source-ip-based>`);
+        if (screen.limit_session.destination_based) lines.push(`          <destination-ip-based>${screen.limit_session.destination_based}</destination-ip-based>`);
+        lines.push('        </limit-session>');
+      }
+    }
+
+    lines.push('      </ids-option>');
+  }
+
+  lines.push('    </screen>');
+  lines.push('  </security>');
+}
+
+function buildHaXml(haConfig, lines) {
+  if (!haConfig || !haConfig.enabled) return;
+
+  const clusterId = haConfig.group_id || 1;
+  const pri = haConfig.priority || 200;
+  const secPri = pri > 100 ? 100 : pri - 1;
+
+  lines.push('  <chassis>');
+  lines.push('    <cluster>');
+  lines.push(`      <cluster-id>${clusterId}</cluster-id>`);
+
+  // Redundancy group 0
+  lines.push('      <redundancy-group>');
+  lines.push('        <name>0</name>');
+  lines.push(`        <node><name>0</name><priority>${pri}</priority></node>`);
+  lines.push(`        <node><name>1</name><priority>${secPri}</priority></node>`);
+  if (haConfig.preempt) lines.push('        <preempt/>');
+  lines.push('      </redundancy-group>');
+
+  // Redundancy group 1
+  lines.push('      <redundancy-group>');
+  lines.push('        <name>1</name>');
+  lines.push(`        <node><name>0</name><priority>${pri}</priority></node>`);
+  lines.push(`        <node><name>1</name><priority>${secPri}</priority></node>`);
+  if (haConfig.preempt) lines.push('        <preempt/>');
+  lines.push('      </redundancy-group>');
+
+  lines.push('      <heartbeat-interval>1000</heartbeat-interval>');
+  lines.push('      <heartbeat-threshold>3</heartbeat-threshold>');
+  lines.push('    </cluster>');
+  lines.push('  </chassis>');
+
+  // Fabric interfaces
+  for (const iface of (haConfig.ha_interfaces || [])) {
+    const name = (iface.name || '').toLowerCase();
+    if ((name === 'fab0' || name === 'fab1') && iface.interface) {
+      lines.push('  <interfaces>');
+      lines.push(`    <interface><name>${name}</name>`);
+      lines.push(`      <fabric-options><member-interfaces><name>${escapeXml(iface.interface)}</name></member-interfaces></fabric-options>`);
+      lines.push('    </interface>');
+      lines.push('  </interfaces>');
+    }
+  }
+
+  lines.push(`  <!-- Source HA: ${escapeXml(haConfig.description || haConfig.mode)} -->`);
+  lines.push('  <!-- NOTE: Review chassis cluster config for target hardware -->')
+}
+
+// ---------------------------------------------------------------------------
+// Syslog XML Builder
+// ---------------------------------------------------------------------------
+
+function buildSyslogXml(syslogConfig, lines) {
+  if (!syslogConfig || syslogConfig.length === 0) return;
+
+  lines.push('  <system>');
+  lines.push('    <syslog>');
+
+  for (const srv of syslogConfig) {
+    if (!srv.server || srv.transport === 'file') continue;
+
+    lines.push('      <host>');
+    lines.push(`        <name>${escapeXml(srv.server)}</name>`);
+    lines.push('        <any><any/></any>');
+
+    if (srv.port && srv.port !== 514) {
+      lines.push(`        <port>${srv.port}</port>`);
+    }
+
+    if (srv.transport === 'tcp' || srv.transport === 'tls') {
+      lines.push('        <transport><protocol>tcp</protocol></transport>');
+    }
+
+    if (srv.source_address) {
+      lines.push(`        <source-address>${escapeXml(srv.source_address)}</source-address>`);
+    }
+
+    if (srv.structured_data) {
+      lines.push('        <structured-data/>');
+    }
+
+    lines.push('      </host>');
+  }
+
+  lines.push('    </syslog>');
+  lines.push('  </system>');
+}
+
+
+// ---------------------------------------------------------------------------
+// DHCP XML Builder
+// ---------------------------------------------------------------------------
+
+function buildDhcpXml(dhcpConfig, lines) {
+  if (!dhcpConfig || dhcpConfig.length === 0) return;
+
+  let hasRelay = false;
+  let hasPool = false;
+
+  for (const cfg of dhcpConfig) {
+    if (cfg.type === 'relay') hasRelay = true;
+    if (cfg.type === 'server' || cfg.type === 'pool') hasPool = true;
+  }
+
+  // DHCP Relay: forwarding-options
+  if (hasRelay) {
+    lines.push('  <forwarding-options>');
+    lines.push('    <helpers>');
+    lines.push('      <bootp>');
+    for (const cfg of dhcpConfig) {
+      if (cfg.type !== 'relay') continue;
+      const iface = cfg.interface || 'ge-0/0/0.0';
+      lines.push(`        <interface><name>${escapeXml(iface)}</name>`);
+      for (const srv of (cfg.servers || [])) {
+        lines.push(`          <server>${escapeXml(srv)}</server>`);
+      }
+      lines.push('        </interface>');
+    }
+    lines.push('      </bootp>');
+    lines.push('    </helpers>');
+    lines.push('  </forwarding-options>');
+  }
+
+  // DHCP Server: access address-assignment pool
+  if (hasPool) {
+    lines.push('  <access>');
+    lines.push('    <address-assignment>');
+    for (const cfg of dhcpConfig) {
+      if (cfg.type !== 'server' && cfg.type !== 'pool') continue;
+      const poolName = cfg.name || cfg.interface || 'dhcp-pool';
+      lines.push(`      <pool><name>${escapeXml(poolName)}</name>`);
+      lines.push('        <family><inet>');
+
+      if (cfg.network) {
+        lines.push(`          <network>${escapeXml(cfg.network)}</network>`);
+      }
+
+      if (cfg.ranges) {
+        for (const range of cfg.ranges) {
+          lines.push(`          <range><name>${escapeXml(range.name || 'range1')}</name>`);
+          if (range.low) lines.push(`            <low>${range.low}</low>`);
+          if (range.high) lines.push(`            <high>${range.high}</high>`);
+          lines.push('          </range>');
+        }
+      }
+
+      if (cfg.pools) {
+        for (let i = 0; i < cfg.pools.length; i++) {
+          const pool = cfg.pools[i];
+          if (pool.includes('-')) {
+            const [low, high] = pool.split('-');
+            lines.push(`          <range><name>range${i + 1}</name><low>${low}</low><high>${high}</high></range>`);
+          }
+        }
+      }
+
+      const gw = cfg.gateway || cfg.router;
+      const dns = cfg.dns_servers || [];
+      if (gw || dns.length > 0) {
+        lines.push('          <dhcp-attributes>');
+        if (gw) lines.push(`            <router>${escapeXml(gw)}</router>`);
+        for (const d of dns) {
+          lines.push(`            <name-server>${escapeXml(d)}</name-server>`);
+        }
+        lines.push('          </dhcp-attributes>');
+      }
+
+      lines.push('        </inet></family>');
+      lines.push('      </pool>');
+    }
+    lines.push('    </address-assignment>');
+    lines.push('  </access>');
+  }
+}
+
+
+// ---------------------------------------------------------------------------
+// QoS / CoS XML Builder
+// ---------------------------------------------------------------------------
+
+function buildQosXml(qosConfig, lines) {
+  if (!qosConfig || qosConfig.length === 0) return;
+
+  lines.push('  <class-of-service>');
+
+  for (const qos of qosConfig) {
+    if (qos.type === 'scheduler') {
+      lines.push('    <schedulers>');
+      lines.push(`      <name>${escapeXml(qos.name)}</name>`);
+      if (qos.transmit_rate) lines.push(`      <transmit-rate>${escapeXml(qos.transmit_rate)}</transmit-rate>`);
+      if (qos.buffer_size) lines.push(`      <buffer-size>${escapeXml(qos.buffer_size)}</buffer-size>`);
+      if (qos.priority) lines.push(`      <priority>${escapeXml(qos.priority)}</priority>`);
+      lines.push('    </schedulers>');
+    } else if (qos.type === 'interface-cos') {
+      lines.push('    <interfaces>');
+      lines.push(`      <interface><name>${escapeXml(qos.interface)}</name>`);
+      if (qos.scheduler_map) lines.push(`        <scheduler-map>${escapeXml(qos.scheduler_map)}</scheduler-map>`);
+      if (qos.shaping_rate) lines.push(`        <shaping-rate>${escapeXml(qos.shaping_rate)}</shaping-rate>`);
+      lines.push('      </interface>');
+      lines.push('    </interfaces>');
+    } else {
+      // Generic scheduler-map from PAN-OS/FortiGate/Cisco
+      const classes = qos.classes || [];
+      if (classes.length > 0) {
+        lines.push('    <scheduler-maps>');
+        lines.push(`      <name>${escapeXml(qos.name)}</name>`);
+        for (const cls of classes) {
+          const clsName = cls.name || 'default';
+          lines.push(`      <forwarding-class><class-name>${escapeXml(clsName)}</class-name>`);
+          lines.push(`        <scheduler>${escapeXml(clsName)}</scheduler>`);
+          lines.push('      </forwarding-class>');
+        }
+        lines.push('    </scheduler-maps>');
+
+        // Emit scheduler definitions for each class
+        for (const cls of classes) {
+          const clsName = cls.name || 'default';
+          lines.push('    <schedulers>');
+          lines.push(`      <name>${escapeXml(clsName)}</name>`);
+          if (cls.guaranteed_bandwidth || cls.maximum_bandwidth || cls.police_rate) {
+            lines.push(`      <transmit-rate>${cls.police_rate || cls.maximum_bandwidth || cls.guaranteed_bandwidth}</transmit-rate>`);
+          }
+          if (cls.priority === true || cls.priority === 'high') {
+            lines.push('      <priority>high</priority>');
+          }
+          lines.push('    </schedulers>');
+        }
+      }
+    }
+  }
+
+  lines.push('  </class-of-service>');
+}
+
 
 function escapeXml(str) {
   if (!str) return '';

@@ -70,6 +70,12 @@ export function convertToSrxSetCommands(config, interfaceMappings = {}, targetCo
   convertSecurityPolicies(config.security_policies, commands, warnings, summary, { utmPolicyMap, idpPolicyMap, secIntelEnabled }, config.application_groups);
   convertNatRules(config.nat_rules, commands, warnings, summary);
   convertStaticRoutes(config.static_routes, commands, warnings, summary);
+  convertHaConfig(config.ha_config, commands, warnings, summary);
+  convertScreenConfig(config.screen_config, commands, warnings, summary);
+  convertVpnTunnels(config.vpn_tunnels, commands, warnings, summary);
+  convertSyslogConfig(config.syslog_config, commands, warnings, summary);
+  convertDhcpConfig(config.dhcp_config, commands, warnings, summary);
+  convertQosConfig(config.qos_config, commands, warnings, summary);
 
   // Generate placeholder definitions for unmapped Customfwic applications
   if (customfwicApps.size > 0) {
@@ -85,6 +91,14 @@ export function convertToSrxSetCommands(config, interfaceMappings = {}, targetCo
     }
     commands.push('');
   }
+
+  // Unsupported feature notices
+  commands.push('# =============================================');
+  commands.push('# NOT CONVERTED — Manual Configuration Required');
+  commands.push('# =============================================');
+  commands.push('# AAA / Authentication (RADIUS, TACACS+, LDAP) — not converted by this tool');
+  commands.push('# Configure manually: set system authentication-order, set access profile, etc.');
+  commands.push('');
 
   summary.total_warnings = warnings.length;
 
@@ -1114,6 +1128,441 @@ function convertStaticRoutes(routes, commands, warnings, summary) {
 
   commands.push('');
 }
+
+/**
+ * Converts HA configuration to SRX chassis cluster or MNHA set commands.
+ */
+function convertHaConfig(haConfig, commands, warnings, summary) {
+  if (!haConfig || !haConfig.enabled) return;
+
+  commands.push('# =============================================');
+  commands.push('# Chassis Cluster / HA Configuration');
+  commands.push('# =============================================');
+  commands.push(`# Source HA: ${haConfig.description || haConfig.mode}`);
+
+  const clusterId = haConfig.group_id || 1;
+
+  // Chassis cluster setup
+  commands.push(`set chassis cluster cluster-id ${clusterId}`);
+
+  // Redundancy group 0 (control plane) — always needed
+  commands.push(`set chassis cluster redundancy-group 0 node 0 priority ${haConfig.priority || 200}`);
+  const secondaryPrio = (haConfig.priority || 200) > 100 ? 100 : (haConfig.priority || 200) - 1;
+  commands.push(`set chassis cluster redundancy-group 0 node 1 priority ${secondaryPrio}`);
+
+  // Redundancy group 1 (data plane) — mirrors RG0 priorities
+  commands.push(`set chassis cluster redundancy-group 1 node 0 priority ${haConfig.priority || 200}`);
+  commands.push(`set chassis cluster redundancy-group 1 node 1 priority ${secondaryPrio}`);
+
+  if (haConfig.preempt) {
+    commands.push('set chassis cluster redundancy-group 0 preempt');
+    commands.push('set chassis cluster redundancy-group 1 preempt');
+  }
+
+  // Heartbeat interval
+  commands.push('set chassis cluster heartbeat-interval 1000');
+  commands.push('set chassis cluster heartbeat-threshold 3');
+
+  // HA interfaces — map to SRX fabric and control links
+  for (const iface of haConfig.ha_interfaces) {
+    const name = (iface.name || '').toLowerCase();
+    if (name === 'fab0' || name === 'fab1' || name.includes('fabric')) {
+      if (iface.interface) {
+        commands.push(`set interfaces ${name.startsWith('fab') ? name : 'fab0'} fabric-options member-interfaces ${iface.interface}`);
+      }
+    } else if (name.includes('ha1') || name.includes('heartbeat') || name.includes('failover') || name.includes('control')) {
+      // Map to SRX control-link (fxp1) — add as comment since fxp1 is implicit
+      commands.push(`# Source HA control link: ${iface.name} on ${iface.interface || 'N/A'} (${iface.ip || 'no IP'})`);
+    } else if (name.includes('ha2') || name.includes('state') || name.includes('stateful')) {
+      commands.push(`# Source HA data link: ${iface.name} on ${iface.interface || 'N/A'} (${iface.ip || 'no IP'})`);
+    } else if (iface.interface) {
+      commands.push(`# Source HA interface: ${iface.name} on ${iface.interface} (${iface.ip || 'no IP'})`);
+    }
+  }
+
+  // Monitoring
+  if (haConfig.monitoring) {
+    for (const lg of (haConfig.monitoring.link_groups || [])) {
+      if (lg.interfaces && lg.interfaces.length > 0) {
+        commands.push(`# Source link monitoring group "${lg.name}": ${lg.interfaces.join(', ')}`);
+      }
+    }
+  }
+
+  commands.push('# NOTE: Review chassis cluster config — verify fabric interfaces, reth interfaces,');
+  commands.push('# and redundancy-group assignments match your target SRX hardware topology');
+
+  warnings.push(createWarning('ha', 'HA converted to chassis cluster — verify fabric/reth mappings for target hardware', 'info'));
+  summary.ha_converted = 1;
+  commands.push('');
+}
+
+/**
+ * Converts screen/DDoS protection configuration to SRX screen ids-option set commands.
+ */
+function convertScreenConfig(screens, commands, warnings, summary) {
+  if (!screens || screens.length === 0) return;
+
+  commands.push('# =============================================');
+  commands.push('# Security Screen (IDS Options)');
+  commands.push('# =============================================');
+
+  for (const screen of screens) {
+    const name = sanitizeJunosName(screen.name || 'default-screen');
+    const prefix = `set security screen ids-option ${name}`;
+
+    // ICMP protections
+    if (screen.icmp) {
+      if (screen.icmp.ping_death) commands.push(`${prefix} icmp ping-death`);
+      if (screen.icmp.fragment) commands.push(`${prefix} icmp fragment`);
+      if (screen.icmp.flood_threshold) commands.push(`${prefix} icmp flood threshold ${screen.icmp.flood_threshold}`);
+    }
+
+    // TCP protections
+    if (screen.tcp) {
+      if (screen.tcp.syn_flood_threshold) {
+        commands.push(`${prefix} tcp syn-flood alarm-threshold ${Math.round(screen.tcp.syn_flood_threshold * 5) || 1024}`);
+        commands.push(`${prefix} tcp syn-flood attack-threshold ${screen.tcp.syn_flood_threshold}`);
+      }
+      if (screen.tcp.syn_flood_timeout) commands.push(`${prefix} tcp syn-flood timeout ${screen.tcp.syn_flood_timeout}`);
+      if (screen.tcp.land_attack) commands.push(`${prefix} tcp land`);
+      if (screen.tcp.winnuke) commands.push(`${prefix} tcp winnuke`);
+      if (screen.tcp.tcp_no_flag) commands.push(`${prefix} tcp tcp-no-flag`);
+    }
+
+    // UDP protections
+    if (screen.udp && screen.udp.flood_threshold) {
+      commands.push(`${prefix} udp flood threshold ${screen.udp.flood_threshold}`);
+    }
+
+    // IP protections
+    if (screen.ip) {
+      if (screen.ip.spoofing) commands.push(`${prefix} ip spoofing`);
+      if (screen.ip.source_route) commands.push(`${prefix} ip source-route-option`);
+      if (screen.ip.tear_drop) commands.push(`${prefix} ip tear-drop`);
+      if (screen.ip.record_route) commands.push(`${prefix} ip record-route-option`);
+      if (screen.ip.timestamp) commands.push(`${prefix} ip timestamp-option`);
+    }
+
+    // Session limits
+    if (screen.limit_session) {
+      if (screen.limit_session.source_based) commands.push(`${prefix} limit-session source-ip-based ${screen.limit_session.source_based}`);
+      if (screen.limit_session.destination_based) commands.push(`${prefix} limit-session destination-ip-based ${screen.limit_session.destination_based}`);
+    }
+
+    // Apply screen to zone if known
+    if (screen.zone) {
+      commands.push(`set security zones security-zone ${sanitizeJunosName(screen.zone)} screen ${name}`);
+    }
+
+    summary.screens_converted = (summary.screens_converted || 0) + 1;
+  }
+
+  commands.push('');
+}
+
+/**
+ * Converts VPN/IPsec tunnel configuration to SRX set commands.
+ */
+function convertVpnTunnels(tunnels, commands, warnings, summary) {
+  if (!tunnels || tunnels.length === 0) return;
+
+  commands.push('# =============================================');
+  commands.push('# VPN / IPsec Configuration');
+  commands.push('# =============================================');
+
+  const emittedProposals = new Set();
+  const emittedPolicies = new Set();
+  const emittedGateways = new Set();
+
+  for (const vpn of tunnels) {
+    const vpnName = sanitizeJunosName(vpn.name || 'vpn-1');
+
+    // IKE Proposal
+    if (vpn.ike_proposal && !emittedProposals.has(vpn.ike_proposal.name)) {
+      const propName = sanitizeJunosName(vpn.ike_proposal.name || `ike-prop-${vpnName}`);
+      emittedProposals.add(vpn.ike_proposal.name);
+      commands.push(`set security ike proposal ${propName} authentication-method ${vpn.ike_proposal.auth_method || 'pre-shared-keys'}`);
+      commands.push(`set security ike proposal ${propName} dh-group ${vpn.ike_proposal.dh_group || 'group14'}`);
+      commands.push(`set security ike proposal ${propName} encryption-algorithm ${vpn.ike_proposal.encryption || 'aes-256-cbc'}`);
+      commands.push(`set security ike proposal ${propName} authentication-algorithm ${vpn.ike_proposal.authentication || 'sha-256'}`);
+      if (vpn.ike_proposal.lifetime) {
+        commands.push(`set security ike proposal ${propName} lifetime-seconds ${vpn.ike_proposal.lifetime}`);
+      }
+    }
+
+    // IKE Policy
+    const polName = sanitizeJunosName(`ike-pol-${vpnName}`);
+    if (!emittedPolicies.has(polName)) {
+      emittedPolicies.add(polName);
+      const propRef = sanitizeJunosName(vpn.ike_proposal?.name || `ike-prop-${vpnName}`);
+      commands.push(`set security ike policy ${polName} proposals ${propRef}`);
+      commands.push(`set security ike policy ${polName} pre-shared-key ascii-text "CHANGE-ME"`);
+    }
+
+    // IKE Gateway
+    const gwName = sanitizeJunosName(vpn.ike_gateway?.name || `gw-${vpnName}`);
+    if (!emittedGateways.has(gwName)) {
+      emittedGateways.add(gwName);
+      if (vpn.ike_gateway?.address) {
+        commands.push(`set security ike gateway ${gwName} address ${vpn.ike_gateway.address}`);
+      }
+      commands.push(`set security ike gateway ${gwName} ike-policy ${polName}`);
+      if (vpn.ike_gateway?.local_address) {
+        const extIf = vpn.ike_gateway.local_address.includes('.') && !vpn.ike_gateway.local_address.includes('/') ? vpn.ike_gateway.local_address : 'ge-0/0/0.0';
+        commands.push(`set security ike gateway ${gwName} external-interface ${extIf}`);
+      }
+      if (vpn.ike_gateway?.ike_version === 'v2') {
+        commands.push(`set security ike gateway ${gwName} version v2-only`);
+      }
+    }
+
+    // IPsec Proposal
+    if (vpn.ipsec_proposal && !emittedProposals.has('ipsec-' + vpn.ipsec_proposal.name)) {
+      const ipropName = sanitizeJunosName(vpn.ipsec_proposal.name || `ipsec-prop-${vpnName}`);
+      emittedProposals.add('ipsec-' + vpn.ipsec_proposal.name);
+      commands.push(`set security ipsec proposal ${ipropName} protocol ${vpn.ipsec_proposal.protocol || 'esp'}`);
+      commands.push(`set security ipsec proposal ${ipropName} encryption-algorithm ${vpn.ipsec_proposal.encryption || 'aes-256-cbc'}`);
+      commands.push(`set security ipsec proposal ${ipropName} authentication-algorithm ${vpn.ipsec_proposal.authentication || 'hmac-sha-256-128'}`);
+      if (vpn.ipsec_proposal.lifetime) {
+        commands.push(`set security ipsec proposal ${ipropName} lifetime-seconds ${vpn.ipsec_proposal.lifetime}`);
+      }
+    }
+
+    // IPsec Policy
+    const ipsecPolName = sanitizeJunosName(`ipsec-pol-${vpnName}`);
+    const ipropRef = sanitizeJunosName(vpn.ipsec_proposal?.name || `ipsec-prop-${vpnName}`);
+    commands.push(`set security ipsec policy ${ipsecPolName} proposals ${ipropRef}`);
+    if (vpn.ipsec_proposal?.pfs_group) {
+      commands.push(`set security ipsec policy ${ipsecPolName} perfect-forward-secrecy keys ${vpn.ipsec_proposal.pfs_group}`);
+    }
+
+    // IPsec VPN
+    commands.push(`set security ipsec vpn ${vpnName} ike gateway ${gwName}`);
+    commands.push(`set security ipsec vpn ${vpnName} ike ipsec-policy ${ipsecPolName}`);
+    if (vpn.tunnel_interface) {
+      const bindIf = vpn.tunnel_interface.startsWith('st0') ? vpn.tunnel_interface : 'st0.0';
+      commands.push(`set security ipsec vpn ${vpnName} bind-interface ${bindIf}`);
+    }
+
+    // Traffic selectors / Proxy IDs
+    if (vpn.proxy_id && vpn.proxy_id.length > 0) {
+      for (let i = 0; i < vpn.proxy_id.length; i++) {
+        const pid = vpn.proxy_id[i];
+        const tsName = `ts${i + 1}`;
+        if (pid.local) commands.push(`set security ipsec vpn ${vpnName} traffic-selector ${tsName} local-ip ${pid.local}`);
+        if (pid.remote) commands.push(`set security ipsec vpn ${vpnName} traffic-selector ${tsName} remote-ip ${pid.remote}`);
+      }
+    }
+
+    summary.vpn_tunnels_converted = (summary.vpn_tunnels_converted || 0) + 1;
+  }
+
+  commands.push('');
+}
+
+// ---------------------------------------------------------------------------
+// Syslog Configuration Converter
+// ---------------------------------------------------------------------------
+
+function convertSyslogConfig(syslogConfig, commands, warnings, summary) {
+  if (!syslogConfig || syslogConfig.length === 0) return;
+
+  commands.push('# =============================================');
+  commands.push('# Syslog / Logging Configuration');
+  commands.push('# =============================================');
+
+  for (const srv of syslogConfig) {
+    if (!srv.server || srv.transport === 'file') continue;
+
+    const host = srv.server;
+    commands.push(`set system syslog host ${host} any any`);
+
+    if (srv.port && srv.port !== 514) {
+      commands.push(`set system syslog host ${host} port ${srv.port}`);
+    }
+
+    if (srv.transport === 'tcp' || srv.transport === 'tls') {
+      commands.push(`set system syslog host ${host} transport protocol tcp`);
+    }
+
+    if (srv.source_address) {
+      commands.push(`set system syslog host ${host} source-address ${srv.source_address}`);
+    }
+
+    if (srv.structured_data) {
+      commands.push(`set system syslog host ${host} structured-data`);
+    }
+
+    // Facility-specific entries
+    if (srv.facilities && srv.facilities.length > 0) {
+      for (const fac of srv.facilities) {
+        commands.push(`set system syslog host ${host} ${fac.facility} ${fac.level}`);
+      }
+    }
+
+    summary.syslog_servers_converted = (summary.syslog_servers_converted || 0) + 1;
+  }
+
+  commands.push('');
+}
+
+
+// ---------------------------------------------------------------------------
+// DHCP Configuration Converter
+// ---------------------------------------------------------------------------
+
+function convertDhcpConfig(dhcpConfig, commands, warnings, summary) {
+  if (!dhcpConfig || dhcpConfig.length === 0) return;
+
+  commands.push('# =============================================');
+  commands.push('# DHCP Configuration');
+  commands.push('# =============================================');
+
+  for (const cfg of dhcpConfig) {
+    if (cfg.type === 'relay') {
+      // DHCP Relay: set forwarding-options helpers bootp interface <if> server <ip>
+      const iface = cfg.interface || 'ge-0/0/0.0';
+      const servers = cfg.servers || [];
+      for (const srv of servers) {
+        commands.push(`set forwarding-options helpers bootp interface ${iface} server ${srv}`);
+      }
+      summary.dhcp_configs_converted = (summary.dhcp_configs_converted || 0) + 1;
+    } else if (cfg.type === 'server' || cfg.type === 'pool') {
+      // DHCP Server pool
+      const poolName = sanitizeJunosName(cfg.name || cfg.interface || 'dhcp-pool');
+
+      if (cfg.pools) {
+        for (let i = 0; i < cfg.pools.length; i++) {
+          const pool = cfg.pools[i];
+          if (pool.includes('-')) {
+            const [low, high] = pool.split('-');
+            commands.push(`set access address-assignment pool ${poolName} family inet range range${i + 1} low ${low}`);
+            commands.push(`set access address-assignment pool ${poolName} family inet range range${i + 1} high ${high}`);
+          }
+        }
+      }
+
+      if (cfg.ranges) {
+        for (const range of cfg.ranges) {
+          const rName = sanitizeJunosName(range.name || 'range1');
+          if (range.low) commands.push(`set access address-assignment pool ${poolName} family inet range ${rName} low ${range.low}`);
+          if (range.high) commands.push(`set access address-assignment pool ${poolName} family inet range ${rName} high ${range.high}`);
+        }
+      }
+
+      if (cfg.network) {
+        commands.push(`set access address-assignment pool ${poolName} family inet network ${cfg.network}`);
+      }
+
+      if (cfg.gateway || cfg.router) {
+        commands.push(`set access address-assignment pool ${poolName} family inet dhcp-attributes router ${cfg.gateway || cfg.router}`);
+      }
+
+      const dnsServers = cfg.dns_servers || [];
+      for (const dns of dnsServers) {
+        commands.push(`set access address-assignment pool ${poolName} family inet dhcp-attributes name-server ${dns}`);
+      }
+
+      if (cfg.lease_time && cfg.lease_time !== 86400) {
+        commands.push(`set access address-assignment pool ${poolName} family inet dhcp-attributes maximum-lease-time ${cfg.lease_time}`);
+      }
+
+      if (cfg.interfaces || cfg.interface) {
+        const ifList = cfg.interfaces || [cfg.interface];
+        for (const iface of ifList.filter(Boolean)) {
+          commands.push(`set system services dhcp-local-server group ${poolName} interface ${iface}`);
+        }
+      }
+
+      summary.dhcp_configs_converted = (summary.dhcp_configs_converted || 0) + 1;
+    }
+  }
+
+  commands.push('');
+}
+
+
+// ---------------------------------------------------------------------------
+// QoS / CoS Configuration Converter
+// ---------------------------------------------------------------------------
+
+function convertQosConfig(qosConfig, commands, warnings, summary) {
+  if (!qosConfig || qosConfig.length === 0) return;
+
+  commands.push('# =============================================');
+  commands.push('# QoS / Class-of-Service Configuration');
+  commands.push('# =============================================');
+
+  for (const qos of qosConfig) {
+    if (qos.type === 'scheduler') {
+      // SRX CoS scheduler
+      const name = sanitizeJunosName(qos.name);
+      if (qos.transmit_rate) commands.push(`set class-of-service schedulers ${name} transmit-rate ${qos.transmit_rate}`);
+      if (qos.buffer_size) commands.push(`set class-of-service schedulers ${name} buffer-size ${qos.buffer_size}`);
+      if (qos.priority) commands.push(`set class-of-service schedulers ${name} priority ${qos.priority}`);
+      summary.qos_configs_converted = (summary.qos_configs_converted || 0) + 1;
+    } else if (qos.type === 'interface-cos') {
+      // Interface CoS binding
+      const ifName = qos.interface || 'ge-0/0/0';
+      if (qos.scheduler_map) commands.push(`set class-of-service interfaces ${ifName} scheduler-map ${sanitizeJunosName(qos.scheduler_map)}`);
+      if (qos.shaping_rate) commands.push(`set class-of-service interfaces ${ifName} shaping-rate ${qos.shaping_rate}`);
+      summary.qos_configs_converted = (summary.qos_configs_converted || 0) + 1;
+    } else if (qos.type === 'shaping-profile' || qos.type === 'policy-map') {
+      // Generic QoS from FortiGate/Cisco — map to CoS scheduler-map
+      const name = sanitizeJunosName(qos.name);
+      const classes = qos.classes || [];
+      if (classes.length > 0) {
+        commands.push(`set class-of-service scheduler-maps ${name}`);
+        for (const cls of classes) {
+          const clsName = sanitizeJunosName(cls.name || 'default');
+          if (cls.guaranteed_bandwidth) {
+            commands.push(`set class-of-service schedulers ${clsName} transmit-rate percent ${cls.guaranteed_bandwidth}`);
+          }
+          if (cls.maximum_bandwidth) {
+            commands.push(`set class-of-service schedulers ${clsName} transmit-rate percent ${cls.maximum_bandwidth} exact`);
+          }
+          if (cls.priority === true || cls.priority === 'high') {
+            commands.push(`set class-of-service schedulers ${clsName} priority high`);
+          }
+          if (cls.police_rate) {
+            commands.push(`set class-of-service schedulers ${clsName} transmit-rate ${cls.police_rate}`);
+          }
+          commands.push(`set class-of-service scheduler-maps ${name} forwarding-class ${clsName} scheduler ${clsName}`);
+        }
+      }
+      if (qos.interface) {
+        commands.push(`set class-of-service interfaces ${qos.interface} scheduler-map ${name}`);
+      }
+      summary.qos_configs_converted = (summary.qos_configs_converted || 0) + 1;
+    } else {
+      // Max bandwidth style (PAN-OS)
+      const name = sanitizeJunosName(qos.name);
+      if (qos.max_bandwidth) {
+        commands.push(`# QoS profile "${qos.name}" — max-bandwidth: ${qos.max_bandwidth}`);
+        commands.push(`set class-of-service scheduler-maps ${name}`);
+      }
+      const classes = qos.classes || [];
+      for (const cls of classes) {
+        const clsName = sanitizeJunosName(cls.name || 'default');
+        if (cls.guaranteed_bandwidth) {
+          commands.push(`set class-of-service schedulers ${clsName} transmit-rate ${cls.guaranteed_bandwidth}`);
+        }
+        if (cls.maximum_bandwidth) {
+          commands.push(`set class-of-service schedulers ${clsName} transmit-rate ${cls.maximum_bandwidth}`);
+        }
+        if (cls.priority) {
+          commands.push(`set class-of-service schedulers ${clsName} priority ${cls.priority}`);
+        }
+        commands.push(`set class-of-service scheduler-maps ${name} forwarding-class ${clsName} scheduler ${clsName}`);
+      }
+      summary.qos_configs_converted = (summary.qos_configs_converted || 0) + 1;
+    }
+  }
+
+  commands.push('');
+}
+
 
 /**
  * Groups NAT rules by source-zone → destination-zone pair.

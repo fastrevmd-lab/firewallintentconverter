@@ -110,6 +110,9 @@ export function parsePanosConfig(configText) {
   const allSecurityProfileObjects = [];
   const routingContexts = [];
 
+  // Parse HA configuration (device-level, not per-vsys)
+  const haConfig = parseHaConfig(config, warnings);
+
   for (const vsys of vsysList) {
     const vsysName = vsys['@_name'] || 'vsys1';
 
@@ -235,6 +238,21 @@ export function parsePanosConfig(configText) {
     }
   }
 
+  // Parse screen/DDoS protection profiles (device-level, not per-vsys)
+  const screenConfig = parseScreenConfig(config, allZones, warnings);
+
+  // Parse VPN/IPsec tunnel configuration (device-level, not per-vsys)
+  const vpnTunnels = parseVpnConfig(config, warnings);
+
+  // Parse syslog server configuration
+  const syslogConfig = parseSyslogConfig(config, warnings);
+
+  // Parse DHCP relay/server configuration
+  const dhcpConfig = parseDhcpConfig(config, warnings);
+
+  // Parse QoS/traffic shaping configuration
+  const qosConfig = parseQosConfig(config, warnings);
+
   // Re-index all policies across vsys for consistent ordering
   for (let i = 0; i < allSecurityPolicies.length; i++) {
     allSecurityPolicies[i]._rule_index = i + 1;
@@ -253,7 +271,12 @@ export function parsePanosConfig(configText) {
     schedules: allSchedules,
     security_profile_objects: allSecurityProfileObjects,
     external_lists: allExternalLists,
-    vpn_tunnels: [],
+    vpn_tunnels: vpnTunnels,
+    ha_config: haConfig,
+    screen_config: screenConfig,
+    syslog_config: syslogConfig,
+    dhcp_config: dhcpConfig,
+    qos_config: qosConfig,
     routing_contexts: routingContexts,
     static_routes: staticRoutes,
     target_context: null,
@@ -267,6 +290,11 @@ export function parsePanosConfig(configText) {
       zone_count: allZones.length,
       routing_context_count: routingContexts.length,
       static_route_count: staticRoutes.length,
+      vpn_tunnel_count: vpnTunnels.length,
+      syslog_server_count: syslogConfig.length,
+      dhcp_config_count: dhcpConfig.length,
+      qos_profile_count: qosConfig.length,
+      ha_enabled: !!(haConfig && haConfig.enabled),
       multi_vsys: multiVsys,
     },
   };
@@ -277,6 +305,226 @@ export function parsePanosConfig(configText) {
     parseStats: intermediateConfig.metadata,
   };
 }
+
+// ---------------------------------------------------------------------------
+// HA Configuration
+// ---------------------------------------------------------------------------
+
+function parseHaConfig(config, warnings) {
+  const devices = getNestedValue(config, 'devices');
+  if (!devices) return null;
+  const deviceEntries = extractEntries(devices);
+  for (const device of deviceEntries) {
+    const ha = getNestedValue(device, 'deviceconfig.high-availability');
+    if (!ha) continue;
+
+    const enabled = ha.enabled === 'yes' || ha.enabled === true;
+    if (!enabled) return { enabled: false, mode: 'standalone', group_id: 0, priority: 128, preempt: false, peer_ip: '', ha_interfaces: [], monitoring: { link_groups: [], path_groups: [] }, description: 'HA disabled' };
+
+    const group = ha.group || {};
+    const groupId = parseInt(group['group-id']) || 1;
+    const peerIp = group['peer-ip'] || '';
+
+    // Determine mode
+    let mode = 'active-passive';
+    const modeNode = group.mode || {};
+    if (modeNode['active-active']) mode = 'active-active';
+    else if (modeNode['active-passive']) mode = 'active-passive';
+
+    // Election options
+    const election = group['election-option'] || {};
+    const priority = parseInt(election['device-priority']) || 128;
+    const preempt = election.preemptive === 'yes' || election.preemptive === true;
+
+    // HA interfaces
+    const haInterfaces = [];
+    const haIface = ha.interface || {};
+    for (const linkName of ['ha1', 'ha1-backup', 'ha2', 'ha2-backup', 'ha3']) {
+      const link = haIface[linkName];
+      if (!link) continue;
+      const ipAddr = link['ip-address'] || '';
+      const port = link.port || '';
+      haInterfaces.push({
+        name: linkName.toUpperCase(),
+        ip: ipAddr.split('/')[0],
+        netmask: ipAddr.includes('/') ? ipAddr.split('/')[1] : '',
+        interface: port,
+      });
+    }
+
+    // Link monitoring
+    const monitoring = { link_groups: [], path_groups: [] };
+    const linkMonitor = getNestedValue(ha, 'group.monitoring.link-monitoring.link-group');
+    if (linkMonitor) {
+      const groups = extractEntries(linkMonitor);
+      for (const g of groups) {
+        monitoring.link_groups.push({
+          name: g['@_name'] || 'default',
+          enabled: g.enabled !== 'no',
+          interfaces: extractMembers(g.interface || g),
+        });
+      }
+    }
+    const pathMonitor = getNestedValue(ha, 'group.monitoring.path-monitoring.path-group');
+    if (pathMonitor) {
+      const groups = extractEntries(pathMonitor);
+      for (const g of groups) {
+        monitoring.path_groups.push({
+          name: g['@_name'] || 'default',
+          enabled: g.enabled !== 'no',
+        });
+      }
+    }
+
+    return {
+      enabled,
+      mode,
+      group_id: groupId,
+      priority,
+      preempt,
+      peer_ip: peerIp,
+      ha_interfaces: haInterfaces,
+      monitoring,
+      description: `PAN-OS HA ${mode} group ${groupId}`,
+    };
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// Screen / DDoS Protection Parser
+// ---------------------------------------------------------------------------
+
+/**
+ * Parses PAN-OS zone protection profiles into the screen_config schema.
+ * Profiles are at: config > devices > entry > network > profiles > zone-protection-profile > entry
+ * Zone assignment: each zone entry may have <zone-protection-profile>profileName</zone-protection-profile>
+ */
+function parseScreenConfig(config, zones, warnings) {
+  const screenConfigs = [];
+
+  // Navigate to zone-protection-profile entries
+  const devices = getNestedValue(config, 'devices');
+  if (!devices) return screenConfigs;
+
+  const deviceEntries = extractEntries(devices);
+  let profileEntries = [];
+  for (const device of deviceEntries) {
+    const profiles = getNestedValue(device, 'network.profiles.zone-protection-profile');
+    if (profiles) {
+      profileEntries = extractEntries(profiles);
+      break;
+    }
+  }
+
+  if (profileEntries.length === 0) return screenConfigs;
+
+  // Build a map from profile name to zone name (from parsed zones)
+  const profileToZone = {};
+  for (const device of deviceEntries) {
+    const vsys = getNestedValue(device, 'vsys');
+    if (!vsys) continue;
+    const vsysEntries = extractEntries(vsys);
+    for (const vs of vsysEntries) {
+      const zoneContainer = vs.zone;
+      if (!zoneContainer) continue;
+      const zoneEntries = extractEntries(zoneContainer);
+      for (const zEntry of zoneEntries) {
+        const zoneName = zEntry['@_name'] || '';
+        const zpp = zEntry['zone-protection-profile'];
+        if (zpp && typeof zpp === 'string') {
+          profileToZone[zpp] = zoneName;
+        }
+      }
+    }
+  }
+
+  for (const entry of profileEntries) {
+    const name = entry['@_name'] || 'unnamed-screen';
+    const flood = entry.flood || {};
+
+    // TCP SYN flood
+    const tcpSyn = flood['tcp-syn'] || {};
+    const tcpSynEnabled = getNestedValue(tcpSyn, 'enable') === 'yes';
+    const tcpSynRate = tcpSynEnabled
+      ? parseInt(getNestedValue(tcpSyn, 'red.activate-rate') || getNestedValue(tcpSyn, 'red.alarm-rate')) || null
+      : null;
+
+    // ICMP flood
+    const icmpFlood = flood.icmp || {};
+    const icmpEnabled = getNestedValue(icmpFlood, 'enable') === 'yes';
+    const icmpRate = icmpEnabled
+      ? parseInt(getNestedValue(icmpFlood, 'red.alarm-rate') || getNestedValue(icmpFlood, 'red.activate-rate')) || null
+      : null;
+
+    // UDP flood
+    const udpFlood = flood.udp || {};
+    const udpEnabled = getNestedValue(udpFlood, 'enable') === 'yes';
+    const udpRate = udpEnabled
+      ? parseInt(getNestedValue(udpFlood, 'red.alarm-rate') || getNestedValue(udpFlood, 'red.activate-rate')) || null
+      : null;
+
+    // Reconnaissance (scan)
+    const scan = entry.scan || {};
+
+    // IP-related protections (under reconnaissaince or protocol-protection)
+    const protocolProtection = entry['protocol-protection'] || {};
+
+    const screen = {
+      name,
+      zone: profileToZone[name] || '',
+      icmp: {
+        flood_threshold: icmpRate,
+        ping_death: false,
+        fragment: false,
+      },
+      tcp: {
+        syn_flood_threshold: tcpSynRate,
+        syn_flood_timeout: null,
+        land_attack: false,
+        winnuke: false,
+        tcp_no_flag: false,
+      },
+      udp: {
+        flood_threshold: udpRate,
+      },
+      ip: {
+        spoofing: false,
+        source_route: false,
+        tear_drop: false,
+        record_route: false,
+        timestamp: false,
+      },
+      limit_session: {
+        source_based: null,
+        destination_based: null,
+      },
+      description: '',
+    };
+
+    // Check for additional protections in the profile
+    const disallowed = entry['disallowed-addresses'] || {};
+    const ipDrop = entry['ip-drop'] || {};
+
+    if (ipDrop['spoofed-ip-address'] || getNestedValue(ipDrop, 'spoofed-ip-address.enable') === 'yes') {
+      screen.ip.spoofing = true;
+    }
+    if (ipDrop['strict-source-routing'] || ipDrop['loose-source-routing']) {
+      screen.ip.source_route = true;
+    }
+
+    screenConfigs.push(screen);
+  }
+
+  if (screenConfigs.length > 0) {
+    warnings.push(createWarning("info", "screen-config",
+      `Parsed ${screenConfigs.length} zone protection profile(s)`,
+      "Review screen/DDoS settings in the generated config"));
+  }
+
+  return screenConfigs;
+}
+
 
 // ---------------------------------------------------------------------------
 // VSys Finder
@@ -1130,6 +1378,220 @@ function flagSecIntelRules(policies, externalLists, warnings) {
 // NAT Rules Parser
 // ---------------------------------------------------------------------------
 
+
+// ---------------------------------------------------------------------------
+// VPN / IPsec Tunnel Parser
+// ---------------------------------------------------------------------------
+
+/**
+ * Parses PAN-OS IKE/IPsec VPN configuration.
+ * IKE crypto/IPsec profiles, gateways, tunnels under devices > entry > network
+ */
+function parseVpnConfig(config, warnings) {
+  const vpnTunnels = [];
+  const devices = getNestedValue(config, 'devices');
+  if (!devices) return vpnTunnels;
+
+  const deviceEntries = extractEntries(devices);
+  for (const device of deviceEntries) {
+    // ---- IKE crypto profiles ----
+    const ikeCryptoProfiles = {};
+    const ikeCryptoContainer = getNestedValue(device, 'network.ike.crypto-profile.ike-crypto-profiles');
+    if (ikeCryptoContainer) {
+      for (const entry of extractEntries(ikeCryptoContainer)) {
+        const name = entry['@_name'] || '';
+        if (!name) continue;
+        const encryption = extractMembers(entry.encryption).join(',') || 'aes-256-cbc';
+        const hash = extractMembers(entry.hash).join(',') || 'sha256';
+        const dhGroup = extractMembers(entry['dh-group']).join(',') || 'group14';
+        let lifetime = 28800;
+        if (entry.lifetime) {
+          if (entry.lifetime.hours) lifetime = parseInt(entry.lifetime.hours, 10) * 3600;
+          else if (entry.lifetime.seconds) lifetime = parseInt(entry.lifetime.seconds, 10);
+          else if (entry.lifetime.minutes) lifetime = parseInt(entry.lifetime.minutes, 10) * 60;
+          else if (entry.lifetime.days) lifetime = parseInt(entry.lifetime.days, 10) * 86400;
+        }
+        ikeCryptoProfiles[name] = {
+          name,
+          auth_method: 'pre-shared-keys',
+          dh_group: dhGroup,
+          encryption,
+          authentication: hash,
+          lifetime: lifetime || 28800,
+        };
+      }
+    }
+
+    // ---- IPsec crypto profiles ----
+    const ipsecCryptoProfiles = {};
+    const ipsecCryptoContainer = getNestedValue(device, 'network.ike.crypto-profile.ipsec-crypto-profiles');
+    if (ipsecCryptoContainer) {
+      for (const entry of extractEntries(ipsecCryptoContainer)) {
+        const name = entry['@_name'] || '';
+        if (!name) continue;
+        const esp = entry.esp || {};
+        const encryption = extractMembers(esp.encryption).join(',') || 'aes-256-cbc';
+        const authentication = extractMembers(esp.authentication).join(',') || 'sha256';
+        const dhGroup = typeof entry['dh-group'] === 'string' ? entry['dh-group'] : extractMembers(entry['dh-group']).join(',') || 'group14';
+        let lifetime = 3600;
+        if (entry.lifetime) {
+          if (entry.lifetime.hours) lifetime = parseInt(entry.lifetime.hours, 10) * 3600;
+          else if (entry.lifetime.seconds) lifetime = parseInt(entry.lifetime.seconds, 10);
+          else if (entry.lifetime.minutes) lifetime = parseInt(entry.lifetime.minutes, 10) * 60;
+          else if (entry.lifetime.days) lifetime = parseInt(entry.lifetime.days, 10) * 86400;
+        }
+        ipsecCryptoProfiles[name] = {
+          name,
+          protocol: 'esp',
+          encryption,
+          authentication,
+          lifetime: lifetime || 3600,
+          pfs_group: dhGroup,
+        };
+      }
+    }
+
+    // ---- IKE gateways ----
+    const ikeGateways = {};
+    const gwContainer = getNestedValue(device, 'network.ike.gateway');
+    if (gwContainer) {
+      for (const entry of extractEntries(gwContainer)) {
+        const name = entry['@_name'] || '';
+        if (!name) continue;
+
+        let peerAddress = '';
+        const peerAddr = entry['peer-address'];
+        if (peerAddr) {
+          if (typeof peerAddr === 'string') peerAddress = peerAddr;
+          else if (peerAddr.ip) peerAddress = String(peerAddr.ip);
+          else if (peerAddr.fqdn) peerAddress = String(peerAddr.fqdn);
+          else if (peerAddr.dynamic) peerAddress = 'dynamic';
+        }
+
+        let localAddress = '';
+        const localAddr = entry['local-address'];
+        if (localAddr) {
+          if (typeof localAddr === 'string') localAddress = localAddr;
+          else if (localAddr.interface) localAddress = String(localAddr.interface);
+          else if (localAddr.ip) localAddress = String(localAddr.ip);
+        }
+
+        let ikeVersion = 'v2';
+        const protocol = entry.protocol;
+        if (protocol) {
+          if (protocol.ikev1) ikeVersion = 'v1';
+          else if (protocol.ikev2) ikeVersion = 'v2';
+        }
+
+        let ikeProposal = '';
+        // Check protocol-common for crypto profile reference
+        const protocolCommon = entry['protocol-common'];
+        if (protocolCommon && protocolCommon['ike-crypto-profile']) {
+          ikeProposal = String(protocolCommon['ike-crypto-profile']);
+        }
+        // Also check protocol > ikev2/ikev1 for crypto profile reference
+        if (!ikeProposal && protocol) {
+          if (protocol.ikev2 && protocol.ikev2['ike-crypto-profile']) {
+            ikeProposal = String(protocol.ikev2['ike-crypto-profile']);
+          } else if (protocol.ikev1 && protocol.ikev1['ike-crypto-profile']) {
+            ikeProposal = String(protocol.ikev1['ike-crypto-profile']);
+          }
+        }
+        const auth = entry.authentication;
+        if (auth && auth['pre-shared-key']) {
+          warnings.push(createWarning(
+            'info',
+            'ike-gateway/' + name,
+            'IKE gateway ' + name + ' pre-shared key sanitized',
+            'Pre-shared keys are never included in parsed output'
+          ));
+        }
+
+        ikeGateways[name] = {
+          name,
+          address: peerAddress,
+          local_address: localAddress,
+          pre_shared_key: 'SANITIZED',
+          ike_version: ikeVersion,
+          proposal: ikeProposal,
+        };
+      }
+    }
+
+    // ---- IPsec tunnels ----
+    const ipsecContainer = getNestedValue(device, 'network.tunnel.ipsec');
+    if (ipsecContainer) {
+      for (const entry of extractEntries(ipsecContainer)) {
+        const name = entry['@_name'] || '';
+        if (!name) continue;
+
+        const tunnelInterface = entry['tunnel-interface'] ? String(entry['tunnel-interface']) : '';
+        const autoKey = entry['auto-key'] || {};
+
+        let gwName = '';
+        const ikeGwRef = autoKey['ike-gateway'];
+        if (ikeGwRef) {
+          const gwEntries = extractEntries(ikeGwRef);
+          if (gwEntries.length > 0) gwName = gwEntries[0]['@_name'] || '';
+        }
+
+        let ipsecProposalName = '';
+        if (autoKey['ipsec-crypto-profile']) {
+          ipsecProposalName = String(autoKey['ipsec-crypto-profile']);
+        }
+
+        const proxyIds = [];
+        const proxyIdContainer = autoKey['proxy-id'];
+        if (proxyIdContainer) {
+          for (const pid of extractEntries(proxyIdContainer)) {
+            proxyIds.push({
+              local: pid.local ? String(pid.local) : '',
+              remote: pid.remote ? String(pid.remote) : '',
+              protocol: pid.protocol ? String(pid.protocol) : 'any',
+            });
+          }
+        }
+
+        const gw = ikeGateways[gwName] || {
+          name: gwName, address: '', local_address: '',
+          pre_shared_key: 'SANITIZED', ike_version: 'v2', proposal: '',
+        };
+
+        const ikeProposal = ikeCryptoProfiles[gw.proposal] || {
+          name: gw.proposal || 'default', auth_method: 'pre-shared-keys',
+          dh_group: 'group14', encryption: 'aes-256-cbc',
+          authentication: 'sha256', lifetime: 28800,
+        };
+
+        const ipsecProposal = ipsecCryptoProfiles[ipsecProposalName] || {
+          name: ipsecProposalName || 'default', protocol: 'esp',
+          encryption: 'aes-256-cbc', authentication: 'sha256',
+          lifetime: 3600, pfs_group: 'group14',
+        };
+
+        vpnTunnels.push({
+          name,
+          ike_gateway: gw,
+          ike_proposal: ikeProposal,
+          ipsec_proposal: ipsecProposal,
+          proxy_id: proxyIds,
+          tunnel_interface: tunnelInterface,
+          description: '',
+        });
+      }
+    }
+  }
+
+  if (vpnTunnels.length > 0) {
+    warnings.push(createWarning(
+      'info', 'vpn',
+      'Parsed ' + vpnTunnels.length + ' VPN/IPsec tunnel(s)',
+      'VPN tunnel configuration detected and included in intermediate output'
+    ));
+  }
+
+  return vpnTunnels;
+}
 function parseNatRules(vsys, warnings) {
   const rulebase = vsys.rulebase;
   if (!rulebase) return [];
@@ -1222,4 +1684,182 @@ function parseNatRules(vsys, warnings) {
       _uturn: isUturn || undefined,
     };
   });
+}
+
+
+// ---------------------------------------------------------------------------
+// Syslog Configuration Parser
+// ---------------------------------------------------------------------------
+
+/**
+ * Parses PAN-OS syslog server profile configuration.
+ * Located at: devices > entry > deviceconfig > system > syslog
+ */
+function parseSyslogConfig(config, warnings) {
+  const servers = [];
+  const devices = getNestedValue(config, 'devices');
+  if (!devices) return servers;
+
+  const entries = Array.isArray(devices.entry) ? devices.entry : devices.entry ? [devices.entry] : [];
+  for (const device of entries) {
+    // PAN-OS syslog: deviceconfig > system > syslog > server-profile > entry
+    const syslogSection = getNestedValue(device, 'deviceconfig.system.syslog');
+    if (!syslogSection) continue;
+
+    const profiles = syslogSection['server-profile'];
+    if (!profiles) continue;
+
+    const profileEntries = Array.isArray(profiles.entry) ? profiles.entry : profiles.entry ? [profiles.entry] : [];
+    for (const profile of profileEntries) {
+      const profileName = profile['@_name'] || profile.name || 'default';
+      const serverSection = profile.server;
+      if (!serverSection) continue;
+
+      const serverEntries = Array.isArray(serverSection.entry) ? serverSection.entry : serverSection.entry ? [serverSection.entry] : [];
+      for (const srv of serverEntries) {
+        servers.push({
+          name: srv['@_name'] || srv.name || profileName,
+          server: srv.server || srv['@_name'] || '',
+          port: parseInt(srv.port || '514', 10),
+          transport: srv.transport || 'udp',
+          facility: srv.facility || 'LOG_USER',
+          profile: profileName,
+        });
+      }
+    }
+  }
+
+  if (servers.length > 0) {
+    warnings.push(createWarning('info', 'syslog', `Parsed ${servers.length} syslog server(s)`, 'Syslog server configuration detected'));
+  }
+  return servers;
+}
+
+
+// ---------------------------------------------------------------------------
+// DHCP Configuration Parser
+// ---------------------------------------------------------------------------
+
+/**
+ * Parses PAN-OS DHCP server/relay configuration.
+ * Located at: devices > entry > network > dhcp
+ */
+function parseDhcpConfig(config, warnings) {
+  const dhcpConfigs = [];
+  const devices = getNestedValue(config, 'devices');
+  if (!devices) return dhcpConfigs;
+
+  const entries = Array.isArray(devices.entry) ? devices.entry : devices.entry ? [devices.entry] : [];
+  for (const device of entries) {
+    const dhcpSection = getNestedValue(device, 'network.dhcp');
+    if (!dhcpSection) continue;
+
+    // DHCP Server
+    const serverSection = dhcpSection.interface;
+    if (serverSection) {
+      const ifEntries = Array.isArray(serverSection.entry) ? serverSection.entry : serverSection.entry ? [serverSection.entry] : [];
+      for (const iface of ifEntries) {
+        const ifName = iface['@_name'] || '';
+        const serverConfig = iface.server;
+        if (!serverConfig) continue;
+
+        const ipPool = serverConfig['ip-pool'];
+        const pools = [];
+        if (ipPool) {
+          const members = Array.isArray(ipPool.member) ? ipPool.member : ipPool.member ? [ipPool.member] : [];
+          pools.push(...members);
+        }
+
+        const gateway = serverConfig.option?.gateway || '';
+        const dns1 = serverConfig.option?.['dns-server']?.primary || '';
+        const dns2 = serverConfig.option?.['dns-server']?.secondary || '';
+
+        dhcpConfigs.push({
+          type: 'server',
+          interface: ifName,
+          pools,
+          gateway,
+          dns_servers: [dns1, dns2].filter(Boolean),
+          lease_time: parseInt(serverConfig.option?.lease?.timeout || '86400', 10),
+        });
+      }
+    }
+
+    // DHCP Relay
+    const relaySection = dhcpSection.relay;
+    if (relaySection) {
+      const relayEntries = Array.isArray(relaySection.entry) ? relaySection.entry : relaySection.entry ? [relaySection.entry] : [];
+      for (const relay of relayEntries) {
+        const ifName = relay['@_name'] || '';
+        const relayServers = relay.server?.['ip-address'];
+        const serverList = Array.isArray(relayServers) ? relayServers : relayServers ? [relayServers] : [];
+        if (relay.server) {
+          const members = Array.isArray(relay.server.member) ? relay.server.member : relay.server.member ? [relay.server.member] : [];
+          if (members.length > 0) serverList.push(...members);
+        }
+        dhcpConfigs.push({
+          type: 'relay',
+          interface: ifName,
+          servers: serverList,
+        });
+      }
+    }
+  }
+
+  if (dhcpConfigs.length > 0) {
+    warnings.push(createWarning('info', 'dhcp', `Parsed ${dhcpConfigs.length} DHCP config(s)`, 'DHCP server/relay configuration detected'));
+  }
+  return dhcpConfigs;
+}
+
+
+// ---------------------------------------------------------------------------
+// QoS Configuration Parser
+// ---------------------------------------------------------------------------
+
+/**
+ * Parses PAN-OS QoS profile configuration.
+ * Located at: devices > entry > network > qos > profile
+ */
+function parseQosConfig(config, warnings) {
+  const qosProfiles = [];
+  const devices = getNestedValue(config, 'devices');
+  if (!devices) return qosProfiles;
+
+  const entries = Array.isArray(devices.entry) ? devices.entry : devices.entry ? [devices.entry] : [];
+  for (const device of entries) {
+    const qosSection = getNestedValue(device, 'network.qos.profile');
+    if (!qosSection) continue;
+
+    const profileEntries = Array.isArray(qosSection.entry) ? qosSection.entry : qosSection.entry ? [qosSection.entry] : [];
+    for (const profile of profileEntries) {
+      const name = profile['@_name'] || profile.name || 'default';
+      const classes = [];
+
+      // Parse class bandwidth allocations
+      const classSection = profile.class;
+      if (classSection) {
+        const classEntries = Array.isArray(classSection.entry) ? classSection.entry : classSection.entry ? [classSection.entry] : [];
+        for (const cls of classEntries) {
+          classes.push({
+            name: cls['@_name'] || '',
+            priority: cls.priority || 'medium',
+            guaranteed_bandwidth: parseInt(cls['guaranteed-bandwidth'] || '0', 10),
+            maximum_bandwidth: parseInt(cls['maximum-bandwidth'] || '0', 10),
+          });
+        }
+      }
+
+      qosProfiles.push({
+        name,
+        max_bandwidth: parseInt(profile['aggregate-bandwidth']?.['egress-max'] || '0', 10),
+        classes,
+      });
+    }
+  }
+
+  if (qosProfiles.length > 0) {
+    warnings.push(createWarning('info', 'qos', `Parsed ${qosProfiles.length} QoS profile(s)`, 'QoS configuration detected'));
+  }
+  return qosProfiles;
 }

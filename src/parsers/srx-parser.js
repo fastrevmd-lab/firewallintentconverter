@@ -51,6 +51,8 @@ export function parseSrxConfig(configText) {
   const applications = parseApplications(tree, warnings);
   const schedules = parseSchedulers(setCommands, warnings);
   const { staticRoutes, routingContexts } = parseSrxStaticRoutes(tree, warnings);
+  const haConfig = parseSrxHaConfig(tree, warnings);
+  const screenConfig = parseSrxScreenConfig(tree, zones, warnings);
 
   // Extract version info if available
   const version = extractVersion(tree);
@@ -78,6 +80,14 @@ export function parseSrxConfig(configText) {
     _implicit: true,
   });
 
+  // Parse VPN/IPsec tunnel configuration
+  const vpnTunnels = parseSrxVpnConfig(tree, warnings);
+
+  // Parse syslog, DHCP, QoS
+  const syslogConfig = parseSrxSyslogConfig(tree, warnings);
+  const dhcpConfig = parseSrxDhcpConfig(tree, warnings);
+  const qosConfig = parseSrxQosConfig(tree, warnings);
+
   const intermediateConfig = {
     zones,
     address_objects: addressObjects,
@@ -91,7 +101,12 @@ export function parseSrxConfig(configText) {
     schedules,
     security_profile_objects: [],
     external_lists: [],
-    vpn_tunnels: [],
+    vpn_tunnels: vpnTunnels,
+    ha_config: haConfig,
+    screen_config: screenConfig,
+    syslog_config: syslogConfig,
+    dhcp_config: dhcpConfig,
+    qos_config: qosConfig,
     routing_contexts: routingContexts,
     static_routes: staticRoutes,
     target_context: null,
@@ -103,8 +118,13 @@ export function parseSrxConfig(configText) {
       nat_rule_count: natRules.length,
       object_count: addressObjects.length + addressGroups.length + serviceObjects.length + serviceGroups.length,
       zone_count: zones.length,
+      vpn_tunnel_count: vpnTunnels.length,
+      syslog_server_count: syslogConfig.length,
+      dhcp_config_count: dhcpConfig.length,
+      qos_profile_count: qosConfig.length,
       routing_context_count: routingContexts.length,
       static_route_count: staticRoutes.length,
+      ha_enabled: !!(haConfig && haConfig.enabled),
       multi_vsys: false,
     },
   };
@@ -1063,9 +1083,368 @@ function buildSrxRoute(dest, data, vrf, routingContext) {
   };
 }
 
+// ---------------------------------------------------------------------------
+// HA (Chassis Cluster) Configuration
+// ---------------------------------------------------------------------------
+// Screen / DDoS Protection Parser
+// ---------------------------------------------------------------------------
+
+/**
+ * Parses SRX screen (ids-option) config into the screen_config schema.
+ * Screens at: security > screen > ids-option > <screen-name>
+ * Zone assignment: security > zones > security-zone > <zone-name> > screen
+ */
+function parseSrxScreenConfig(tree, zones, warnings) {
+  const screenConfigs = [];
+
+  const idsOptions = tree?.security?.screen?.['ids-option'];
+  if (!idsOptions || typeof idsOptions !== 'object') return screenConfigs;
+
+  // Build map of zone → screen name from zone config
+  const zoneToScreen = {};
+  const zonesNode = tree?.security?.zones?.['security-zone'];
+  if (zonesNode && typeof zonesNode === 'object') {
+    for (const [zoneName, zoneData] of Object.entries(zonesNode)) {
+      if (typeof zoneData !== 'object' || zoneName.startsWith('_')) continue;
+      if (zoneData.screen) {
+        const screenName = extractStringValue(zoneData.screen);
+        if (screenName) {
+          zoneToScreen[screenName] = zoneName;
+        }
+      }
+    }
+  }
+
+  for (const [screenName, screenData] of Object.entries(idsOptions)) {
+    if (typeof screenData !== 'object' || screenName.startsWith('_')) continue;
+
+    const icmpNode = screenData.icmp || {};
+    const tcpNode = screenData.tcp || {};
+    const udpNode = screenData.udp || {};
+    const ipNode = screenData.ip || {};
+    const limitNode = screenData['limit-session'] || {};
+
+    const screen = {
+      name: screenName,
+      zone: zoneToScreen[screenName] || '',
+      icmp: {
+        flood_threshold: parseInt(extractStringValue(icmpNode['flood']?.threshold)) || null,
+        ping_death: !!(icmpNode['ping-death'] === true || icmpNode['ping-death'] === 'true'),
+        fragment: !!(icmpNode['fragment'] === true || icmpNode['fragment'] === 'true'),
+      },
+      tcp: {
+        syn_flood_threshold: null,
+        syn_flood_timeout: null,
+        land_attack: !!(tcpNode['land'] === true || tcpNode['land'] === 'true'),
+        winnuke: !!(tcpNode['winnuke'] === true || tcpNode['winnuke'] === 'true'),
+        tcp_no_flag: !!(tcpNode['tcp-no-flag'] === true || tcpNode['tcp-no-flag'] === 'true'),
+      },
+      udp: {
+        flood_threshold: parseInt(extractStringValue(udpNode['flood']?.threshold)) || null,
+      },
+      ip: {
+        spoofing: !!(ipNode['spoofing'] === true || ipNode['spoofing'] === 'true'),
+        source_route: !!(ipNode['source-route-option'] === true || ipNode['source-route-option'] === 'true'),
+        tear_drop: !!(ipNode['tear-drop'] === true || ipNode['tear-drop'] === 'true'),
+        record_route: !!(ipNode['record-route-option'] === true || ipNode['record-route-option'] === 'true'),
+        timestamp: !!(ipNode['timestamp-option'] === true || ipNode['timestamp-option'] === 'true'),
+      },
+      limit_session: {
+        source_based: parseInt(extractStringValue(limitNode['source-ip-based'])) || null,
+        destination_based: parseInt(extractStringValue(limitNode['destination-ip-based'])) || null,
+      },
+      description: '',
+    };
+
+    // Parse SYN flood sub-tree
+    const synFlood = tcpNode['syn-flood'];
+    if (synFlood && typeof synFlood === 'object') {
+      screen.tcp.syn_flood_threshold =
+        parseInt(extractStringValue(synFlood['attack-threshold'])) ||
+        parseInt(extractStringValue(synFlood['alarm-threshold'])) ||
+        null;
+      screen.tcp.syn_flood_timeout =
+        parseInt(extractStringValue(synFlood['timeout'])) || null;
+    }
+
+    // Parse ICMP ip-sweep threshold (maps to icmp flood_threshold if not already set)
+    const ipSweep = icmpNode['ip-sweep'];
+    if (ipSweep && typeof ipSweep === 'object' && !screen.icmp.flood_threshold) {
+      screen.icmp.flood_threshold = parseInt(extractStringValue(ipSweep.threshold)) || null;
+    }
+
+    screenConfigs.push(screen);
+  }
+
+  if (screenConfigs.length > 0) {
+    warnings.push(createWarning('info', 'screen-config',
+      `Parsed ${screenConfigs.length} screen ids-option profile(s)`,
+      'Review screen/DDoS settings in the generated config'));
+  }
+
+  return screenConfigs;
+}
+
+
+// ---------------------------------------------------------------------------
+
+function parseSrxHaConfig(tree, warnings) {
+  const chassis = tree['chassis'];
+  if (!chassis) return null;
+  const cluster = chassis['cluster'];
+  if (!cluster) return null;
+
+  const clusterId = parseInt(extractStringValue(cluster['cluster-id'])) || 1;
+
+  // Redundancy groups
+  const haInterfaces = [];
+  const rg = cluster['redundancy-group'];
+  let primaryPriority = 200;
+  if (rg && typeof rg === 'object') {
+    for (const [rgId, rgData] of Object.entries(rg)) {
+      if (typeof rgData !== 'object') continue;
+      const node = rgData['node'];
+      if (node && typeof node === 'object') {
+        for (const [nodeId, nodeData] of Object.entries(node)) {
+          if (typeof nodeData !== 'object') continue;
+          const prio = parseInt(extractStringValue(nodeData['priority']));
+          if (nodeId === '0' && rgId === '0' && prio) primaryPriority = prio;
+        }
+      }
+    }
+  }
+
+  // Fabric interfaces
+  const interfaces = tree['interfaces'] || {};
+  for (const ifName of ['fab0', 'fab1']) {
+    const fab = interfaces[ifName];
+    if (fab && typeof fab === 'object') {
+      const opts = fab['fabric-options'] || {};
+      const members = opts['member-interfaces'];
+      haInterfaces.push({
+        name: ifName,
+        ip: '',
+        netmask: '',
+        interface: members ? (typeof members === 'string' ? members : Object.keys(members)[0] || '') : '',
+      });
+    }
+  }
+
+  // Control link (fxp0 for management, fxp1 for control)
+  for (const ifName of ['fxp0', 'fxp1']) {
+    const fxp = interfaces[ifName];
+    if (fxp && typeof fxp === 'object') {
+      haInterfaces.push({
+        name: ifName,
+        ip: '',
+        netmask: '',
+        interface: ifName,
+      });
+    }
+  }
+
+  return {
+    enabled: true,
+    mode: 'cluster',
+    group_id: clusterId,
+    priority: primaryPriority,
+    preempt: false,
+    peer_ip: '',
+    ha_interfaces: haInterfaces,
+    monitoring: { link_groups: [], path_groups: [] },
+    description: `SRX chassis cluster id ${clusterId}`,
+  };
+}
+
 /**
  * Extract Junos version from tree.
  */
+
+// ---------------------------------------------------------------------------
+// VPN / IPsec Tunnel Parser
+// ---------------------------------------------------------------------------
+
+/**
+ * Parses Junos SRX VPN/IPsec configuration from the config tree.
+ * IKE: tree.security.ike (proposals, policies, gateways)
+ * IPsec: tree.security.ipsec (proposals, policies, vpns)
+ */
+function parseSrxVpnConfig(tree, warnings) {
+  const vpnTunnels = [];
+  const ikeNode = tree && tree.security ? tree.security.ike : null;
+  const ipsecNode = tree && tree.security ? tree.security.ipsec : null;
+
+  // ---- IKE proposals ----
+  const ikeProposals = {};
+  if (ikeNode && ikeNode.proposal) {
+    for (const [name, data] of Object.entries(ikeNode.proposal)) {
+      if (name.startsWith('_') || typeof data !== 'object') continue;
+      ikeProposals[name] = {
+        name,
+        auth_method: extractStringValue(data['authentication-method']) || 'pre-shared-keys',
+        dh_group: extractStringValue(data['dh-group']) || 'group14',
+        encryption: extractStringValue(data['encryption-algorithm']) || 'aes-256-cbc',
+        authentication: extractStringValue(data['authentication-algorithm']) || 'sha-256',
+        lifetime: parseInt(extractStringValue(data['lifetime-seconds']), 10) || 28800,
+      };
+    }
+  }
+
+  // ---- IKE policies ----
+  const ikePolicies = {};
+  if (ikeNode && ikeNode.policy) {
+    for (const [name, data] of Object.entries(ikeNode.policy)) {
+      if (name.startsWith('_') || typeof data !== 'object') continue;
+      const proposalRefs = collectKeys(data.proposals);
+      const hasPsk = data['pre-shared-key'];
+      if (hasPsk) {
+        warnings.push(createWarning(
+          'info', 'ike-policy/' + name,
+          'IKE policy ' + name + ' pre-shared key sanitized',
+          'Pre-shared keys are never included in parsed output'
+        ));
+      }
+      ikePolicies[name] = {
+        name,
+        mode: extractStringValue(data.mode) || 'main',
+        proposals: proposalRefs,
+      };
+    }
+  }
+
+
+  // ---- IKE gateways ----
+  const ikeGateways = {};
+  if (ikeNode && ikeNode.gateway) {
+    for (const [name, data] of Object.entries(ikeNode.gateway)) {
+      if (name.startsWith('_') || typeof data !== 'object') continue;
+      const address = extractStringValue(data.address);
+      const extInterface = extractStringValue(data['external-interface']);
+      const ikePolicyRef = extractStringValue(data['ike-policy']);
+      const policy = ikePolicies[ikePolicyRef];
+      const ikeVersion = data.version ? extractStringValue(data.version) : 'v2';
+
+      ikeGateways[name] = {
+        name, address,
+        local_address: extInterface,
+        pre_shared_key: 'SANITIZED',
+        ike_version: ikeVersion.startsWith('v') ? ikeVersion : 'v' + ikeVersion,
+        proposal: ikePolicyRef,
+        _proposalRefs: policy ? policy.proposals : [],
+      };
+    }
+  }
+
+  // ---- IPsec proposals ----
+  const ipsecProposals = {};
+  if (ipsecNode && ipsecNode.proposal) {
+    for (const [name, data] of Object.entries(ipsecNode.proposal)) {
+      if (name.startsWith('_') || typeof data !== 'object') continue;
+      ipsecProposals[name] = {
+        name,
+        protocol: extractStringValue(data.protocol) || 'esp',
+        encryption: extractStringValue(data['encryption-algorithm']) || 'aes-256-cbc',
+        authentication: extractStringValue(data['authentication-algorithm']) || 'hmac-sha-256-128',
+        lifetime: parseInt(extractStringValue(data['lifetime-seconds']), 10) || 3600,
+        pfs_group: 'group14',
+      };
+    }
+  }
+
+  // ---- IPsec policies ----
+  const ipsecPolicies = {};
+  if (ipsecNode && ipsecNode.policy) {
+    for (const [name, data] of Object.entries(ipsecNode.policy)) {
+      if (name.startsWith('_') || typeof data !== 'object') continue;
+      const pfsNode = data['perfect-forward-secrecy'];
+      const pfs = pfsNode ? pfsNode.keys : null;
+      const proposalRefs = collectKeys(data.proposals);
+      ipsecPolicies[name] = {
+        name,
+        pfs_group: pfs ? extractStringValue(pfs) : 'group14',
+        proposals: proposalRefs,
+      };
+    }
+  }
+
+
+  // ---- IPsec VPNs ----
+  if (ipsecNode && ipsecNode.vpn) {
+    for (const [name, data] of Object.entries(ipsecNode.vpn)) {
+      if (name.startsWith('_') || typeof data !== 'object') continue;
+
+      const bindInterface = extractStringValue(data['bind-interface']);
+      const ikeData = data.ike || {};
+      const gwRef = extractStringValue(ikeData.gateway);
+      const ipsecPolicyRef = extractStringValue(ikeData['ipsec-policy']);
+
+      // Traffic selectors
+      const proxyIds = [];
+      const tsNode = data['traffic-selector'];
+      if (tsNode && typeof tsNode === 'object') {
+        for (const [tsName, tsData] of Object.entries(tsNode)) {
+          if (tsName.startsWith('_') || typeof tsData !== 'object') continue;
+          proxyIds.push({
+            local: extractStringValue(tsData['local-ip']) || '',
+            remote: extractStringValue(tsData['remote-ip']) || '',
+            protocol: 'any',
+          });
+        }
+      }
+
+      // Resolve gateway
+      const gw = ikeGateways[gwRef] || {
+        name: gwRef, address: '', local_address: '',
+        pre_shared_key: 'SANITIZED', ike_version: 'v2', proposal: '', _proposalRefs: [],
+      };
+
+      // Resolve IKE proposal
+      const firstIkeProposalName = gw._proposalRefs && gw._proposalRefs[0] ? gw._proposalRefs[0] : '';
+      const ikeProposal = ikeProposals[firstIkeProposalName] || {
+        name: firstIkeProposalName || 'default',
+        auth_method: 'pre-shared-keys', dh_group: 'group14',
+        encryption: 'aes-256-cbc', authentication: 'sha-256', lifetime: 28800,
+      };
+
+      // Resolve IPsec proposal
+      const ipsecPolicy = ipsecPolicies[ipsecPolicyRef];
+      const firstIpsecProposalName = ipsecPolicy && ipsecPolicy.proposals[0] ? ipsecPolicy.proposals[0] : '';
+      const ipsecProposal = ipsecProposals[firstIpsecProposalName] || {
+        name: firstIpsecProposalName || 'default', protocol: 'esp',
+        encryption: 'aes-256-cbc', authentication: 'hmac-sha-256-128',
+        lifetime: 3600, pfs_group: 'group14',
+      };
+      if (ipsecPolicy && ipsecPolicy.pfs_group) {
+        ipsecProposal.pfs_group = ipsecPolicy.pfs_group;
+      }
+
+      vpnTunnels.push({
+        name,
+        ike_gateway: {
+          name: gw.name, address: gw.address, local_address: gw.local_address,
+          pre_shared_key: 'SANITIZED', ike_version: gw.ike_version, proposal: gw.proposal,
+        },
+        ike_proposal: ikeProposal,
+        ipsec_proposal: ipsecProposal,
+        proxy_id: proxyIds,
+        tunnel_interface: bindInterface,
+        description: '',
+      });
+    }
+  }
+
+  if (vpnTunnels.length > 0) {
+    warnings.push(createWarning(
+      'info', 'vpn',
+      'Parsed ' + vpnTunnels.length + ' VPN/IPsec tunnel(s)',
+      'VPN tunnel configuration detected and included in intermediate output'
+    ));
+  }
+
+  return vpnTunnels;
+}
+
+
 function extractVersion(tree) {
   // version statement
   if (tree.version) {
@@ -1076,4 +1455,230 @@ function extractVersion(tree) {
     return 'unknown (host: ' + extractStringValue(tree.system['host-name']) + ')';
   }
   return 'unknown';
+}
+
+
+// ---------------------------------------------------------------------------
+// Syslog Configuration Parser
+// ---------------------------------------------------------------------------
+
+function parseSrxSyslogConfig(tree, warnings) {
+  const servers = [];
+  const syslog = tree.system?.syslog;
+  if (!syslog) return servers;
+
+  // SRX: set system syslog host <ip> <facility> <level>
+  const hosts = syslog.host;
+  if (hosts && typeof hosts === 'object') {
+    for (const [hostAddr, hostConfig] of Object.entries(hosts)) {
+      if (typeof hostConfig !== 'object') continue;
+      const rawTransport = hostConfig['transport']?.protocol;
+      const transport = typeof rawTransport === 'object' ? Object.keys(rawTransport)[0] || 'udp' : rawTransport || 'udp';
+      const rawPort = hostConfig.port;
+      const port = parseInt(typeof rawPort === 'object' ? Object.keys(rawPort)[0] || '514' : rawPort || (hostConfig['transport']?.['tls-profile'] ? '6514' : '514'), 10);
+
+      // Parse facility/severity pairs
+      const facilities = [];
+      for (const [key, val] of Object.entries(hostConfig)) {
+        if (['transport', 'port', 'source-address', 'structured-data'].includes(key)) continue;
+        if (typeof val === 'string') {
+          facilities.push({ facility: key, level: val });
+        } else if (typeof val === 'object') {
+          facilities.push({ facility: key, level: Object.keys(val)[0] || 'any' });
+        }
+      }
+
+      servers.push({
+        name: `syslog-${hostAddr}`,
+        server: hostAddr,
+        port,
+        transport,
+        facilities,
+        source_address: hostConfig['source-address'] || '',
+        structured_data: !!hostConfig['structured-data'],
+      });
+    }
+  }
+
+  // SRX: set system syslog file <name> <facility> <level>
+  const files = syslog.file;
+  if (files && typeof files === 'object') {
+    for (const [fileName, fileConfig] of Object.entries(files)) {
+      if (typeof fileConfig !== 'object') continue;
+      const facilities = [];
+      for (const [key, val] of Object.entries(fileConfig)) {
+        if (['archive', 'match', 'structured-data'].includes(key)) continue;
+        if (typeof val === 'string') {
+          facilities.push({ facility: key, level: val });
+        }
+      }
+      servers.push({
+        name: `file-${fileName}`,
+        server: `file:${fileName}`,
+        port: 0,
+        transport: 'file',
+        facilities,
+      });
+    }
+  }
+
+  if (servers.length > 0) {
+    warnings.push(createWarning('info', 'syslog', `Parsed ${servers.length} syslog destination(s)`, 'Syslog configuration detected'));
+  }
+  return servers;
+}
+
+
+// ---------------------------------------------------------------------------
+// DHCP Configuration Parser
+// ---------------------------------------------------------------------------
+
+function parseSrxDhcpConfig(tree, warnings) {
+  const dhcpConfigs = [];
+
+  // SRX: set system services dhcp-local-server group <name> interface <if>
+  const dhcpLocal = tree.system?.services?.['dhcp-local-server'];
+  if (dhcpLocal) {
+    const groups = dhcpLocal.group;
+    if (groups && typeof groups === 'object') {
+      for (const [groupName, groupConfig] of Object.entries(groups)) {
+        if (typeof groupConfig !== 'object') continue;
+        const ifaces = [];
+        const ifSection = groupConfig.interface;
+        if (ifSection) {
+          if (typeof ifSection === 'string') ifaces.push(ifSection);
+          else if (typeof ifSection === 'object') ifaces.push(...Object.keys(ifSection));
+        }
+        dhcpConfigs.push({
+          type: 'server',
+          group: groupName,
+          interfaces: ifaces,
+        });
+      }
+    }
+  }
+
+  // SRX: set forwarding-options helpers bootp interface <if> server <ip>
+  const bootp = tree['forwarding-options']?.helpers?.bootp;
+  if (bootp) {
+    const ifSection = bootp.interface;
+    if (ifSection && typeof ifSection === 'object') {
+      for (const [ifName, ifConfig] of Object.entries(ifSection)) {
+        if (typeof ifConfig !== 'object') continue;
+        const relayServers = [];
+        const serverSection = ifConfig.server;
+        if (typeof serverSection === 'string') relayServers.push(serverSection);
+        else if (typeof serverSection === 'object') relayServers.push(...Object.keys(serverSection));
+
+        dhcpConfigs.push({
+          type: 'relay',
+          interface: ifName,
+          servers: relayServers,
+        });
+      }
+    }
+  }
+
+  // SRX: set access address-assignment pool <name> family inet range <range> low/high
+  const pools = tree.access?.['address-assignment']?.pool;
+  if (pools && typeof pools === 'object') {
+    for (const [poolName, poolConfig] of Object.entries(pools)) {
+      if (typeof poolConfig !== 'object') continue;
+      const network = poolConfig.family?.inet?.network || '';
+      const ranges = [];
+      const rangeSection = poolConfig.family?.inet?.range;
+      if (rangeSection && typeof rangeSection === 'object') {
+        for (const [rangeName, rangeConfig] of Object.entries(rangeSection)) {
+          if (typeof rangeConfig !== 'object') continue;
+          ranges.push({ name: rangeName, low: rangeConfig.low || '', high: rangeConfig.high || '' });
+        }
+      }
+      const dns = [];
+      const dnsSection = poolConfig.family?.inet?.['dhcp-attributes']?.['name-server'];
+      if (dnsSection) {
+        if (typeof dnsSection === 'string') dns.push(dnsSection);
+        else if (typeof dnsSection === 'object') dns.push(...Object.keys(dnsSection));
+      }
+      const router = poolConfig.family?.inet?.['dhcp-attributes']?.router || '';
+
+      dhcpConfigs.push({
+        type: 'pool',
+        name: poolName,
+        network,
+        ranges,
+        dns_servers: dns,
+        router,
+      });
+    }
+  }
+
+  if (dhcpConfigs.length > 0) {
+    warnings.push(createWarning('info', 'dhcp', `Parsed ${dhcpConfigs.length} DHCP config(s)`, 'DHCP configuration detected'));
+  }
+  return dhcpConfigs;
+}
+
+
+// ---------------------------------------------------------------------------
+// QoS / CoS Configuration Parser
+// ---------------------------------------------------------------------------
+
+function parseSrxQosConfig(tree, warnings) {
+  const qosProfiles = [];
+
+  // SRX: set class-of-service ...
+  const cos = tree['class-of-service'];
+  if (!cos) return qosProfiles;
+
+  // Forwarding classes
+  const fwdClasses = cos['forwarding-classes'];
+  const classMap = {};
+  if (fwdClasses) {
+    const classSection = fwdClasses.class || fwdClasses['queue'];
+    if (classSection && typeof classSection === 'object') {
+      for (const [name, config] of Object.entries(classSection)) {
+        classMap[name] = {
+          name,
+          queue: typeof config === 'object' ? (config['queue-num'] || '') : config,
+          priority: typeof config === 'object' ? (config.priority || '') : '',
+        };
+      }
+    }
+  }
+
+  // Schedulers
+  const schedulers = cos.schedulers;
+  if (schedulers && typeof schedulers === 'object') {
+    for (const [name, config] of Object.entries(schedulers)) {
+      if (typeof config !== 'object') continue;
+      qosProfiles.push({
+        name,
+        type: 'scheduler',
+        transmit_rate: extractStringValue(config['transmit-rate']),
+        buffer_size: extractStringValue(config['buffer-size']),
+        priority: extractStringValue(config.priority),
+        drop_profile: extractStringValue(config['drop-profile-map']?.['loss-priority']?.['any']?.protocol?.any),
+      });
+    }
+  }
+
+  // Interfaces with CoS
+  const interfaces = cos.interfaces;
+  if (interfaces && typeof interfaces === 'object') {
+    for (const [ifName, ifConfig] of Object.entries(interfaces)) {
+      if (typeof ifConfig !== 'object') continue;
+      qosProfiles.push({
+        name: `cos-${ifName}`,
+        type: 'interface-cos',
+        interface: ifName,
+        scheduler_map: extractStringValue(ifConfig['scheduler-map']),
+        shaping_rate: extractStringValue(ifConfig['shaping-rate']),
+      });
+    }
+  }
+
+  if (qosProfiles.length > 0) {
+    warnings.push(createWarning('info', 'qos', `Parsed ${qosProfiles.length} CoS/QoS config(s)`, 'Class-of-service configuration detected'));
+  }
+  return qosProfiles;
 }

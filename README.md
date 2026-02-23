@@ -91,7 +91,8 @@ Click **Convert to SRX** to generate the output. Switch between **Set Commands**
 - **Schedule support** — Parses schedules from all vendors (FortiGate recurring/onetime, PAN-OS schedule objects, Cisco ASA time-ranges, SRX schedulers) and converts to SRX `set schedulers scheduler` commands with `scheduler-name` references on policies
 - **Nested object groups** — Correctly resolves nested address groups and service groups, emitting `address-set` (not `address`) and `application-set` (not `application`) references for group members that are themselves groups
 - **Vendor-native security profiles** — FortiGate profiles (Application Control, Email Filter, DLP, DNS Filter) use FortiGate-native field names in the intermediate schema and display with correct FortiGate terminology. SRX view shows correct Junos terms (Anti-virus instead of WildFire, Anti-spam, AppSecure, DNS Security). PAN-OS profiles (WildFire, File Blocking) remain unchanged
-- **Application mapping** — Automatically maps PAN-OS application names to Junos equivalents (e.g., `web-browsing` → `junos-http`)
+- **Application mapping** — 120+ cross-vendor application mappings (PAN-OS, FortiGate, Cisco ASA) to Junos predefined applications. Unmapped applications receive a `Customfwic` placeholder suffix with a warning to create a custom application definition on the SRX
+- **Application groups** — PAN-OS `<application-group>` entries are parsed with their members and expanded during conversion. The Applications tab shows groups with expandable member lists, and the SRX view displays per-app Junos mapping (e.g., `junos-ssh`) or `custom:app:'name'` for unmapped apps
 - **Sanitization** — One-click replacement of sensitive data (IPs, hostnames, keys) with placeholders before sharing or sending to an LLM. Originals are restored on export
 
 ### Dual Platform View
@@ -104,7 +105,7 @@ Click **Convert to SRX** to generate the output. Switch between **Set Commands**
 - **Profile group expansion** — PAN-OS profile group references are automatically resolved into individual security profiles
 
 ### Interactive Editing
-- **Tabbed center panel** — Switch between Security Policies/Rules, Security Zones, Address Book/Objects (with Addresses, Groups, Services, and Schedules sub-tabs), and NAT editors
+- **Tabbed center panel** — Switch between Security Policies/Rules, Security Zones, Address Book/Objects (with Addresses, Groups, Services, Applications, Security Profiles, and Schedules sub-tabs), and NAT editors
 - **Inline table editing** — Double-click any cell in the policy table to edit directly
 - **Right panel rule details** — Full editable form for the selected rule: action, zones, addresses, applications, services, logging, security profiles, tags, description
 - **Schedule editor** — View, edit, add, and delete schedules from the Objects > Schedules tab. Each schedule shows its type (recurring/onetime), days, time range, and which rules reference it

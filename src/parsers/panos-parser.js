@@ -104,6 +104,7 @@ export function parsePanosConfig(configText) {
   const serviceObjects = parseServiceObjects(vsys, warnings);
   const serviceGroups = parseServiceGroups(vsys, warnings);
   const applications = parseApplications(vsys, warnings);
+  const applicationGroups = parseApplicationGroups(vsys, warnings);
   const securityPolicies = parseSecurityRules(vsys, warnings);
   const natRules = parseNatRules(vsys, warnings);
   const externalLists = parseExternalLists(vsys, warnings);
@@ -182,6 +183,7 @@ export function parsePanosConfig(configText) {
     security_policies: securityPolicies,
     nat_rules: natRules,
     applications,
+    application_groups: applicationGroups,
     schedules,
     security_profile_objects: securityProfileObjects,
     external_lists: externalLists,
@@ -485,6 +487,34 @@ function parseApplications(vsys, warnings) {
       name,
       protocol,
       port,
+      description: entry.description || '',
+    };
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Application Group Parser
+// ---------------------------------------------------------------------------
+
+function parseApplicationGroups(vsys, warnings) {
+  const groupContainer = vsys['application-group'];
+  if (!groupContainer) return [];
+
+  const entries = extractEntries(groupContainer);
+  return entries.map((entry) => {
+    const name = entry['@_name'] || 'unnamed-app-group';
+    let members = [];
+
+    // PAN-OS uses <members><member>...</member></members>
+    const membersNode = entry.members;
+    if (membersNode) {
+      const membersObj = Array.isArray(membersNode) ? membersNode[0] : membersNode;
+      members = extractMembers(membersObj);
+    }
+
+    return {
+      name,
+      members,
       description: entry.description || '',
     };
   });

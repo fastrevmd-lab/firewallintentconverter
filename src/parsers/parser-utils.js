@@ -109,55 +109,301 @@ export function sanitizeJunosName(name) {
 }
 
 /**
- * Maps well-known PAN-OS application names to Junos built-in application names.
- * Returns null if no mapping exists (indicating a custom application or
- * one that requires interview clarification).
+ * Predefined Junos policy application names from official Juniper documentation.
+ * Source: https://www.juniper.net/documentation/us/en/software/junos/security-policies/topics/topic-map/policy-predefined-applications.html
+ */
+export const JUNOS_PREDEFINED_APPS = new Set([
+  // Internet
+  'junos-aol', 'junos-dhcp-relay', 'junos-dhcp-client', 'junos-dhcp-server',
+  'junos-dns-udp', 'junos-dns-tcp', 'junos-ftp', 'junos-ftp-data',
+  'junos-gopher', 'junos-http', 'junos-http-ext', 'junos-https',
+  'junos-internet-locator-service', 'junos-irc', 'junos-ldap',
+  'junos-pc-anywhere', 'junos-tftp', 'junos-wais',
+  // Microsoft
+  'junos-ms-rpc-epm', 'junos-ms-rpc', 'junos-ms-rpc-msexchange',
+  'junos-ms-rpc-msexchange-database', 'junos-ms-rpc-msexchange-directory',
+  'junos-ms-rpc-msexchange-info-store', 'junos-ms-rpc-tcp', 'junos-ms-rpc-udp',
+  'junos-ms-sql', 'junos-msn',
+  // Dynamic Routing
+  'junos-rip', 'junos-ospf', 'junos-bgp',
+  // Streaming Video
+  'junos-h323', 'junos-netmeeting', 'junos-realaudio', 'junos-rtsp',
+  'junos-sip', 'junos-vdo-live',
+  // Sun RPC
+  'junos-sun-rpc-portmapper', 'junos-sun-rpc-any',
+  'junos-sun-rpc-program-mountd', 'junos-sun-rpc-program-nfs',
+  'junos-sun-rpc-program-nlockmgr', 'junos-sun-rpc-program-rquotad',
+  'junos-sun-rpc-program-rstatd', 'junos-sun-rpc-program-ruserd',
+  'junos-sun-rpc-program-sadmind', 'junos-sun-rpc-program-sprayd',
+  'junos-sun-rpc-program-status', 'junos-sun-rpc-program-walld',
+  'junos-sun-rpc-program-ypbind',
+  // Security & Tunnel
+  'junos-ike', 'junos-ike-nat', 'junos-l2tp', 'junos-pptp',
+  // IP catch-all
+  'junos-tcp-any', 'junos-udp-any',
+  // IM / P2P
+  'junos-gnutella', 'junos-nntp', 'junos-smb', 'junos-ymsg',
+  // Management
+  'junos-nbname', 'junos-nbds', 'junos-nfs', 'junos-ns-global',
+  'junos-ns-global-pro', 'junos-nsm', 'junos-ntp', 'junos-rlogin',
+  'junos-rsh', 'junos-snmp', 'junos-sqlnet-v1', 'junos-sqlnet-v2',
+  'junos-ssh', 'junos-syslog', 'junos-talk', 'junos-telnet',
+  'junos-winframe', 'junos-x-windows',
+  // Mail
+  'junos-imap', 'junos-imaps', 'junos-smtp', 'junos-smtps',
+  'junos-pop3', 'junos-pop3s',
+  // UNIX
+  'junos-finger', 'junos-uucp',
+  // Misc
+  'junos-chargen', 'junos-discard', 'junos-ident', 'junos-lpr',
+  'junos-radius', 'junos-radius-accounting', 'junos-sqlmon',
+  'junos-vnc', 'junos-whois', 'junos-sccp',
+  // ICMP
+  'junos-icmp-any', 'junos-icmp-all', 'junos-icmp-address-mask',
+  'junos-icmp-dest-unreach', 'junos-icmp-fragment-needed',
+  'junos-icmp-fragment-reassembly', 'junos-icmp-host-unreach',
+  'junos-icmp-info', 'junos-icmp-parameter-problem',
+  'junos-icmp-port-unreach', 'junos-icmp-protocol-unreach',
+  'junos-icmp-redirect', 'junos-icmp-redirect-host',
+  'junos-icmp-redirect-tos-host', 'junos-icmp-redirect-tos-net',
+  'junos-icmp-source-quench', 'junos-icmp-source-route-fail',
+  'junos-icmp-time-exceeded', 'junos-icmp-timestamp',
+  'junos-ping', 'junos-traceroute',
+  // Additional common (widely available on modern Junos)
+  'junos-rdp', 'junos-mysql', 'junos-ipsec',
+  'junos-smb-session', 'junos-netbios-session', 'junos-twamp',
+]);
+
+/**
+ * Multi-vendor application name → Junos predefined application mapping.
+ * Covers PAN-OS, FortiGate service names (uppercase), and Cisco ASA names.
+ * Returns null if no mapping exists.
  *
- * @param {string} panosApp - PAN-OS application name
+ * @param {string} appName - Application or service name from any vendor
  * @returns {string|null} - Junos application name or null
  */
-export function mapPanosAppToJunos(panosApp) {
-  const appMap = {
-    // Web
-    'web-browsing': 'junos-http',
-    'ssl': 'junos-https',
-    // DNS
-    'dns': 'junos-dns-udp',
-    // Mail
-    'smtp': 'junos-smtp',
-    'pop3': 'junos-pop3',
-    'imap': 'junos-imap',
-    // File transfer
-    'ftp': 'junos-ftp',
-    'tftp': 'junos-tftp',
-    // Remote access
-    'ssh': 'junos-ssh',
-    'telnet': 'junos-telnet',
-    'rdp': 'junos-rdp',
-    // Network services
-    'ping': 'junos-ping',
-    'ntp': 'junos-ntp',
-    'snmp': 'junos-snmp',
-    'syslog': 'junos-syslog',
-    'dhcp': 'junos-dhcp-client',
-    // VPN
-    'ike': 'junos-ike',
-    'ipsec': 'junos-ipsec',
-    // Database
-    'ms-sql-db': 'junos-ms-sql',
-    'mysql': 'junos-mysql',
-    // LDAP / Directory
-    'ldap': 'junos-ldap',
-    'active-directory': 'junos-ldap',
-    // ICMP
-    'icmp': 'junos-icmp-all',
-    // HTTP/2
-    'http2': 'junos-http',
-  };
+const APP_MAP = {
+  // ── PAN-OS Application Names ──────────────────────────────
+  // Web
+  'web-browsing': 'junos-http',
+  'ssl': 'junos-https',
+  'http2': 'junos-http',
+  'http': 'junos-http',
+  'https': 'junos-https',
+  // DNS
+  'dns': 'junos-dns-udp',
+  'dns-base': 'junos-dns-udp',
+  // Mail
+  'smtp': 'junos-smtp',
+  'smtp-base': 'junos-smtp',
+  'pop3': 'junos-pop3',
+  'imap': 'junos-imap',
+  'imap4': 'junos-imap',
+  'pop3s': 'junos-pop3s',
+  'imaps': 'junos-imaps',
+  'smtps': 'junos-smtps',
+  // File transfer
+  'ftp': 'junos-ftp',
+  'ftp-data': 'junos-ftp-data',
+  'tftp': 'junos-tftp',
+  // Remote access
+  'ssh': 'junos-ssh',
+  'telnet': 'junos-telnet',
+  'rdp': 'junos-rdp',
+  'ms-rdp': 'junos-rdp',
+  'rlogin': 'junos-rlogin',
+  'rsh': 'junos-rsh',
+  'vnc': 'junos-vnc',
+  'vnc-base': 'junos-vnc',
+  'pc-anywhere': 'junos-pc-anywhere',
+  'pcanywhere': 'junos-pc-anywhere',
+  // Network services
+  'ping': 'junos-ping',
+  'traceroute': 'junos-traceroute',
+  'ntp': 'junos-ntp',
+  'ntp-base': 'junos-ntp',
+  'snmp': 'junos-snmp',
+  'snmpv1': 'junos-snmp',
+  'snmpv2c': 'junos-snmp',
+  'snmpv3': 'junos-snmp',
+  'syslog': 'junos-syslog',
+  'dhcp': 'junos-dhcp-client',
+  'dhcp-relay': 'junos-dhcp-relay',
+  // VPN / Tunnel
+  'ike': 'junos-ike',
+  'ike-base': 'junos-ike',
+  'ike-nat-traversal': 'junos-ike-nat',
+  'ipsec': 'junos-ipsec',
+  'ipsec-esp': 'junos-ipsec',
+  'l2tp': 'junos-l2tp',
+  'pptp': 'junos-pptp',
+  // Database
+  'ms-sql-db': 'junos-ms-sql',
+  'mssql-db': 'junos-ms-sql',
+  'mssql': 'junos-ms-sql',
+  'mssql-mon': 'junos-sqlmon',
+  'mysql': 'junos-mysql',
+  'oracle-db': 'junos-sqlnet-v2',
+  'oracle': 'junos-sqlnet-v2',
+  'sqlnet': 'junos-sqlnet-v2',
+  // LDAP / Directory
+  'ldap': 'junos-ldap',
+  'ldap-base': 'junos-ldap',
+  'active-directory': 'junos-ldap',
+  'ms-ds-smbv2': 'junos-smb',
+  'ms-ds-smbv3': 'junos-smb',
+  // ICMP
+  'icmp': 'junos-icmp-all',
+  'icmp6': 'junos-icmp-any',
+  // Streaming / VoIP
+  'sip': 'junos-sip',
+  'sip-base': 'junos-sip',
+  'h323': 'junos-h323',
+  'h.323': 'junos-h323',
+  'rtsp': 'junos-rtsp',
+  'rtsp-base': 'junos-rtsp',
+  'sccp': 'junos-sccp',
+  'skinny': 'junos-sccp',
+  'netmeeting': 'junos-netmeeting',
+  'real-audio': 'junos-realaudio',
+  'realaudio': 'junos-realaudio',
+  'vdo-live': 'junos-vdo-live',
+  // Routing
+  'bgp': 'junos-bgp',
+  'ospf': 'junos-ospf',
+  'rip': 'junos-rip',
+  // IM / P2P
+  'irc': 'junos-irc',
+  'msn-messenger': 'junos-msn',
+  'ymsg': 'junos-ymsg',
+  'yahoo-messenger': 'junos-ymsg',
+  'gnutella': 'junos-gnutella',
+  'aol-instant-messenger': 'junos-aol',
+  'aim': 'junos-aol',
+  // Microsoft RPC
+  'ms-rpc': 'junos-ms-rpc-epm',
+  'msrpc': 'junos-ms-rpc-epm',
+  'ms-exchange': 'junos-ms-rpc-msexchange',
+  // NetBIOS / SMB
+  'netbios-ns': 'junos-nbname',
+  'netbios-dg': 'junos-nbds',
+  'netbios-ss': 'junos-smb',
+  'netbios-ssn': 'junos-smb',
+  'smb': 'junos-smb',
+  'cifs': 'junos-smb',
+  // Misc management
+  'finger': 'junos-finger',
+  'gopher': 'junos-gopher',
+  'whois': 'junos-whois',
+  'ident': 'junos-ident',
+  'lpr': 'junos-lpr',
+  'radius': 'junos-radius',
+  'nntp': 'junos-nntp',
+  'x11': 'junos-x-windows',
+  'x-windows': 'junos-x-windows',
+  'nfs': 'junos-nfs',
+  'sun-rpc': 'junos-sun-rpc-any',
+  'rpc-portmapper': 'junos-sun-rpc-portmapper',
+  'chargen': 'junos-chargen',
+  'discard': 'junos-discard',
+  'wais': 'junos-wais',
+  'uucp': 'junos-uucp',
+  'talk': 'junos-talk',
 
-  const normalized = panosApp.toLowerCase().trim();
-  return appMap[normalized] || null;
+  // ── FortiGate Service Object Names (case-sensitive uppercase) ──
+  'HTTP': 'junos-http',
+  'HTTPS': 'junos-https',
+  'DNS': 'junos-dns-udp',
+  'FTP': 'junos-ftp',
+  'FTP_GET': 'junos-ftp',
+  'FTP_PUT': 'junos-ftp',
+  'TFTP': 'junos-tftp',
+  'SSH': 'junos-ssh',
+  'TELNET': 'junos-telnet',
+  'SMTP': 'junos-smtp',
+  'SMTPS': 'junos-smtps',
+  'POP3': 'junos-pop3',
+  'POP3S': 'junos-pop3s',
+  'IMAP': 'junos-imap',
+  'IMAPS': 'junos-imaps',
+  'SNMP': 'junos-snmp',
+  'NTP': 'junos-ntp',
+  'SYSLOG': 'junos-syslog',
+  'RDP': 'junos-rdp',
+  'SIP': 'junos-sip',
+  'SIP-MSNmessenger': 'junos-sip',
+  'H.323': 'junos-h323',
+  'PING': 'junos-ping',
+  'PING6': 'junos-icmp-any',
+  'TRACEROUTE': 'junos-traceroute',
+  'IKE': 'junos-ike',
+  'IKE_NAT_TRAVERSAL': 'junos-ike-nat',
+  'L2TP': 'junos-l2tp',
+  'PPTP': 'junos-pptp',
+  'IRC': 'junos-irc',
+  'LDAP': 'junos-ldap',
+  'LDAP_UDP': 'junos-ldap',
+  'SMB': 'junos-smb',
+  'SAMBA': 'junos-smb',
+  'DCE-RPC': 'junos-ms-rpc-epm',
+  'MS-SQL': 'junos-ms-sql',
+  'MYSQL': 'junos-mysql',
+  'RADIUS': 'junos-radius',
+  'RADIUS-OLD': 'junos-radius',
+  'WINS': 'junos-nbname',
+  'NBNAME': 'junos-nbname',
+  'NBDATAGRAM': 'junos-nbds',
+  'NBSESSION': 'junos-smb',
+  'NFS': 'junos-nfs',
+  'X-WINDOWS': 'junos-x-windows',
+  'VNC': 'junos-vnc',
+  'BGP': 'junos-bgp',
+  'OSPF': 'junos-ospf',
+  'RIP': 'junos-rip',
+  'GRE': 'junos-pptp',
+  'FINGER': 'junos-finger',
+  'GOPHER': 'junos-gopher',
+  'NNTP': 'junos-nntp',
+  'WHOIS': 'junos-whois',
+  'AH': 'junos-ipsec',
+  'ESP': 'junos-ipsec',
+  'ALL': 'any',
+  'ALL_TCP': 'junos-tcp-any',
+  'ALL_UDP': 'junos-udp-any',
+  'ALL_ICMP': 'junos-icmp-any',
+  'ALL_ICMP6': 'junos-icmp-any',
+  'webproxy': 'junos-http',
+  'DHCP': 'junos-dhcp-client',
+  'TIMESTAMP': 'junos-icmp-timestamp',
+  'INFO_REQUEST': 'junos-icmp-info',
+  'INFO_ADDRESS': 'junos-icmp-address-mask',
+  'SCCP': 'junos-sccp',
+  'PC-Anywhere': 'junos-pc-anywhere',
+  'LPR': 'junos-lpr',
+  'UUCP': 'junos-uucp',
+  'TALK': 'junos-talk',
+
+  // ── Cisco ASA Common Service Names ────────────────────────
+  'www': 'junos-http',
+  'domain': 'junos-dns-udp',
+  'sunrpc': 'junos-sun-rpc-any',
+  'login': 'junos-rlogin',
+  'shell': 'junos-rsh',
+  'exec': 'junos-rsh',
+  'lpd': 'junos-lpr',
+};
+
+export function mapAppToJunos(appName) {
+  if (!appName) return null;
+  // Try exact match first (preserves case for FortiGate uppercase names)
+  if (APP_MAP[appName]) return APP_MAP[appName];
+  // Then try lowercase normalized
+  const normalized = appName.toLowerCase().trim();
+  return APP_MAP[normalized] || null;
 }
+
+// Backward-compatible alias
+export const mapPanosAppToJunos = mapAppToJunos;
 
 /**
  * Maps a PAN-OS security profile type to the corresponding SRX feature and profile name.

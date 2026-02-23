@@ -10,7 +10,7 @@
  * Phase 2+: Full XML with NAT, routing, VPN, UTM.
  */
 
-import { sanitizeJunosName, mapPanosAppToJunos, mapProfileToSrx } from '../parsers/parser-utils.js';
+import { sanitizeJunosName, mapAppToJunos, mapProfileToSrx, createWarning } from '../parsers/parser-utils.js';
 
 /**
  * Builds a Junos XML configuration from the intermediate config.
@@ -22,6 +22,7 @@ import { sanitizeJunosName, mapPanosAppToJunos, mapProfileToSrx } from '../parse
 export function buildSrxXml(config, interfaceMappings = {}) {
   const warnings = [];
   const lines = [];
+  xmlCustomfwicApps.clear();
 
   // Compute UTM/IDP/SecIntel assignment maps (mirrors srx-converter logic)
   const { utmPolicyMap, utmProfiles } = computeUtmMap(config.security_policies);
@@ -45,15 +46,15 @@ export function buildSrxXml(config, interfaceMappings = {}) {
   buildUtmXml(utmProfiles, lines);
 
   // Policies
-  buildPoliciesXml(config.security_policies, lines, warnings, { utmPolicyMap, idpPolicyMap, secIntelEnabled });
+  buildPoliciesXml(config.security_policies, lines, warnings, { utmPolicyMap, idpPolicyMap, secIntelEnabled }, config.application_groups);
 
   // NAT
   buildNatXml(config.nat_rules, lines, warnings);
 
   lines.push('  </security>');
 
-  // Applications
-  buildApplicationsXml(config.service_objects, config.applications, config.service_groups, lines);
+  // Applications (includes Customfwic placeholders for unmapped apps)
+  buildApplicationsXml(config.service_objects, config.applications, config.service_groups, lines, xmlCustomfwicApps);
 
   // Schedulers
   buildSchedulersXml(config.schedules, lines);
@@ -186,7 +187,7 @@ function buildAddressBookXml(addressObjects, addressGroups, lines) {
 // Security Policies XML Builder
 // ---------------------------------------------------------------------------
 
-function buildPoliciesXml(policies, lines, warnings, profileMaps = {}) {
+function buildPoliciesXml(policies, lines, warnings, profileMaps = {}, appGroups = []) {
   if (!policies || policies.length === 0) return;
 
   const { utmPolicyMap = {}, idpPolicyMap = {}, secIntelEnabled = false } = profileMaps;
@@ -235,7 +236,7 @@ function buildPoliciesXml(policies, lines, warnings, profileMaps = {}) {
         lines.push(`            <destination-address>${escapeXml(sanitizeJunosName(addr))}</destination-address>`);
       }
 
-      const apps = resolveApps(policy.applications, policy.services);
+      const apps = resolveApps(policy.applications, policy.services, warnings, policy.name, appGroups);
       for (const app of apps) {
         lines.push(`            <application>${escapeXml(app)}</application>`);
       }
@@ -324,10 +325,11 @@ function buildNatXml(natRules, lines, warnings) {
 // Applications XML Builder
 // ---------------------------------------------------------------------------
 
-function buildApplicationsXml(serviceObjects, applications, serviceGroups, lines) {
+function buildApplicationsXml(serviceObjects, applications, serviceGroups, lines, customfwicMap) {
   const allApps = [...(serviceObjects || []), ...(applications || [])];
   const groups = serviceGroups || [];
-  if (allApps.length === 0 && groups.length === 0) return;
+  const hasCustomfwic = customfwicMap && customfwicMap.size > 0;
+  if (allApps.length === 0 && groups.length === 0 && !hasCustomfwic) return;
 
   lines.push('  <applications>');
 
@@ -389,6 +391,19 @@ function buildApplicationsXml(serviceObjects, applications, serviceGroups, lines
       }
     }
     lines.push('    </application-set>');
+  }
+
+  // Placeholder Customfwic applications for unmapped apps
+  if (hasCustomfwic) {
+    lines.push('    <!-- Placeholder applications (Customfwic) - REQUIRES MANUAL CONFIGURATION -->');
+    for (const [customName, originalName] of customfwicMap) {
+      lines.push('    <application>');
+      lines.push(`      <name>${escapeXml(customName)}</name>`);
+      lines.push('      <protocol>tcp</protocol>');
+      lines.push('      <destination-port>0</destination-port>');
+      lines.push(`      <description>Placeholder for ${escapeXml(originalName)} - REQUIRES MANUAL CONFIGURATION</description>`);
+      lines.push('    </application>');
+    }
   }
 
   lines.push('  </applications>');
@@ -573,19 +588,57 @@ function buildSecIntelXml(blockLists, lines) {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function resolveApps(applications, services) {
+/** Tracks unmapped apps for placeholder XML generation */
+const xmlCustomfwicApps = new Map();
+
+function resolveApps(applications, services, warnings, policyName, appGroups = []) {
   const resolved = [];
+
+  // Helper to map a single app name to Junos (with Customfwic fallback)
+  const mapSingleApp = (appName) => {
+    const junos = mapAppToJunos(appName);
+    if (junos) {
+      resolved.push(junos);
+    } else {
+      const customName = sanitizeJunosName(appName) + 'Customfwic';
+      resolved.push(customName);
+      xmlCustomfwicApps.set(customName, appName);
+      if (warnings) {
+        warnings.push(createWarning(
+          'warning',
+          `policy/${policyName}`,
+          `Application "${appName}" has no predefined Junos equivalent — using placeholder "${customName}"`,
+          'Create a custom application on the SRX with the correct protocol/port definition for this application'
+        ));
+      }
+    }
+  };
+
   if (applications && applications.length > 0) {
     for (const app of applications) {
       if (app === 'any') { resolved.push('any'); continue; }
-      const junos = mapPanosAppToJunos(app);
-      resolved.push(junos || sanitizeJunosName(app));
+
+      // Check if this is an application group reference — expand to members
+      const group = appGroups.find(g => g.name === app);
+      if (group && group.members.length > 0) {
+        for (const member of group.members) {
+          mapSingleApp(member);
+        }
+        continue;
+      }
+
+      mapSingleApp(app);
     }
   }
   if (services && services.length > 0) {
     for (const svc of services) {
       if (svc === 'application-default' || svc === 'any') continue;
-      resolved.push(sanitizeJunosName(svc));
+      const junos = mapAppToJunos(svc);
+      if (junos) {
+        resolved.push(junos);
+      } else {
+        resolved.push(sanitizeJunosName(svc));
+      }
     }
   }
   if (resolved.length === 0) resolved.push('any');

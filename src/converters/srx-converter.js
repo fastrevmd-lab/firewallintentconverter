@@ -18,7 +18,7 @@
  * (clean / warning / unsupported) for the warnings panel.
  */
 
-import { sanitizeJunosName, mapPanosAppToJunos, mapProfileToSrx, createWarning } from '../parsers/parser-utils.js';
+import { sanitizeJunosName, mapAppToJunos, mapProfileToSrx, createWarning } from '../parsers/parser-utils.js';
 
 // ---------------------------------------------------------------------------
 // Main Converter Entry Point
@@ -53,6 +53,9 @@ export function convertToSrxSetCommands(config, interfaceMappings = {}) {
   convertServiceGroups(config.service_groups, commands, warnings, summary);
   convertApplications(config.applications, commands, warnings, summary);
 
+  // Clear Customfwic tracker for fresh conversion
+  customfwicApps.clear();
+
   // UTM / IDP / SecIntel — must run before security policies to build assignment maps
   const { utmCommands, utmPolicyMap } = convertUtmPolicies(config.security_policies, warnings);
   const { idpCommands, idpPolicyMap } = convertIdpPolicies(config.security_policies, warnings);
@@ -63,8 +66,23 @@ export function convertToSrxSetCommands(config, interfaceMappings = {}) {
   commands.push(...secIntelCommands);
 
   convertSchedules(config.schedules, commands, warnings);
-  convertSecurityPolicies(config.security_policies, commands, warnings, summary, { utmPolicyMap, idpPolicyMap, secIntelEnabled });
+  convertSecurityPolicies(config.security_policies, commands, warnings, summary, { utmPolicyMap, idpPolicyMap, secIntelEnabled }, config.application_groups);
   convertNatRules(config.nat_rules, commands, warnings, summary);
+
+  // Generate placeholder definitions for unmapped Customfwic applications
+  if (customfwicApps.size > 0) {
+    commands.push('# =============================================');
+    commands.push('# Placeholder Custom Applications (Customfwic)');
+    commands.push('# WARNING: These need manual protocol/port definitions');
+    commands.push('# =============================================');
+    for (const [customName, originalName] of customfwicApps) {
+      commands.push(`# TODO: Define "${originalName}" — set correct protocol and destination-port`);
+      commands.push(`set applications application ${customName} protocol tcp`);
+      commands.push(`set applications application ${customName} destination-port 0`);
+      commands.push(`set applications application ${customName} description "Placeholder for ${originalName} - REQUIRES MANUAL CONFIGURATION"`);
+    }
+    commands.push('');
+  }
 
   summary.total_warnings = warnings.length;
 
@@ -601,7 +619,7 @@ function convertSchedules(schedules, commands, warnings) {
 // Security Policy Converter
 // ---------------------------------------------------------------------------
 
-function convertSecurityPolicies(policies, commands, warnings, summary, profileMaps = {}) {
+function convertSecurityPolicies(policies, commands, warnings, summary, profileMaps = {}, appGroups = []) {
   if (!policies || policies.length === 0) return;
 
   const { utmPolicyMap = {}, idpPolicyMap = {}, secIntelEnabled = false } = profileMaps;
@@ -663,7 +681,7 @@ function convertSecurityPolicies(policies, commands, warnings, summary, profileM
         }
 
         // Match criteria: applications
-        const apps = resolveApplications(policy.applications, policy.services, warnings, policyName);
+        const apps = resolveApplications(policy.applications, policy.services, warnings, policyName, appGroups);
         for (const app of apps) {
           commands.push(`set ${policyPath} match application ${app}`);
         }
@@ -727,33 +745,59 @@ function convertSecurityPolicies(policies, commands, warnings, summary, profileM
 }
 
 /**
- * Resolves PAN-OS application/service fields to SRX application names.
+ * Tracks unmapped applications that received the Customfwic placeholder suffix.
+ * Map of customName → originalName, used to generate placeholder definitions.
+ */
+const customfwicApps = new Map();
+
+/**
+ * Resolves application/service fields from any vendor to SRX application names.
  *
- * PAN-OS allows both "application" and "service" fields on a rule:
- *   - application: ["web-browsing"] → maps to junos-http
- *   - service: ["application-default"] → use the application's default port
- *   - service: ["tcp-8080"] → use the custom service object
+ * Applications are mapped via mapAppToJunos() (PAN-OS, FortiGate, Cisco ASA).
+ * Unmapped applications get a "Customfwic" suffix and a warning is generated
+ * telling the user to create a custom application definition on the SRX.
  *
  * SRX only has "application" in policy match — we unify both fields.
  */
-function resolveApplications(applications, services, warnings, policyName) {
+function resolveApplications(applications, services, warnings, policyName, appGroups = []) {
   const resolved = [];
 
-  // Map PAN-OS applications to Junos equivalents
+  // Helper to map a single app name to Junos (with Customfwic fallback)
+  const mapSingleApp = (appName) => {
+    const junosApp = mapAppToJunos(appName);
+    if (junosApp) {
+      resolved.push(junosApp);
+    } else {
+      const customName = sanitizeJunosName(appName) + 'Customfwic';
+      resolved.push(customName);
+      customfwicApps.set(customName, appName);
+      warnings.push(createWarning(
+        'warning',
+        `policy/${policyName}`,
+        `Application "${appName}" has no predefined Junos equivalent — using placeholder "${customName}"`,
+        'Create a custom application on the SRX with the correct protocol/port definition for this application'
+      ));
+    }
+  };
+
+  // Map applications to Junos equivalents
   if (applications && applications.length > 0) {
     for (const app of applications) {
       if (app === 'any') {
         resolved.push('any');
         continue;
       }
-      const junosApp = mapPanosAppToJunos(app);
-      if (junosApp) {
-        resolved.push(junosApp);
-      } else {
-        // Custom or unmapped application — use sanitized name and hope
-        // a custom application definition was generated
-        resolved.push(sanitizeJunosName(app));
+
+      // Check if this is an application group reference — expand to members
+      const group = appGroups.find(g => g.name === app);
+      if (group && group.members.length > 0) {
+        for (const member of group.members) {
+          mapSingleApp(member);
+        }
+        continue;
       }
+
+      mapSingleApp(app);
     }
   }
 
@@ -761,8 +805,14 @@ function resolveApplications(applications, services, warnings, policyName) {
   if (services && services.length > 0) {
     for (const svc of services) {
       if (svc === 'application-default' || svc === 'any') continue;
-      // Service objects were converted to SRX applications — reference by name
-      resolved.push(sanitizeJunosName(svc));
+      // Try mapping service name (catches FortiGate "HTTP", "HTTPS", etc.)
+      const junosApp = mapAppToJunos(svc);
+      if (junosApp) {
+        resolved.push(junosApp);
+      } else {
+        // Service objects already converted to SRX applications — reference by name
+        resolved.push(sanitizeJunosName(svc));
+      }
     }
   }
 

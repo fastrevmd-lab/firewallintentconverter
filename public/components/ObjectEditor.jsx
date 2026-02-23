@@ -11,6 +11,7 @@
  */
 import React, { useState } from 'react';
 import { ChipEditor } from './ZoneEditor.jsx';
+import { mapAppToJunos } from '../../src/parsers/parser-utils.js';
 
 export default function ObjectEditor({ intermediateConfig, onConfigUpdate, viewMode }) {
   const [subTab, setSubTab] = useState('addresses');
@@ -19,9 +20,22 @@ export default function ObjectEditor({ intermediateConfig, onConfigUpdate, viewM
   const addresses = intermediateConfig?.address_objects || [];
   const groups = intermediateConfig?.address_groups || [];
   const services = intermediateConfig?.service_objects || [];
+  const customApps = intermediateConfig?.applications || [];
+  const appGroups = intermediateConfig?.application_groups || [];
   const secProfiles = intermediateConfig?.security_profile_objects || [];
   const schedules = intermediateConfig?.schedules || [];
   const policies = intermediateConfig?.security_policies || [];
+
+  // Count unique apps: referenced in policies + custom definitions not already referenced + app groups
+  const referencedAppNames = new Set();
+  for (const p of policies) {
+    for (const a of (p.applications || [])) {
+      if (a !== 'any') referencedAppNames.add(a);
+    }
+  }
+  const appCount = referencedAppNames.size
+    + customApps.filter(a => !referencedAppNames.has(a.name)).length
+    + appGroups.filter(g => !referencedAppNames.has(g.name)).length;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -43,7 +57,13 @@ export default function ObjectEditor({ intermediateConfig, onConfigUpdate, viewM
           className={`sub-tab-btn ${subTab === 'services' ? 'active' : ''}`}
           onClick={() => setSubTab('services')}
         >
-          {isSrx ? 'Applications' : 'Services'} ({services.length})
+          Services ({services.length})
+        </button>
+        <button
+          className={`sub-tab-btn ${subTab === 'applications' ? 'active' : ''}`}
+          onClick={() => setSubTab('applications')}
+        >
+          Applications ({appCount})
         </button>
         <button
           className={`sub-tab-btn ${subTab === 'profiles' ? 'active' : ''}`}
@@ -77,6 +97,16 @@ export default function ObjectEditor({ intermediateConfig, onConfigUpdate, viewM
           <ServiceObjectTable
             items={services}
             onUpdate={(items) => onConfigUpdate('service_objects', items)}
+          />
+        )}
+        {subTab === 'applications' && (
+          <ApplicationTable
+            policies={policies}
+            customApps={customApps}
+            appGroups={appGroups}
+            onUpdate={(items) => onConfigUpdate('applications', items)}
+            onGroupsUpdate={(items) => onConfigUpdate('application_groups', items)}
+            isSrx={isSrx}
           />
         )}
         {subTab === 'profiles' && (
@@ -476,6 +506,319 @@ function SecurityProfileTable({ items, onUpdate }) {
       </table>
       <div style={{ padding: '8px 12px' }}>
         <button className="btn btn-secondary btn-sm" onClick={handleAdd}>+ Add Profile</button>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Applications Table
+// ---------------------------------------------------------------------------
+
+function ApplicationTable({ policies, customApps, appGroups = [], onUpdate, onGroupsUpdate, isSrx }) {
+  const [expandedGroups, setExpandedGroups] = useState({});
+
+  // Build map of appName → [policyNames] from all policies
+  const appUsage = {};
+  for (const p of policies) {
+    for (const a of (p.applications || [])) {
+      if (a === 'any') continue;
+      if (!appUsage[a]) appUsage[a] = [];
+      appUsage[a].push(p.name);
+    }
+  }
+
+  // Build app group lookup
+  const appGroupMap = {};
+  for (const g of appGroups) {
+    appGroupMap[g.name] = g;
+  }
+
+  // Build unified rows: referenced apps + custom definitions
+  const customAppMap = {};
+  for (const ca of customApps) {
+    customAppMap[ca.name] = ca;
+  }
+
+  const rows = [];
+  // First: application groups (from parser)
+  for (const group of appGroups) {
+    rows.push({
+      name: group.name,
+      type: 'group',
+      members: group.members,
+      protocol: '',
+      port: '',
+      description: group.description || '',
+      usedBy: appUsage[group.name] || [],
+      isCustom: false,
+      isGroup: true,
+    });
+  }
+  // Then: all referenced apps from policies (skip group names already shown)
+  for (const [name, policyNames] of Object.entries(appUsage)) {
+    if (appGroupMap[name]) continue; // already shown as group row
+    const custom = customAppMap[name];
+    rows.push({
+      name,
+      type: custom ? 'custom' : 'referenced',
+      protocol: custom?.protocol || '',
+      port: custom?.port_range || custom?.port || '',
+      description: custom?.description || '',
+      usedBy: policyNames,
+      isCustom: !!custom,
+      isGroup: false,
+    });
+  }
+  // Then: custom apps not referenced by any policy
+  for (const ca of customApps) {
+    if (!appUsage[ca.name]) {
+      rows.push({
+        name: ca.name,
+        type: 'custom',
+        protocol: ca.protocol || '',
+        port: ca.port_range || ca.port || '',
+        description: ca.description || '',
+        usedBy: [],
+        isCustom: true,
+        isGroup: false,
+      });
+    }
+  }
+
+  const handleCustomChange = (appName, field, value) => {
+    const existing = customApps.find(a => a.name === appName);
+    if (existing) {
+      onUpdate(customApps.map(a => a.name === appName ? { ...a, [field]: value } : a));
+    } else {
+      onUpdate([...customApps, { name: appName, protocol: 'tcp', port: '', description: '', [field]: value }]);
+    }
+  };
+
+  const handleAdd = () => {
+    onUpdate([...customApps, {
+      name: `app-${customApps.length + 1}`,
+      protocol: 'tcp',
+      port: '',
+      description: '',
+    }]);
+  };
+
+  const handleDelete = (appName) => {
+    onUpdate(customApps.filter(a => a.name !== appName));
+  };
+
+  const toggleGroup = (name) => {
+    setExpandedGroups(prev => ({ ...prev, [name]: !prev[name] }));
+  };
+
+  // Helper: get SRX mapping display for a single app name
+  const getSrxMapping = (appName) => {
+    const junos = mapAppToJunos(appName);
+    if (junos) return { mapped: true, value: junos };
+    return { mapped: false, value: `custom:app:'${appName}'` };
+  };
+
+  const colCount = isSrx ? 8 : 7;
+
+  // Type badge styling
+  const typeBadge = (type) => {
+    const styles = {
+      group: { bg: 'rgba(100,149,237,0.15)', color: '#6495ED' },
+      custom: { bg: 'rgba(74,208,200,0.15)', color: 'var(--accent)' },
+      referenced: { bg: 'rgba(255,255,255,0.06)', color: 'var(--text-muted)' },
+    };
+    const labels = { group: 'App Group', custom: 'Custom', referenced: 'Referenced' };
+    const s = styles[type] || styles.referenced;
+    return (
+      <span className="cell-chip" style={{ fontSize: 10, background: s.bg, color: s.color }}>
+        {labels[type] || type}
+      </span>
+    );
+  };
+
+  return (
+    <div>
+      <table className="editor-table">
+        <thead>
+          <tr>
+            <th style={{ width: 180 }}>Name</th>
+            <th style={{ width: 90 }}>Type</th>
+            {isSrx && <th style={{ width: 180 }}>SRX Mapping</th>}
+            <th style={{ width: 70 }}>Protocol</th>
+            <th style={{ width: 120 }}>Port(s)</th>
+            <th style={{ width: 160 }}>Description</th>
+            <th>Used By</th>
+            <th style={{ width: 36 }}></th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, i) => (
+            <React.Fragment key={row.name + i}>
+              <tr>
+                <td>
+                  {row.isGroup ? (
+                    <span
+                      style={{ fontFamily: 'var(--font-mono)', fontSize: 12, cursor: 'pointer' }}
+                      onClick={() => toggleGroup(row.name)}
+                      title={`${row.members.length} member(s) — click to ${expandedGroups[row.name] ? 'collapse' : 'expand'}`}
+                    >
+                      {expandedGroups[row.name] ? '▾' : '▸'} {row.name}
+                    </span>
+                  ) : row.isCustom ? (
+                    <input
+                      className="cell-input"
+                      value={row.name}
+                      onChange={(e) => {
+                        const oldName = row.name;
+                        const newName = e.target.value;
+                        onUpdate(customApps.map(a => a.name === oldName ? { ...a, name: newName } : a));
+                      }}
+                    />
+                  ) : (
+                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>{row.name}</span>
+                  )}
+                </td>
+                <td>{typeBadge(row.type)}</td>
+                {isSrx && (
+                  <td>
+                    {row.isGroup ? (
+                      <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>
+                        {row.members.length} member(s)
+                      </span>
+                    ) : (() => {
+                      const mapping = getSrxMapping(row.name);
+                      return (
+                        <span
+                          className="cell-chip"
+                          style={{
+                            fontSize: 10,
+                            background: mapping.mapped ? 'rgba(74,208,200,0.12)' : 'rgba(255,165,0,0.12)',
+                            color: mapping.mapped ? 'var(--accent)' : '#FFA500',
+                            maxWidth: 170,
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            display: 'inline-block',
+                          }}
+                          title={mapping.value}
+                        >
+                          {mapping.value}
+                        </span>
+                      );
+                    })()}
+                  </td>
+                )}
+                <td>
+                  {row.isCustom ? (
+                    <select
+                      className="cell-select"
+                      value={row.protocol}
+                      onChange={(e) => handleCustomChange(row.name, 'protocol', e.target.value)}
+                    >
+                      <option value="tcp">TCP</option>
+                      <option value="udp">UDP</option>
+                      <option value="icmp">ICMP</option>
+                    </select>
+                  ) : (
+                    <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>--</span>
+                  )}
+                </td>
+                <td>
+                  {row.isCustom ? (
+                    <input
+                      className="cell-input"
+                      value={row.port}
+                      onChange={(e) => handleCustomChange(row.name, 'port', e.target.value)}
+                      placeholder="80 or 443"
+                    />
+                  ) : (
+                    <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>--</span>
+                  )}
+                </td>
+                <td>
+                  {row.isCustom ? (
+                    <input
+                      className="cell-input"
+                      value={row.description}
+                      onChange={(e) => handleCustomChange(row.name, 'description', e.target.value)}
+                      placeholder="Description"
+                    />
+                  ) : (
+                    <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                      {row.isGroup ? `${row.members.length} apps` : ''}
+                    </span>
+                  )}
+                </td>
+                <td>
+                  {row.usedBy.length > 0 ? (
+                    row.usedBy.map((r, j) => (
+                      <span key={j} className="cell-chip" style={{ fontSize: 10 }}>{r}</span>
+                    ))
+                  ) : (
+                    <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>unused</span>
+                  )}
+                </td>
+                <td>
+                  {row.isCustom && (
+                    <button className="btn-icon btn-icon-danger" onClick={() => handleDelete(row.name)} title="Delete">x</button>
+                  )}
+                </td>
+              </tr>
+              {/* Expanded group members */}
+              {row.isGroup && expandedGroups[row.name] && row.members.map((member, mi) => {
+                const mapping = isSrx ? getSrxMapping(member) : null;
+                return (
+                  <tr key={`${row.name}-member-${mi}`} style={{ background: 'rgba(100,149,237,0.04)' }}>
+                    <td style={{ paddingLeft: 28 }}>
+                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-secondary)' }}>
+                        ↳ {member}
+                      </span>
+                    </td>
+                    <td>
+                      <span className="cell-chip" style={{ fontSize: 9, background: 'rgba(255,255,255,0.04)', color: 'var(--text-muted)' }}>
+                        Member
+                      </span>
+                    </td>
+                    {isSrx && (
+                      <td>
+                        <span
+                          className="cell-chip"
+                          style={{
+                            fontSize: 10,
+                            background: mapping.mapped ? 'rgba(74,208,200,0.12)' : 'rgba(255,165,0,0.12)',
+                            color: mapping.mapped ? 'var(--accent)' : '#FFA500',
+                            maxWidth: 170,
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            display: 'inline-block',
+                          }}
+                          title={mapping.value}
+                        >
+                          {mapping.value}
+                        </span>
+                      </td>
+                    )}
+                    <td><span style={{ fontSize: 11, color: 'var(--text-muted)' }}>--</span></td>
+                    <td><span style={{ fontSize: 11, color: 'var(--text-muted)' }}>--</span></td>
+                    <td></td>
+                    <td></td>
+                    <td></td>
+                  </tr>
+                );
+              })}
+            </React.Fragment>
+          ))}
+          {rows.length === 0 && (
+            <tr>
+              <td colSpan={colCount} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 20, fontSize: 12 }}>
+                No applications referenced in policies
+              </td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+      <div style={{ padding: '8px 12px' }}>
+        <button className="btn btn-secondary btn-sm" onClick={handleAdd}>+ Add Custom Application</button>
       </div>
     </div>
   );

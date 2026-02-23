@@ -86,6 +86,7 @@ export function parseSrxConfig(configText) {
     security_policies: securityPolicies,
     nat_rules: natRules,
     applications,
+    application_groups: [],
     schedules,
     security_profile_objects: [],
     external_lists: [],

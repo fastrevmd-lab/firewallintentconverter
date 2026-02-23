@@ -130,6 +130,7 @@ export function parseFortigateConfig(configText) {
     security_policies: securityPolicies,
     nat_rules: natRules,
     applications: [],
+    application_groups: [],
     schedules: intermediateSchedules,
     security_profile_objects: buildProfileObjects(securityPolicies, profileGroups),
     external_lists: [],

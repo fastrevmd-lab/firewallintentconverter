@@ -75,6 +75,7 @@ export function parseCiscoAsaConfig(configText) {
     security_policies: securityPolicies,
     nat_rules: natRules,
     applications: [],
+    application_groups: [],
     schedules: timeRanges,
     security_profile_objects: [],
     external_lists: [],

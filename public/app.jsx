@@ -32,6 +32,7 @@ import ZoneEditor from './components/ZoneEditor.jsx';
 import ObjectEditor from './components/ObjectEditor.jsx';
 import NATEditor from './components/NATEditor.jsx';
 import RoutingEditor from './components/RoutingEditor.jsx';
+import VPNEditor from './components/VPNEditor.jsx';
 
 export default function App() {
   // --- Config input state ---
@@ -308,6 +309,11 @@ export default function App() {
   /** Update NAT rules */
   const handleNATUpdate = useCallback((natRules) => {
     setIntermediateConfig(prev => ({ ...prev, nat_rules: natRules }));
+  }, []);
+
+  /** Update VPN tunnels */
+  const handleVPNUpdate = useCallback((vpnTunnels) => {
+    setIntermediateConfig(prev => ({ ...prev, vpn_tunnels: vpnTunnels }));
   }, []);
 
   /** Update a config section (for ObjectEditor) */
@@ -588,6 +594,12 @@ export default function App() {
                   >
                     Routing ({intermediateConfig.static_routes?.length || 0})
                   </button>
+                  <button
+                    className={`center-tab-btn ${editTab === 'vpn' ? 'active' : ''}`}
+                    onClick={() => setEditTab('vpn')}
+                  >
+                    VPN ({intermediateConfig.vpn_tunnels?.length || 0})
+                  </button>
                   <div style={{ flex: 1 }} />
                   {platformView === 'srx' && (
                     <>
@@ -706,6 +718,13 @@ export default function App() {
                       const updated = { ...intermediateConfig, static_routes: routes };
                       setIntermediateConfig(updated);
                     }}
+                  />
+                )}
+                {editTab === 'vpn' && (
+                  <VPNEditor
+                    vpnTunnels={intermediateConfig.vpn_tunnels || []}
+                    onVPNUpdate={handleVPNUpdate}
+                    viewMode={effectiveViewMode}
                   />
                 )}
               </div>

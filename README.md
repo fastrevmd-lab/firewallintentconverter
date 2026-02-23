@@ -105,10 +105,12 @@ Click **Convert to SRX** to generate the output. Switch between **Set Commands**
 - **Profile group expansion** — PAN-OS profile group references are automatically resolved into individual security profiles
 
 ### Interactive Editing
-- **Tabbed center panel** — Switch between Security Policies/Rules, Security Zones, Address Book/Objects (with Addresses, Groups, Services, Applications, Security Profiles, and Schedules sub-tabs), and NAT editors
+- **Tabbed center panel** — Switch between Security Policies/Rules, Security Zones, Address Book/Objects (with Addresses, Groups, Services, Applications, Security Profiles, and Schedules sub-tabs), NAT, Routing, and VPN editors
 - **Inline table editing** — Double-click any cell in the policy table to edit directly
 - **Right panel rule details** — Full editable form for the selected rule: action, zones, addresses, applications, services, logging, security profiles, tags, description
 - **Schedule editor** — View, edit, add, and delete schedules from the Objects > Schedules tab. Each schedule shows its type (recurring/onetime), days, time range, and which rules reference it
+- **Routing editor** — View, edit, add, and delete static routes from the Routing tab. Displays routing contexts (vsys/VDOM/routing-instance) and routes with destination, next-hop, type, interface, metric, and VRF
+- **VPN editor** — View, edit, add, and delete VPN/IPsec tunnels from the VPN tab. Card-based editor showing IKE gateway (peer address, local interface, IKE version), IKE proposal (encryption, authentication, DH group, lifetime, auth method), IPsec proposal (protocol, encryption, authentication, PFS group, lifetime), tunnel interface, and traffic selectors/proxy IDs
 - **Add / delete rules** — Create new rules or remove existing ones from the UI
 
 ### Hardware Awareness
@@ -200,6 +202,8 @@ firewall-intent-converter/
 │   │   ├── ZoneEditor.jsx        # Center panel tab — zone editing
 │   │   ├── ObjectEditor.jsx      # Center panel tab — address/service object editing
 │   │   ├── NATEditor.jsx         # Center panel tab — NAT rule editing
+│   │   ├── RoutingEditor.jsx     # Center panel tab — static route + routing context editing
+│   │   ├── VPNEditor.jsx         # Center panel tab — VPN/IPsec tunnel editing
 │   │   ├── InterviewPanel.jsx    # Right panel — rule details, LLM review, accept
 │   │   ├── ReviewChatPanel.jsx   # Right panel — full-ruleset LLM chat review
 │   │   ├── SRXOutput.jsx         # Bottom panel — SRX output display

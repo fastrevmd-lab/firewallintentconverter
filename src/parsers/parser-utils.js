@@ -252,12 +252,16 @@ const APP_MAP = {
   'oracle-db': 'junos-sqlnet-v2',
   'oracle': 'junos-sqlnet-v2',
   'sqlnet': 'junos-sqlnet-v2',
+  // Secure file transfer (over SSH)
+  'scp': 'junos-ssh',
+  'sftp': 'junos-ssh',
   // LDAP / Directory
   'ldap': 'junos-ldap',
   'ldap-base': 'junos-ldap',
   'active-directory': 'junos-ldap',
   'ms-ds-smbv2': 'junos-smb',
   'ms-ds-smbv3': 'junos-smb',
+  'ms-ds-smb-base': 'junos-smb',
   // ICMP
   'icmp': 'junos-icmp-all',
   'icmp6': 'junos-icmp-any',
@@ -297,6 +301,16 @@ const APP_MAP = {
   'netbios-ssn': 'junos-smb',
   'smb': 'junos-smb',
   'cifs': 'junos-smb',
+  // Additional management / network
+  'radius-accounting': 'junos-radius-accounting',
+  'twamp': 'junos-twamp',
+  'snmp-trap': 'junos-snmp',
+  'dhcp-server': 'junos-dhcp-server',
+  'dhcp-client': 'junos-dhcp-client',
+  'syslog-ng': 'junos-syslog',
+  'citrix': 'junos-winframe',
+  'citrix-online': 'junos-winframe',
+  'gre': 'junos-udp-any',  // GRE is IP protocol 47 — no junos-gre predefined
   // Misc management
   'finger': 'junos-finger',
   'gopher': 'junos-gopher',
@@ -366,7 +380,7 @@ const APP_MAP = {
   'BGP': 'junos-bgp',
   'OSPF': 'junos-ospf',
   'RIP': 'junos-rip',
-  'GRE': 'junos-pptp',
+  'GRE': 'junos-udp-any',  // GRE is IP protocol 47 — not PPTP
   'STUN': 'junos-stun',
   'QUIC': 'junos-quic',
   'FINGER': 'junos-finger',
@@ -382,6 +396,11 @@ const APP_MAP = {
   'ALL_ICMP6': 'junos-icmp-any',
   'webproxy': 'junos-http',
   'DHCP': 'junos-dhcp-client',
+  'SCP': 'junos-ssh',
+  'SFTP': 'junos-ssh',
+  'TWAMP': 'junos-twamp',
+  'SNMP_TRAP': 'junos-snmp',
+  'RADIUS_ACCOUNTING': 'junos-radius-accounting',
   'TIMESTAMP': 'junos-icmp-timestamp',
   'INFO_REQUEST': 'junos-icmp-info',
   'INFO_ADDRESS': 'junos-icmp-address-mask',

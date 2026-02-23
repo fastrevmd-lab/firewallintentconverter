@@ -107,6 +107,7 @@ export default function ObjectEditor({ intermediateConfig, onConfigUpdate, viewM
             onUpdate={(items) => onConfigUpdate('applications', items)}
             onGroupsUpdate={(items) => onConfigUpdate('application_groups', items)}
             isSrx={isSrx}
+            sourceVendor={intermediateConfig?.metadata?.source_vendor}
           />
         )}
         {subTab === 'profiles' && (
@@ -555,7 +556,7 @@ function SecurityProfileTable({ items, onUpdate }) {
 // Applications Table
 // ---------------------------------------------------------------------------
 
-function ApplicationTable({ policies, customApps, appGroups = [], onUpdate, onGroupsUpdate, isSrx }) {
+function ApplicationTable({ policies, customApps, appGroups = [], onUpdate, onGroupsUpdate, isSrx, sourceVendor }) {
   const [expandedGroups, setExpandedGroups] = useState({});
 
   // Build map of appName → [policyNames] from all policies
@@ -653,7 +654,10 @@ function ApplicationTable({ policies, customApps, appGroups = [], onUpdate, onGr
   };
 
   // Helper: get SRX mapping display for a single app name
+  const isSrxSource = sourceVendor === 'srx';
   const getSrxMapping = (appName) => {
+    // SRX→SRX: app names are already native Junos names, pass through 1:1
+    if (isSrxSource) return { mapped: true, value: appName };
     const junos = mapAppToJunos(appName);
     if (junos) return { mapped: true, value: junos };
     return { mapped: false, value: `custom:app:'${appName}'` };

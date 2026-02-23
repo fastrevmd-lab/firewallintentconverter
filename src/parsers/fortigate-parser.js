@@ -64,6 +64,27 @@ export function parseFortigateConfig(configText) {
     end: s.end || '',
   }));
 
+  // Expand profile group references into individual profiles on policies
+  for (const policy of securityPolicies) {
+    if (policy.profile_group && Object.keys(policy.security_profiles).length === 0) {
+      const groupDef = profileGroups[policy.profile_group];
+      if (groupDef) {
+        if (groupDef['av-profile']) policy.security_profiles.virus = groupDef['av-profile'];
+        if (groupDef['webfilter-profile']) policy.security_profiles['url-filtering'] = groupDef['webfilter-profile'];
+        if (groupDef['ips-sensor']) policy.security_profiles.vulnerability = groupDef['ips-sensor'];
+        if (groupDef['application-list']) policy.security_profiles['application-control'] = groupDef['application-list'];
+        if (groupDef['dnsfilter-profile']) policy.security_profiles['dns-security'] = groupDef['dnsfilter-profile'];
+        if (groupDef['emailfilter-profile']) policy.security_profiles['email-filter'] = groupDef['emailfilter-profile'];
+        if (groupDef['dlp-profile']) policy.security_profiles.dlp = groupDef['dlp-profile'];
+        if (groupDef['ssl-ssh-profile']) policy.security_profiles.decryption = groupDef['ssl-ssh-profile'];
+      } else {
+        warnings.push(createWarning('warning', `policy/${policy.name}`,
+          `Profile group "${policy.profile_group}" referenced but not found in config`,
+          'Define the profile group or assign individual profiles'));
+      }
+    }
+  }
+
   // Merge zone and interface data — FortiGate can use interfaces directly as zones
   const mergedZones = mergeZonesAndInterfaces(zones, interfaces, securityPolicies);
 
@@ -441,14 +462,14 @@ function parseAddressObjects(tree, warnings) {
         ));
         break;
       case 'geography':
-        type = 'fqdn'; // closest match in intermediate schema
-        value = `geo:${getString(entry['country'])}`;
-        warnings.push(createWarning('warning', `address:${name}`, `Geography address object mapped as FQDN placeholder`, 'Review geo-based objects manually'));
+        type = 'geography';
+        value = getString(entry['country']) || '';
+        warnings.push(createWarning('unsupported', `address:${name}`, `Geography address "${name}" (country: ${value}) — SRX does not support geo-IP address objects natively`, 'Replace with static IP ranges or use SRX Security Intelligence feeds'));
         break;
       case 'dynamic':
-        type = 'fqdn';
-        value = `dynamic:${getString(entry['sdn']) || 'unknown'}`;
-        warnings.push(createWarning('warning', `address:${name}`, `Dynamic/SDN address object mapped as placeholder`, 'Review SDN-based objects manually'));
+        type = 'dynamic';
+        value = getString(entry['sdn']) || 'unknown';
+        warnings.push(createWarning('unsupported', `address:${name}`, `Dynamic/SDN address "${name}" (${value}) — SRX does not support SDN-based address objects natively`, 'Replace with static addresses or use SRX Security Intelligence feeds'));
         break;
       default:
         warnings.push(createWarning('warning', `address:${name}`, `Unknown address type: ${addrType}`, 'Review manually'));

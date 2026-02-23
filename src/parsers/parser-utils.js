@@ -464,7 +464,7 @@ export function mapProfileToSrx(profileType, profileName) {
     'application-control': { srxFeature: 'appfw', srxType: 'application-firewall', srxProfile: `appfw-${safeName}` },
     'email-filter':        { srxFeature: 'utm',   srxType: 'anti-spam',            srxProfile: `junos-as-${safeName}` },
     'dlp':                 { srxFeature: 'none',  srxType: 'dlp',                  srxProfile: safeName },
-    'dns-security':        { srxFeature: 'utm',   srxType: 'anti-spam',            srxProfile: `dns-${safeName}` },
+    'dns-security':        { srxFeature: 'utm',   srxType: 'dns-security',         srxProfile: `dns-${safeName}` },
   };
   return mapping[profileType] || { srxFeature: 'unknown', srxType: profileType, srxProfile: safeName };
 }

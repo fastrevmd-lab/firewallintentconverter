@@ -51,6 +51,9 @@ export function buildSrxXml(config, interfaceMappings = {}) {
   // NAT
   buildNatXml(config.nat_rules, lines, warnings);
 
+  // IDP
+  buildIdpXml(config.security_policies, lines);
+
   lines.push('  </security>');
 
   // Applications (includes Customfwic placeholders for unmapped apps)
@@ -151,6 +154,11 @@ function buildAddressBookXml(addressObjects, addressGroups, lines) {
         lines.push(`          <high>${escapeXml(high)}</high>`);
         lines.push(`        </range-address>`);
         break;
+      case 'geography':
+      case 'dynamic':
+      case 'wildcard':
+        lines.push(`        <!-- UNSUPPORTED: ${obj.type} address "${obj.name}" (${obj.value}) -->`);
+        continue;
     }
 
     if (obj.description) {
@@ -163,6 +171,10 @@ function buildAddressBookXml(addressObjects, addressGroups, lines) {
   // Address sets (groups)
   const addrGroupNameSet = new Set((addressGroups || []).map(g => g.name));
   for (const group of (addressGroups || [])) {
+    if (group._dynamic) {
+      lines.push(`      <!-- UNSUPPORTED: Dynamic address group "${group.name}" — SRX does not support tag-based dynamic groups -->`);
+      continue;
+    }
     const groupName = sanitizeJunosName(group.name);
     lines.push('      <address-set>');
     lines.push(`        <name>${escapeXml(groupName)}</name>`);
@@ -450,7 +462,8 @@ function computeUtmMap(policies) {
   const utmProfiles = []; // { policyName, profiles: { type → mapped } }
   if (!policies) return { utmPolicyMap, utmProfiles };
 
-  const utmTypes = ['virus', 'wildfire-analysis', 'url-filtering', 'file-blocking', 'email-filter', 'application-control', 'dlp'];
+  const utmTypes = ['virus', 'wildfire-analysis', 'url-filtering', 'file-blocking', 'email-filter',
+    'application-control', 'dlp', 'dns-security', 'decryption', 'waf', 'casb', 'voip'];
   const comboMap = new Map();
   let idx = 0;
 
@@ -512,6 +525,7 @@ function buildUtmXml(utmProfiles, lines) {
 
   // Feature profiles
   const emitted = new Set();
+  lines.push('      <!-- NOTE: Generated profiles use recommended defaults — review and customize -->');
   lines.push('      <feature-profile>');
   for (const combo of utmProfiles) {
     for (const mapped of Object.values(combo.profiles)) {
@@ -519,13 +533,35 @@ function buildUtmXml(utmProfiles, lines) {
       emitted.add(mapped.srxProfile);
 
       if (mapped.srxType === 'anti-virus') {
-        lines.push(`        <anti-virus><profile name="${escapeXml(mapped.srxProfile)}"/></anti-virus>`);
+        lines.push('        <anti-virus>');
+        lines.push(`          <profile>`);
+        lines.push(`            <name>${escapeXml(mapped.srxProfile)}</name>`);
+        lines.push('            <fallback-options><default>log-and-permit</default><content-size>log-and-permit</content-size></fallback-options>');
+        lines.push('            <scan-options><content-size-limit>20000</content-size-limit><timeout>180</timeout></scan-options>');
+        lines.push('          </profile>');
+        lines.push('        </anti-virus>');
       } else if (mapped.srxType === 'web-filtering') {
-        lines.push(`        <web-filtering><profile name="${escapeXml(mapped.srxProfile)}" type="juniper-enhanced"/></web-filtering>`);
+        lines.push('        <web-filtering>');
+        lines.push(`          <profile>`);
+        lines.push(`            <name>${escapeXml(mapped.srxProfile)}</name>`);
+        lines.push('            <type>juniper-enhanced</type>');
+        lines.push('            <default>block</default>');
+        lines.push('          </profile>');
+        lines.push('        </web-filtering>');
       } else if (mapped.srxType === 'content-filtering') {
-        lines.push(`        <content-filtering><profile name="${escapeXml(mapped.srxProfile)}"/></content-filtering>`);
+        lines.push('        <content-filtering>');
+        lines.push(`          <profile>`);
+        lines.push(`            <name>${escapeXml(mapped.srxProfile)}</name>`);
+        lines.push('          </profile>');
+        lines.push('        </content-filtering>');
       } else if (mapped.srxType === 'anti-spam') {
-        lines.push(`        <anti-spam><profile name="${escapeXml(mapped.srxProfile)}"/></anti-spam>`);
+        lines.push('        <anti-spam>');
+        lines.push(`          <profile>`);
+        lines.push(`            <name>${escapeXml(mapped.srxProfile)}</name>`);
+        lines.push('          </profile>');
+        lines.push('        </anti-spam>');
+      } else if (mapped.srxType === 'dns-security') {
+        lines.push(`        <!-- DNS Security: configure SRX DNS Security (requires ATP license) -->`);
       }
     }
   }
@@ -550,6 +586,77 @@ function buildUtmXml(utmProfiles, lines) {
   }
 
   lines.push('    </utm>');
+}
+
+// ---------------------------------------------------------------------------
+// IDP XML Builder
+// ---------------------------------------------------------------------------
+
+function buildIdpXml(policies, lines) {
+  if (!policies) return;
+
+  const idpTypes = ['spyware', 'vulnerability'];
+  const comboMap = new Map();
+  let idx = 0;
+
+  for (const policy of policies) {
+    const sp = policy.security_profiles || {};
+    const hasIdp = idpTypes.some(t => sp[t]);
+    if (!hasIdp) continue;
+
+    const idpP = {};
+    for (const t of idpTypes) {
+      if (sp[t]) idpP[t] = sp[t];
+    }
+    const key = JSON.stringify(idpP);
+    if (!comboMap.has(key)) {
+      idx++;
+      comboMap.set(key, { profiles: idpP, policyName: `idp-policy-${idx}` });
+    }
+  }
+
+  if (comboMap.size === 0) return;
+
+  lines.push('    <idp>');
+
+  for (const [, combo] of comboMap) {
+    lines.push(`      <idp-policy>`);
+    lines.push(`        <name>${escapeXml(combo.policyName)}</name>`);
+    lines.push('        <rulebase-ips>');
+
+    let ruleIdx = 0;
+    for (const [pType, pValue] of Object.entries(combo.profiles)) {
+      ruleIdx++;
+      const ruleName = `${pType}-rule-${ruleIdx}`;
+
+      // Determine action from source profile name
+      const nameLower = pValue.toLowerCase();
+      let idpAction = 'recommended';
+      if (nameLower.includes('strict') || nameLower.includes('critical')) {
+        idpAction = 'drop-connection';
+      } else if (nameLower.includes('alert') || nameLower.includes('monitor')) {
+        idpAction = 'no-action';
+      }
+
+      lines.push('          <rule>');
+      lines.push(`            <name>${escapeXml(ruleName)}</name>`);
+      lines.push('            <match>');
+      lines.push('              <attacks>');
+      lines.push('                <predefined-attack-groups>Recommended</predefined-attack-groups>');
+      lines.push('              </attacks>');
+      lines.push('            </match>');
+      lines.push('            <then>');
+      lines.push(`              <action><${idpAction}/></action>`);
+      lines.push('              <notification><log-attacks/></notification>');
+      lines.push('            </then>');
+      lines.push('          </rule>');
+    }
+
+    lines.push('        </rulebase-ips>');
+    lines.push('      </idp-policy>');
+  }
+
+  lines.push('    </idp>');
 }
 
 // ---------------------------------------------------------------------------

@@ -213,6 +213,20 @@ function convertAddressObjects(objects, commands, warnings, summary) {
           'Replace with subnet or range address'));
         summary.unsupported_items++;
         continue; // Skip the description line
+      case 'geography':
+        commands.push(`# UNSUPPORTED: Geography address "${obj.name}" (country: ${obj.value}) — SRX requires Security Intelligence feeds for geo-IP`);
+        warnings.push(createWarning('unsupported', `address/${name}`,
+          `Geography address "${obj.name}" (${obj.value}) has no direct SRX equivalent`,
+          'Replace with static IP ranges or configure SRX Security Intelligence geo-IP feeds'));
+        summary.unsupported_items++;
+        continue;
+      case 'dynamic':
+        commands.push(`# UNSUPPORTED: Dynamic/SDN address "${obj.name}" (${obj.value}) — SRX requires manual configuration`);
+        warnings.push(createWarning('unsupported', `address/${name}`,
+          `Dynamic/SDN address "${obj.name}" (${obj.value}) has no direct SRX equivalent`,
+          'Replace with static addresses or use SRX Security Intelligence feeds'));
+        summary.unsupported_items++;
+        continue;
       default:
         commands.push(`# WARNING: Unknown address type "${obj.type}" for "${obj.name}"`);
         break;
@@ -242,6 +256,11 @@ function convertAddressGroups(groups, commands, warnings, summary) {
   const groupNameSet = new Set(groups.map(g => g.name));
 
   for (const group of groups) {
+    if (group._dynamic) {
+      commands.push(`# UNSUPPORTED: Dynamic address group "${group.name}" — SRX does not support tag-based dynamic groups`);
+      commands.push(`# Define members statically or use SRX address-book with feed servers`);
+      continue;
+    }
     const groupName = sanitizeJunosName(group.name);
 
     for (const member of group.members) {
@@ -397,7 +416,8 @@ function convertUtmPolicies(policies, warnings) {
   const utmPolicyMap = {};
   if (!policies || policies.length === 0) return { utmCommands, utmPolicyMap };
 
-  const utmTypes = ['virus', 'wildfire-analysis', 'url-filtering', 'file-blocking', 'email-filter', 'application-control', 'dlp'];
+  const utmTypes = ['virus', 'wildfire-analysis', 'url-filtering', 'file-blocking', 'email-filter',
+    'application-control', 'dlp', 'dns-security', 'decryption', 'waf', 'casb', 'voip'];
 
   // Collect unique UTM profile combinations per rule
   const comboMap = new Map(); // serialized combo → { profiles, policyName, rules[] }
@@ -424,6 +444,7 @@ function convertUtmPolicies(policies, warnings) {
 
   utmCommands.push('# =============================================');
   utmCommands.push('# UTM Feature Profiles & Policies');
+  utmCommands.push('# NOTE: Generated profiles use recommended defaults — review and customize for your environment');
   utmCommands.push('# =============================================');
 
   // Collect all unique feature profiles
@@ -445,13 +466,33 @@ function convertUtmPolicies(policies, warnings) {
         continue;
       }
 
+      if (mapped.srxFeature === 'unknown' || mapped.srxFeature === 'none' || mapped.srxFeature === 'ssl-proxy') {
+        warnings.push(createWarning('warning', `profile/${pType}`,
+          `${pType} profile "${pValue}" has no SRX equivalent — requires manual configuration`,
+          `Review SRX capabilities for ${pType} and configure manually if needed`));
+        utmCommands.push(`# UNSUPPORTED: ${pType} profile "${pValue}" — no direct SRX equivalent`);
+        continue;
+      }
+
       if (mapped.srxFeature !== 'utm') continue;
 
-      // Emit feature profile definition once
+      // Emit feature profile definition once (with recommended defaults)
       if (!emittedProfiles.has(mapped.srxProfile)) {
         emittedProfiles.add(mapped.srxProfile);
-        if (mapped.srxType === 'web-filtering') {
-          utmCommands.push(`set security utm feature-profile ${mapped.srxType} profile ${mapped.srxProfile} type juniper-enhanced`);
+        if (mapped.srxType === 'anti-virus') {
+          utmCommands.push(`set security utm feature-profile anti-virus profile ${mapped.srxProfile} fallback-options default log-and-permit`);
+          utmCommands.push(`set security utm feature-profile anti-virus profile ${mapped.srxProfile} fallback-options content-size log-and-permit`);
+          utmCommands.push(`set security utm feature-profile anti-virus profile ${mapped.srxProfile} scan-options content-size-limit 20000`);
+          utmCommands.push(`set security utm feature-profile anti-virus profile ${mapped.srxProfile} scan-options timeout 180`);
+        } else if (mapped.srxType === 'web-filtering') {
+          utmCommands.push(`set security utm feature-profile web-filtering profile ${mapped.srxProfile} type juniper-enhanced`);
+          utmCommands.push(`set security utm feature-profile web-filtering profile ${mapped.srxProfile} default block`);
+        } else if (mapped.srxType === 'content-filtering') {
+          utmCommands.push(`set security utm feature-profile content-filtering profile ${mapped.srxProfile} permit-command file-extension exe`);
+          utmCommands.push(`set security utm feature-profile content-filtering profile ${mapped.srxProfile} permit-command file-extension zip`);
+        } else if (mapped.srxType === 'dns-security') {
+          utmCommands.push(`# DNS Security: FortiGate dnsfilter profile "${pValue}" — configure SRX DNS Security (requires ATP license)`);
+          utmCommands.push(`set security utm feature-profile anti-virus profile ${mapped.srxProfile}`);
         } else {
           utmCommands.push(`set security utm feature-profile ${mapped.srxType} profile ${mapped.srxProfile}`);
         }
@@ -516,6 +557,7 @@ function convertIdpPolicies(policies, warnings) {
 
   idpCommands.push('# =============================================');
   idpCommands.push('# IDP Policies');
+  idpCommands.push('# NOTE: Actions derived from source profile name heuristics — review for your environment');
   idpCommands.push('# =============================================');
 
   for (const [, combo] of comboMap) {
@@ -527,10 +569,19 @@ function convertIdpPolicies(policies, warnings) {
       const ruleName = `${pType}-rule-${ruleIdx}`;
       const base = `security idp idp-policy ${pName} rulebase-ips rule ${ruleName}`;
 
+      // Determine action based on source profile name heuristics
+      const nameLower = pValue.toLowerCase();
+      let idpAction = 'recommended';
+      if (nameLower.includes('strict') || nameLower.includes('critical')) {
+        idpAction = 'drop-connection';
+      } else if (nameLower.includes('alert') || nameLower.includes('monitor')) {
+        idpAction = 'no-action';
+      }
+
       idpCommands.push(`set ${base} match attacks predefined-attack-groups "Recommended"`);
-      idpCommands.push(`set ${base} then action recommended`);
+      idpCommands.push(`set ${base} then action ${idpAction}`);
       idpCommands.push(`set ${base} then notification log-attacks`);
-      idpCommands.push(`# IDP rule mapped from PAN-OS ${pType} profile "${pValue}"`);
+      idpCommands.push(`# IDP rule mapped from ${pType} profile "${pValue}" → action: ${idpAction}`);
     }
   }
 

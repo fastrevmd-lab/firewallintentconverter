@@ -186,15 +186,39 @@ function AddressObjectTable({ items, onUpdate }) {
                   <option value="subnet">Subnet</option>
                   <option value="range">Range</option>
                   <option value="fqdn">FQDN</option>
+                  <option value="geography">Geography</option>
+                  <option value="dynamic">Dynamic/SDN</option>
+                  <option value="wildcard">Wildcard</option>
                 </select>
               </td>
               <td>
-                <input
-                  className="cell-input"
-                  value={item.value}
-                  onChange={(e) => handleChange(i, 'value', e.target.value)}
-                  placeholder={item.type === 'host' ? '10.0.0.1/32' : item.type === 'subnet' ? '10.0.0.0/24' : item.type === 'fqdn' ? 'example.com' : '10.0.0.1-10.0.0.254'}
-                />
+                <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                  <input
+                    className="cell-input"
+                    value={item.value}
+                    onChange={(e) => handleChange(i, 'value', e.target.value)}
+                    placeholder={item.type === 'host' ? '10.0.0.1/32' : item.type === 'subnet' ? '10.0.0.0/24' : item.type === 'fqdn' ? 'example.com' : item.type === 'geography' ? 'US' : item.type === 'dynamic' ? 'azure' : '10.0.0.1-10.0.0.254'}
+                    style={{ flex: 1 }}
+                  />
+                  {item.type === 'fqdn' && (
+                    <select
+                      className="cell-select"
+                      value={item.fqdn_ip_version || ''}
+                      onChange={(e) => handleChange(i, 'fqdn_ip_version', e.target.value || undefined)}
+                      style={{ width: 70, fontSize: 10 }}
+                      title="FQDN IP version filter"
+                    >
+                      <option value="">Any</option>
+                      <option value="v4">IPv4</option>
+                      <option value="v6">IPv6</option>
+                    </select>
+                  )}
+                  {(item.type === 'geography' || item.type === 'dynamic' || item.type === 'wildcard') && (
+                    <span className="cell-chip" style={{ fontSize: 9, background: 'rgba(255,165,0,0.12)', color: '#FFA500', whiteSpace: 'nowrap' }}>
+                      Unsupported
+                    </span>
+                  )}
+                </div>
               </td>
               <td>
                 <input
@@ -390,6 +414,14 @@ const PROFILE_TYPE_OPTIONS = [
   { value: 'url-filtering', label: 'URL Filtering' },
   { value: 'file-blocking', label: 'File Blocking' },
   { value: 'wildfire-analysis', label: 'WildFire' },
+  { value: 'application-control', label: 'App Control' },
+  { value: 'email-filter', label: 'Email Filter' },
+  { value: 'dns-security', label: 'DNS Security' },
+  { value: 'dlp', label: 'DLP' },
+  { value: 'decryption', label: 'SSL/Decryption' },
+  { value: 'waf', label: 'WAF' },
+  { value: 'casb', label: 'CASB' },
+  { value: 'voip', label: 'VoIP' },
 ];
 
 const PROFILE_FEATURE_MAP = {
@@ -399,6 +431,14 @@ const PROFILE_FEATURE_MAP = {
   'file-blocking':      { srxFeature: 'utm', srxType: 'content-filtering', label: 'File Blocking' },
   'spyware':            { srxFeature: 'idp', srxType: 'idp-policy',        label: 'Anti-Spyware' },
   'vulnerability':      { srxFeature: 'idp', srxType: 'idp-policy',        label: 'Vulnerability' },
+  'application-control': { srxFeature: 'appfw', srxType: 'application-firewall', label: 'App Control' },
+  'email-filter':        { srxFeature: 'utm', srxType: 'anti-spam',        label: 'Email Filter' },
+  'dns-security':        { srxFeature: 'utm', srxType: 'dns-security',     label: 'DNS Security' },
+  'dlp':                 { srxFeature: 'none', srxType: 'dlp',             label: 'DLP' },
+  'decryption':          { srxFeature: 'none', srxType: 'ssl-proxy',       label: 'SSL/Decryption' },
+  'waf':                 { srxFeature: 'none', srxType: 'waf',             label: 'WAF' },
+  'casb':                { srxFeature: 'none', srxType: 'casb',            label: 'CASB' },
+  'voip':                { srxFeature: 'none', srxType: 'voip',            label: 'VoIP' },
 };
 
 function SecurityProfileTable({ items, onUpdate }) {

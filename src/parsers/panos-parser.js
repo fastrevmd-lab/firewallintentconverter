@@ -345,11 +345,18 @@ function parseAddressGroups(vsys, warnings) {
     // Dynamic group: has <dynamic><filter>...</filter></dynamic>
     if (entry.dynamic) {
       warnings.push(createWarning(
-        'interview_required',
+        'unsupported',
         `address-group/${name}`,
         `Dynamic address group "${name}" uses tag-based matching — SRX does not support dynamic address groups natively`,
         'Define the group members statically, or use SRX address-book with feed servers'
       ));
+      return {
+        name,
+        members: [],
+        description: entry.description || '',
+        tags,
+        _dynamic: true,
+      };
     }
 
     return {

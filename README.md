@@ -1,4 +1,4 @@
-# Firewall to Intent Converter <img width="1024" height="1024" alt="image" src="https://github.com/user-attachments/assets/e7bc0569-e247-4718-a461-58d72122e1a8" />
+# Firewall to Intent Converter 
 
 
 A browser-based tool that converts firewall configurations into an intermediate format for review, editing, and conversion to Juniper SRX. Supports **PAN-OS XML**, **Junos SRX**, **FortiGate / FortiOS**, and **Cisco ASA / FTD** as source formats. Paste or upload a config, review and edit the parsed rules through an interactive UI, optionally get AI-powered best-practice suggestions, then export as SRX set commands or XML.

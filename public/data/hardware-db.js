@@ -1540,7 +1540,7 @@ export function detectSrxModel(intermediateConfig) {
  *   - Virtual PAN-OS → always vSRX3.0 (recommended)
  *   - Otherwise, find the SRX model with the next higher throughput in the
  *     selected metric. Mark it as recommended.
- *   - If no SRX has higher throughput, fall back to SRX4700 (not recommended).
+ *   - If no SRX has higher throughput, fall back to SRX4700-700 (not recommended).
  *
  * @param {string} panosModel - PAN-OS model name
  * @param {'l4'|'l7'|'threat'} metric - Which throughput metric to compare
@@ -1575,10 +1575,11 @@ export function suggestSrxModel(panosModel, metric = 'l7') {
   const PREFER_CURRENT = {
     'SRX4100': 'SRX4120',
     'SRX4200': 'SRX4300',
-    'SRX4600': 'SRX4700',
+    'SRX4600': 'SRX4700-700',
+    'SRX4700': 'SRX4700-700',
   };
 
-  // Prefer SRX4700 over chassis models (5400/5600/5800)
+  // Prefer SRX4700-700 over chassis models (5400/5600/5800)
   const PREFER_OVER_CHASSIS = ['SRX5400', 'SRX5600', 'SRX5800'];
 
   // Find the first SRX with throughput >= source throughput
@@ -1586,17 +1587,17 @@ export function suggestSrxModel(panosModel, metric = 'l7') {
   if (sourceThroughput > 0) {
     const match = candidates.find(c => c.throughput >= sourceThroughput);
     if (match) {
-      // If matched a chassis model, recommend SRX4700 instead
+      // If matched a chassis model, recommend SRX4700-700 instead
       if (PREFER_OVER_CHASSIS.includes(match.name)) {
-        return { model: 'SRX4700', recommended: true };
+        return { model: 'SRX4700-700', recommended: true };
       }
       const model = PREFER_CURRENT[match.name] || match.name;
       return { model, recommended: true };
     }
   }
 
-  // No match or source throughput is N/A — fall back to SRX4700, not recommended
-  return { model: 'SRX4700', recommended: false };
+  // No match or source throughput is N/A — fall back to SRX4700-700, not recommended
+  return { model: 'SRX4700-700', recommended: false };
 }
 
 

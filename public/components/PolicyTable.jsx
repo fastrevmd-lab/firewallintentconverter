@@ -223,67 +223,52 @@ export default function PolicyTable({
       : (policy._secIntelAddresses?.length > 0);
     const rows = [];
 
-    // IPS = spyware + vulnerability (maps to IDP on SRX)
-    if (sp.spyware || sp.vulnerability) {
-      const parts = [sp.vulnerability, sp.spyware].filter(Boolean).join(', ');
-      rows.push({ label: 'IPS', cls: 'ips', value: parts });
+    // IPS — single IDP policy
+    if (policy._srx_idp || sp.spyware || sp.vulnerability) {
+      const value = policy._srx_idp_profile || [sp.vulnerability, sp.spyware].filter(Boolean).join(', ') || 'enabled';
+      rows.push({ label: 'IPS', cls: 'ips', value });
     }
 
-    // Content Security = url-filtering + file-blocking
-    if (sp['url-filtering'] || sp['file-blocking']) {
-      const parts = [sp['url-filtering'], sp['file-blocking']].filter(Boolean).join(', ');
-      rows.push({ label: 'Content Security', cls: 'urlfilter', value: parts });
+    // Content Security — UTM (url-filtering + file-blocking)
+    if (policy._srx_content_security || sp['url-filtering'] || sp['file-blocking']) {
+      const value = policy._srx_content_security_profile || [sp['url-filtering'], sp['file-blocking']].filter(Boolean).join(', ') || 'enabled';
+      rows.push({ label: 'Content Security', cls: 'urlfilter', value });
     }
 
     // Decrypt
     if (policy._srx_decrypt) {
-      rows.push({ label: 'Decrypt', cls: 'ips', value: 'SSL Proxy' });
+      const value = policy._srx_decrypt_profile || 'SSL Proxy';
+      rows.push({ label: 'Decrypt', cls: 'ips', value });
     }
 
     // Flow-based AV
     if (policy._srx_flow_av) {
-      rows.push({ label: 'Flow-based AV', cls: 'antimalware', value: 'enabled' });
+      const value = policy._srx_flow_av_profile || 'enabled';
+      rows.push({ label: 'Flow-based AV', cls: 'antimalware', value });
     }
 
-    // Anti-virus = virus + wildfire (SRX term — no WildFire on SRX)
-    if (sp.virus || sp['wildfire-analysis']) {
-      const parts = [sp.virus, sp['wildfire-analysis']].filter(Boolean).join(', ');
-      rows.push({ label: 'Anti-virus', cls: 'antimalware', value: parts });
+    // Anti-malware
+    if (policy._srx_antimalware || sp.virus || sp['wildfire-analysis']) {
+      const value = policy._srx_antimalware_profile || [sp.virus, sp['wildfire-analysis']].filter(Boolean).join(', ') || 'enabled';
+      rows.push({ label: 'Anti-malware', cls: 'antimalware', value });
     }
 
     // SecIntel
     if (hasSecIntel) {
-      rows.push({ label: 'SecIntel', cls: 'secintel', value: 'Security Intelligence' });
+      const value = policy._srx_secintel_profile || 'Security Intelligence';
+      rows.push({ label: 'SecIntel', cls: 'secintel', value });
     }
 
     // Secure Web Proxy
     if (policy._srx_secure_web_proxy) {
-      rows.push({ label: 'Secure Web Proxy', cls: 'secintel', value: 'enabled' });
+      const value = policy._srx_secure_web_proxy_profile || 'enabled';
+      rows.push({ label: 'Secure Web Proxy', cls: 'secintel', value });
     }
 
     // ICAP Redirect
     if (policy._srx_icap_redirect) {
-      rows.push({ label: 'ICAP Redirect', cls: 'fileblock', value: 'enabled' });
-    }
-
-    // Anti-spam (from FortiGate email filter)
-    if (sp['email-filter']) {
-      rows.push({ label: 'Anti-spam', cls: 'urlfilter', value: sp['email-filter'] });
-    }
-
-    // AppSecure (from FortiGate app control)
-    if (sp['application-control']) {
-      rows.push({ label: 'AppSecure', cls: 'ips', value: sp['application-control'] });
-    }
-
-    // DLP (informational — requires ICAP on SRX)
-    if (sp['dlp']) {
-      rows.push({ label: 'DLP (ICAP)', cls: 'fileblock', value: sp['dlp'] });
-    }
-
-    // DNS Security (from FortiGate DNS filter)
-    if (sp['dns-security']) {
-      rows.push({ label: 'DNS Security', cls: 'secintel', value: sp['dns-security'] });
+      const value = policy._srx_icap_redirect_profile || 'enabled';
+      rows.push({ label: 'ICAP Redirect', cls: 'fileblock', value });
     }
 
     if (rows.length === 0) {
@@ -308,8 +293,9 @@ export default function PolicyTable({
     const addrs = type === 'src' ? policy.src_addresses : policy.dst_addresses;
     const isNegated = type === 'src' ? policy.negate_source : policy.negate_destination;
     const MAX_SHOW = 2;
-    // URL filtering profile — show under destinations
+    // Content Security (URL filtering + file blocking) — show under destinations (matches Security Director)
     const urlFilter = type === 'dst' ? (policy.security_profiles || {})['url-filtering'] : null;
+    const fileBlock = type === 'dst' ? (policy.security_profiles || {})['file-blocking'] : null;
 
     return (
       <div className="srx-cell-stack">
@@ -358,11 +344,17 @@ export default function PolicyTable({
             )}
           </>
         )}
-        {/* URL Filtering (destinations only) */}
+        {/* Content Security: URL Filtering + File Blocking (destinations only, matches Security Director) */}
         {urlFilter && (
           <div className="srx-cell-row">
             <span className="srx-cell-icon url">U</span>
             <span className="srx-cell-value" style={{ fontSize: 11 }}>{urlFilter}</span>
+          </div>
+        )}
+        {fileBlock && (
+          <div className="srx-cell-row">
+            <span className="srx-cell-icon url">F</span>
+            <span className="srx-cell-value" style={{ fontSize: 11 }}>{fileBlock}</span>
           </div>
         )}
       </div>

@@ -455,7 +455,7 @@ export default function InterviewPanel({
 
         {/* Security Profiles / Application Services */}
         <div className="detail-section">
-          <h3>{isSrx ? 'Application Services' : 'Security Profiles'}</h3>
+          <h3>{isSrx ? 'Security Subscriptions' : 'Security Profiles'}</h3>
 
           {/* License warning — "to SRX" tab only */}
           {isToSrxTab && srxLicense && (() => {
@@ -721,15 +721,12 @@ function EditableChipsField({ label, values, onChange }) {
  * matching Security Director Cloud layout.
  */
 const SRX_SUBSCRIPTION_TOGGLES = [
-  { key: 'ips',              label: 'IPS',              sub: 'Intrusion Prevention',       profiles: ['spyware', 'vulnerability'] },
-  { key: 'content-security', label: 'Content Security', sub: 'UTM Content Filtering',      profiles: ['url-filtering', 'file-blocking'] },
+  { key: 'ips',              label: 'IPS',              sub: 'IDP Policy',                 srxField: '_srx_idp',              initFrom: ['spyware', 'vulnerability'] },
+  { key: 'content-security', label: 'Content Security', sub: 'UTM Content Filtering',      srxField: '_srx_content_security', initFrom: ['url-filtering', 'file-blocking'] },
   { key: 'decrypt',          label: 'Decrypt',          sub: 'SSL/TLS Inspection',         srxField: '_srx_decrypt' },
   { key: 'flow-av',          label: 'Flow-based AV',    sub: 'Flow-mode Antivirus',        srxField: '_srx_flow_av' },
-  { key: 'antimalware',      label: 'Anti-virus',       sub: 'UTM Anti-virus',             profiles: ['virus', 'wildfire-analysis'] },
+  { key: 'antimalware',      label: 'Anti-malware',     sub: 'Anti-malware Protection',    srxField: '_srx_antimalware',      initFrom: ['virus', 'wildfire-analysis'] },
   { key: 'secintel',         label: 'SecIntel',         sub: 'Security Intelligence',      srxField: '_srx_secintel', initFromSecIntel: true },
-  { key: 'anti-spam',        label: 'Anti-spam',        sub: 'UTM Anti-spam',              profiles: ['email-filter'] },
-  { key: 'appsecure',        label: 'AppSecure',        sub: 'Application Firewall',       profiles: ['application-control'] },
-  { key: 'dns-sec',          label: 'DNS Security',     sub: 'DNS Security',               profiles: ['dns-security'] },
   { key: 'secure-web-proxy', label: 'Secure Web Proxy', sub: 'Explicit/Transparent Proxy', srxField: '_srx_secure_web_proxy' },
   { key: 'icap-redirect',    label: 'ICAP Redirect',    sub: 'ICAP Content Adaptation',    srxField: '_srx_icap_redirect' },
 ];
@@ -738,27 +735,29 @@ function SrxSecurityToggles({ rule, onProfileChange, onFieldChange }) {
   const sp = rule.security_profiles || {};
 
   const isEnabled = (toggle) => {
-    if (toggle.srxField) {
-      if (toggle.initFromSecIntel && rule._srx_secintel === undefined) {
-        return (rule._secIntelAddresses || []).length > 0;
-      }
-      return !!rule[toggle.srxField];
-    }
-    if (toggle.profiles) return toggle.profiles.some(p => !!sp[p]);
+    // If the srxField is explicitly set, use that
+    if (rule[toggle.srxField] !== undefined) return !!rule[toggle.srxField];
+    // Initialize from source-vendor profiles (e.g. spyware/vulnerability → IPS)
+    if (toggle.initFrom) return toggle.initFrom.some(p => !!sp[p]);
+    // SecIntel: initialize from EDL addresses
+    if (toggle.initFromSecIntel) return (rule._secIntelAddresses || []).length > 0;
     return false;
   };
 
+  const getProfile = (toggle) => {
+    // Explicit profile value
+    if (rule[toggle.srxField + '_profile']) return rule[toggle.srxField + '_profile'];
+    // Derive from source-vendor profiles
+    if (toggle.initFrom) {
+      const names = toggle.initFrom.map(p => sp[p]).filter(Boolean);
+      return names[0] || '';
+    }
+    return '';
+  };
+
   const handleToggleChange = (toggle, checked) => {
-    if (toggle.srxField) {
-      onFieldChange(toggle.srxField, checked);
-      if (!checked) onFieldChange(toggle.srxField + '_profile', '');
-      return;
-    }
-    if (toggle.profiles) {
-      for (const p of toggle.profiles) {
-        onProfileChange(p, checked ? (sp[p] || 'default') : '');
-      }
-    }
+    onFieldChange(toggle.srxField, checked);
+    if (!checked) onFieldChange(toggle.srxField + '_profile', '');
   };
 
   return (
@@ -781,24 +780,13 @@ function SrxSecurityToggles({ rule, onProfileChange, onFieldChange }) {
                 <span className="srx-toggle-track" />
               </label>
             </div>
-            {/* Profile name input directly below toggle when enabled */}
-            {enabled && toggle.profiles && toggle.profiles.filter(p => !!sp[p]).map(p => (
-              <div className="detail-field srx-profile-inline" key={p}>
-                <span className="field-label">{formatProfileLabel(p)}</span>
-                <input
-                  className="field-edit-input"
-                  value={sp[p] || ''}
-                  onChange={(e) => onProfileChange(p, e.target.value)}
-                  placeholder="default"
-                />
-              </div>
-            ))}
-            {enabled && toggle.srxField && (
+            {/* Single profile name input below toggle when enabled */}
+            {enabled && (
               <div className="detail-field srx-profile-inline">
                 <span className="field-label">Profile</span>
                 <input
                   className="field-edit-input"
-                  value={rule[toggle.srxField + '_profile'] || ''}
+                  value={getProfile(toggle)}
                   onChange={(e) => onFieldChange(toggle.srxField + '_profile', e.target.value)}
                   placeholder="default"
                 />

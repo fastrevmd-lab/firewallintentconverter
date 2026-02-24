@@ -663,18 +663,6 @@ export default function App() {
                 License <span className="stat-value">{srxLicense}</span>
               </span>
             )}
-            <span className="stat-badge">
-              Zones <span className="stat-value">{displayStats.zone_count}</span>
-            </span>
-            <span className="stat-badge">
-              Rules <span className="stat-value">{displayStats.rule_count}</span>
-            </span>
-            <span className="stat-badge">
-              Objects <span className="stat-value">{displayStats.object_count}</span>
-            </span>
-            <span className="stat-badge">
-              NAT <span className="stat-value">{displayStats.nat_rule_count}</span>
-            </span>
             {allWarnings.length > 0 && (
               <span className="stat-badge">
                 Warnings <span className="stat-value" style={{ color: 'var(--warning)' }}>
@@ -871,7 +859,7 @@ export default function App() {
                     className={`center-tab-btn ${editTab === 'objects' ? 'active' : ''}`}
                     onClick={() => setEditTab('objects')}
                   >
-                    {effectiveViewMode === 'srx' ? 'Address Book' : 'Objects'}
+                    {effectiveViewMode === 'srx' ? 'Address Book' : 'Objects'} ({(intermediateConfig.address_objects?.length || 0) + (intermediateConfig.address_groups?.length || 0) + (intermediateConfig.service_objects?.length || 0) + (intermediateConfig.service_groups?.length || 0)})
                   </button>
                   <button
                     className={`center-tab-btn ${editTab === 'zones' ? 'active' : ''}`}

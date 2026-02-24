@@ -113,12 +113,16 @@ export function buildApplicationServices(rule) {
   const services = [];
   const profiles = rule.security_profiles || {};
 
-  const hasUtm = profiles['virus'] || profiles['wildfire-analysis'] ||
-                 profiles['url-filtering'] || profiles['file-blocking'];
-  const hasIdp = profiles['spyware'] || profiles['vulnerability'];
-
-  if (hasUtm) services.push('utm-policy');
+  // IDP — single policy
+  const hasIdp = rule._srx_idp || profiles['spyware'] || profiles['vulnerability'];
   if (hasIdp) services.push('idp-policy');
+
+  // Content Security (UTM) — url-filtering + file-blocking shown under destinations
+  const hasUtm = profiles['url-filtering'] || profiles['file-blocking'];
+  if (hasUtm) services.push('utm-policy');
+
+  // Flow-based AV
+  if (rule._srx_flow_av) services.push('flow-av');
 
   // SecIntel from EDL references
   if (rule._secIntelAddresses && rule._secIntelAddresses.length > 0) {

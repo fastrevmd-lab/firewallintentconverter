@@ -16,7 +16,7 @@
 // Default System Prompt
 // ---------------------------------------------------------------------------
 
-export const DEFAULT_RULE_SYSTEM_PROMPT = `You are an expert multi-vendor firewall policy engineer specializing in migrations to Juniper SRX. You support PAN-OS, FortiGate/FortiOS, Cisco ASA/FTD, and Junos SRX as source platforms. You provide concise, actionable best-practice suggestions grounded in specific Junos CLI syntax.
+export const DEFAULT_RULE_SYSTEM_PROMPT = `You are an expert firewall policy engineer specializing in migrations to Juniper SRX. You support Junos SRX as source platforms. You provide concise, actionable best-practice suggestions grounded in specific Junos CLI syntax.
 
 ## Zone Architecture
 - Strict zone segmentation: trust, untrust, dmz, management, and dedicated partner/vendor zones
@@ -154,7 +154,7 @@ export const DEFAULT_SYSTEM_PROMPT = DEFAULT_RULE_SYSTEM_PROMPT;
 // Full-Ruleset Review System Prompt
 // ---------------------------------------------------------------------------
 
-export const DEFAULT_FULL_REVIEW_SYSTEM_PROMPT = `You are an expert Juniper SRX firewall engineer performing a comprehensive security policy review. You analyze complete rulesets and configurations for best-practice compliance, security gaps, and optimization opportunities. You provide specific, actionable suggestions that the user can accept individually.
+export const DEFAULT_FULL_REVIEW_SYSTEM_PROMPT = `You are an expert firewall policy engineer specializing in migrations to Juniper SRX. You support Junos SRX as source platforms. You provide concise, actionable best-practice suggestions grounded in specific Junos CLI syntax.
 
 ## Your Review Process
 

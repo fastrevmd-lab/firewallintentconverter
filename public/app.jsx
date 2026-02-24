@@ -983,12 +983,24 @@ export default function App() {
                     routingContexts={intermediateConfig.routing_contexts || []}
                     staticRoutes={intermediateConfig.static_routes || []}
                     interfaces={intermediateConfig.interfaces || []}
+                    bridgeDomains={intermediateConfig.bridge_domains || []}
+                    l2Interfaces={intermediateConfig.l2_interfaces || []}
+                    vwirePairs={intermediateConfig.vwire_pairs || []}
                     onRoutesUpdate={(routes) => {
                       const updated = { ...intermediateConfig, static_routes: routes };
                       setIntermediateConfig(updated);
                     }}
                     onInterfacesUpdate={(interfaces) => {
                       setIntermediateConfig(prev => ({ ...prev, interfaces }));
+                    }}
+                    onBridgeDomainsUpdate={(bridgeDomains) => {
+                      setIntermediateConfig(prev => ({ ...prev, bridge_domains: bridgeDomains }));
+                    }}
+                    onL2InterfacesUpdate={(l2Interfaces) => {
+                      setIntermediateConfig(prev => ({ ...prev, l2_interfaces: l2Interfaces }));
+                    }}
+                    onVwirePairsUpdate={(vwirePairs) => {
+                      setIntermediateConfig(prev => ({ ...prev, vwire_pairs: vwirePairs }));
                     }}
                   />
                 )}

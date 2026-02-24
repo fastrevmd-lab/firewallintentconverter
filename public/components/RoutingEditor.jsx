@@ -7,7 +7,7 @@
  */
 import React, { useState } from 'react';
 
-export default function RoutingEditor({ routingContexts, staticRoutes, onRoutesUpdate, interfaces, onInterfacesUpdate }) {
+export default function RoutingEditor({ routingContexts, staticRoutes, onRoutesUpdate, interfaces, onInterfacesUpdate, bridgeDomains, l2Interfaces, vwirePairs, onBridgeDomainsUpdate, onL2InterfacesUpdate, onVwirePairsUpdate }) {
   const [editingIndex, setEditingIndex] = useState(null);
   const [editingIfIndex, setEditingIfIndex] = useState(null);
 
@@ -187,6 +187,160 @@ export default function RoutingEditor({ routingContexts, staticRoutes, onRoutesU
           </table>
         )}
       </div>
+
+      {/* Bridge Domains (L2) */}
+      {bridgeDomains && bridgeDomains.length > 0 && (
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+            <h3 style={{ fontSize: 14, color: '#94a3b8', margin: 0 }}>
+              Bridge Domains ({bridgeDomains.length})
+              <span style={{ fontSize: 11, color: '#475569', marginLeft: 8 }}>L2</span>
+            </h3>
+            {onBridgeDomainsUpdate && (
+              <button className="btn btn-secondary btn-sm" onClick={() => {
+                onBridgeDomainsUpdate([...bridgeDomains, { name: '', vlan_id: '', interfaces: [], irb_interface: '' }]);
+              }} style={{ fontSize: 11 }}>
+                + Add Bridge Domain
+              </button>
+            )}
+          </div>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+            <thead>
+              <tr style={{ borderBottom: '1px solid #334155', color: '#64748b', textAlign: 'left' }}>
+                <th style={{ padding: '6px 8px' }}>Name</th>
+                <th style={{ padding: '6px 8px' }}>VLAN ID</th>
+                <th style={{ padding: '6px 8px' }}>Interfaces</th>
+                <th style={{ padding: '6px 8px' }}>IRB Interface</th>
+                {onBridgeDomainsUpdate && <th style={{ padding: '6px 4px', width: 40 }}></th>}
+              </tr>
+            </thead>
+            <tbody>
+              {bridgeDomains.map((bd, i) => (
+                <tr key={i} style={{ borderBottom: '1px solid #1e293b' }}>
+                  <td style={{ padding: '5px 8px' }}>
+                    {onBridgeDomainsUpdate ? (
+                      <input type="text" value={bd.name} onChange={(e) => {
+                        const updated = bridgeDomains.map((b, j) => j === i ? { ...b, name: e.target.value } : b);
+                        onBridgeDomainsUpdate(updated);
+                      }} style={inputStyle} />
+                    ) : (
+                      <span style={{ color: '#e2e8f0', fontFamily: 'monospace' }}>{bd.name}</span>
+                    )}
+                  </td>
+                  <td style={{ padding: '5px 8px' }}>
+                    {onBridgeDomainsUpdate ? (
+                      <input type="text" value={bd.vlan_id || ''} onChange={(e) => {
+                        const updated = bridgeDomains.map((b, j) => j === i ? { ...b, vlan_id: e.target.value } : b);
+                        onBridgeDomainsUpdate(updated);
+                      }} style={{ ...inputStyle, width: 60 }} />
+                    ) : (
+                      <span style={{ color: '#94a3b8' }}>{bd.vlan_id || '-'}</span>
+                    )}
+                  </td>
+                  <td style={{ padding: '5px 8px', color: '#94a3b8', fontSize: 11 }}>
+                    {(bd.interfaces || []).join(', ') || '-'}
+                  </td>
+                  <td style={{ padding: '5px 8px' }}>
+                    {onBridgeDomainsUpdate ? (
+                      <input type="text" value={bd.irb_interface || ''} onChange={(e) => {
+                        const updated = bridgeDomains.map((b, j) => j === i ? { ...b, irb_interface: e.target.value } : b);
+                        onBridgeDomainsUpdate(updated);
+                      }} style={inputStyle} placeholder="irb.0" />
+                    ) : (
+                      <span style={{ color: '#94a3b8', fontFamily: 'monospace' }}>{bd.irb_interface || '-'}</span>
+                    )}
+                  </td>
+                  {onBridgeDomainsUpdate && (
+                    <td style={{ padding: '5px 4px', textAlign: 'right' }}>
+                      <button className="btn btn-secondary btn-sm" onClick={() => {
+                        onBridgeDomainsUpdate(bridgeDomains.filter((_, j) => j !== i));
+                      }} style={{ fontSize: 10, padding: '1px 6px', color: '#ef4444' }} title="Delete">X</button>
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* L2 Interfaces */}
+      {l2Interfaces && l2Interfaces.length > 0 && (
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+            <h3 style={{ fontSize: 14, color: '#94a3b8', margin: 0 }}>
+              L2 Interfaces ({l2Interfaces.length})
+              <span style={{ fontSize: 11, color: '#475569', marginLeft: 8 }}>family bridge</span>
+            </h3>
+          </div>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+            <thead>
+              <tr style={{ borderBottom: '1px solid #334155', color: '#64748b', textAlign: 'left' }}>
+                <th style={{ padding: '6px 8px' }}>Interface</th>
+                <th style={{ padding: '6px 8px' }}>Mode</th>
+                <th style={{ padding: '6px 8px' }}>VLAN</th>
+                <th style={{ padding: '6px 8px' }}>Bridge Domain</th>
+              </tr>
+            </thead>
+            <tbody>
+              {l2Interfaces.map((l2if, i) => (
+                <tr key={i} style={{ borderBottom: '1px solid #1e293b' }}>
+                  <td style={{ padding: '5px 8px' }}>
+                    <span style={{ color: '#e2e8f0', fontFamily: 'monospace' }}>{l2if.name}</span>
+                    <span style={{ marginLeft: 6, fontSize: 10, padding: '1px 4px', borderRadius: 3, background: '#1e40af', color: '#93c5fd' }}>L2</span>
+                  </td>
+                  <td style={{ padding: '5px 8px', color: '#94a3b8' }}>{l2if.mode || 'access'}</td>
+                  <td style={{ padding: '5px 8px', color: '#94a3b8' }}>{l2if.vlan || '-'}</td>
+                  <td style={{ padding: '5px 8px', color: '#38bdf8' }}>{l2if.bridge_domain || '-'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Virtual-Wire Pairs (PAN-OS) */}
+      {vwirePairs && vwirePairs.length > 0 && (
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+            <h3 style={{ fontSize: 14, color: '#94a3b8', margin: 0 }}>
+              Virtual-Wire Pairs ({vwirePairs.length})
+              <span style={{ fontSize: 11, color: '#f59e0b', marginLeft: 8 }}>No SRX equivalent</span>
+            </h3>
+          </div>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+            <thead>
+              <tr style={{ borderBottom: '1px solid #334155', color: '#64748b', textAlign: 'left' }}>
+                <th style={{ padding: '6px 8px' }}>Name</th>
+                <th style={{ padding: '6px 8px' }}>Interface 1</th>
+                <th style={{ padding: '6px 8px' }}>Interface 2</th>
+                <th style={{ padding: '6px 8px' }}>Tag Allowed</th>
+              </tr>
+            </thead>
+            <tbody>
+              {vwirePairs.map((vw, i) => (
+                <tr key={i} style={{ borderBottom: '1px solid #1e293b' }}>
+                  <td style={{ padding: '5px 8px' }}>
+                    <span style={{ color: '#e2e8f0' }}>{vw.name}</span>
+                  </td>
+                  <td style={{ padding: '5px 8px' }}>
+                    <span style={{ color: '#94a3b8', fontFamily: 'monospace' }}>{vw.interface1}</span>
+                  </td>
+                  <td style={{ padding: '5px 8px' }}>
+                    <span style={{ color: '#94a3b8', fontFamily: 'monospace' }}>{vw.interface2}</span>
+                  </td>
+                  <td style={{ padding: '5px 8px', color: '#94a3b8', fontSize: 11 }}>
+                    {(vw.tag_allowed || []).join(', ') || 'all'}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div style={{ marginTop: 6, padding: '6px 8px', background: '#1e293b', borderRadius: 4, fontSize: 11, color: '#f59e0b' }}>
+            SRX does not support virtual-wire mode. These pairs will be converted to bridge-domains. Review interface assignments after conversion.
+          </div>
+        </div>
+      )}
 
       {/* Routing Contexts */}
       {routingContexts && routingContexts.length > 0 && (

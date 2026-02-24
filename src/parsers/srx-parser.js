@@ -91,6 +91,10 @@ export function parseSrxConfig(configText) {
   // Parse interface configurations
   const interfaces = parseSrxInterfaces(tree, zones, warnings);
 
+  // Parse L2 / bridge-domain configuration
+  const bridgeDomains = parseSrxBridgeDomains(tree, warnings);
+  const l2Interfaces = detectSrxL2Interfaces(tree, interfaces, warnings);
+
   const intermediateConfig = {
     zones,
     address_objects: addressObjects,
@@ -114,6 +118,10 @@ export function parseSrxConfig(configText) {
     routing_contexts: routingContexts,
     static_routes: staticRoutes,
     target_context: null,
+    transparent_mode: bridgeDomains.length > 0,
+    bridge_domains: bridgeDomains,
+    l2_interfaces: l2Interfaces,
+    vwire_pairs: [],
     metadata: {
       source_vendor: 'srx',
       source_version: version,
@@ -1688,6 +1696,96 @@ function parseSrxQosConfig(tree, warnings) {
   return qosProfiles;
 }
 
+
+// ---------------------------------------------------------------------------
+// Bridge Domain Parser (L2 Support)
+// ---------------------------------------------------------------------------
+
+/**
+ * Parses SRX bridge-domain configuration.
+ * Junos: set bridge-domains <name> domain-type bridge
+ *        set bridge-domains <name> vlan-id <id>
+ *        set bridge-domains <name> routing-interface irb.<unit>
+ */
+function parseSrxBridgeDomains(tree, warnings) {
+  const bdNode = tree?.['bridge-domains'];
+  if (!bdNode || typeof bdNode !== 'object') return [];
+
+  const bridgeDomains = [];
+  for (const [bdName, bdData] of Object.entries(bdNode)) {
+    if (bdName.startsWith('_') || typeof bdData !== 'object') continue;
+
+    const vlanId = extractStringValue(bdData['vlan-id']) || '';
+    const routingIf = extractStringValue(bdData['routing-interface']) || '';
+
+    // Collect interfaces assigned to this bridge domain
+    const bdInterfaces = [];
+
+    bridgeDomains.push({
+      name: bdName,
+      vlan_id: vlanId,
+      interfaces: bdInterfaces,
+      irb_interface: routingIf,
+    });
+  }
+
+  if (bridgeDomains.length > 0) {
+    warnings.push(createWarning(
+      'info', 'l2/bridge-domains',
+      `Parsed ${bridgeDomains.length} bridge domain(s) from SRX config`,
+      'Bridge domain configuration will be preserved in conversion'
+    ));
+  }
+
+  return bridgeDomains;
+}
+
+/**
+ * Detects L2 interfaces from SRX config.
+ * An interface is L2 if its unit has "family bridge" configured.
+ * Also detects bridge-domain assignments on interface units.
+ */
+function detectSrxL2Interfaces(tree, interfaces, warnings) {
+  const l2Interfaces = [];
+  const ifacesNode = tree?.interfaces;
+  if (!ifacesNode || typeof ifacesNode !== 'object') return l2Interfaces;
+
+  for (const [ifName, ifData] of Object.entries(ifacesNode)) {
+    if (ifName.startsWith('_') || typeof ifData !== 'object') continue;
+    const unitNode = ifData?.unit;
+    if (!unitNode || typeof unitNode !== 'object') continue;
+
+    for (const [unitNum, unitData] of Object.entries(unitNode)) {
+      if (unitNum.startsWith('_') || typeof unitData !== 'object') continue;
+
+      // Check for family bridge
+      const hasBridge = unitData?.family?.bridge !== undefined;
+      if (!hasBridge) continue;
+
+      const fullName = `${ifName}.${unitNum}`;
+      const vlanId = extractStringValue(unitData?.['vlan-id']) || '';
+      const bridgeDomainName = extractStringValue(unitData?.['bridge-domain-name']) ||
+        (unitData?.family?.bridge?.['bridge-domain-name'] ? extractStringValue(unitData.family.bridge['bridge-domain-name']) : '');
+
+      l2Interfaces.push({
+        name: fullName,
+        mode: vlanId ? 'trunk' : 'access',
+        vlan: vlanId,
+        bridge_domain: bridgeDomainName,
+      });
+    }
+  }
+
+  if (l2Interfaces.length > 0) {
+    warnings.push(createWarning(
+      'info', 'l2/interfaces',
+      `Detected ${l2Interfaces.length} L2 interface(s) with family bridge`,
+      'L2 interfaces will be preserved in the generated config'
+    ));
+  }
+
+  return l2Interfaces;
+}
 
 // ---------------------------------------------------------------------------
 // Interface Configuration Parser

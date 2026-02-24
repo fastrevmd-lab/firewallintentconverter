@@ -18,7 +18,7 @@
  * (clean / warning / unsupported) for the warnings panel.
  */
 
-import { sanitizeJunosName, mapAppToJunos, mapProfileToSrx, createWarning } from '../parsers/parser-utils.js';
+import { sanitizeJunosName, mapAppToJunos, mapProfileToSrx, createWarning, isPredefEquivalent, JUNOS_PREDEFINED_APPS } from '../parsers/parser-utils.js';
 
 // ---------------------------------------------------------------------------
 // Main Converter Entry Point
@@ -46,6 +46,10 @@ export function convertToSrxSetCommands(config, interfaceMappings = {}, targetCo
     unsupported_items: 0,
   };
 
+  // Clear trackers from any previous conversion (module-level state)
+  customfwicApps.clear();
+  predefServiceMap.clear();
+
   // Generate commands in Junos hierarchy order
   convertZones(config.zones, commands, warnings, summary, interfaceMappings);
   convertAddressObjects(config.address_objects, commands, warnings, summary);
@@ -54,15 +58,13 @@ export function convertToSrxSetCommands(config, interfaceMappings = {}, targetCo
   convertServiceGroups(config.service_groups, commands, warnings, summary);
   convertApplications(config.applications, commands, warnings, summary);
 
-  // Clear Customfwic tracker for fresh conversion
-  customfwicApps.clear();
-
   // Detect source vendor for 1:1 passthrough (SRX→SRX needs no app mapping)
   const sourceVendor = config.metadata?.source_vendor || '';
 
   // UTM / IDP / SecIntel — must run before security policies to build assignment maps
-  const { utmCommands, utmPolicyMap } = convertUtmPolicies(config.security_policies, warnings);
-  const { idpCommands, idpPolicyMap } = convertIdpPolicies(config.security_policies, warnings);
+  const profileDefs = config.security_profile_definitions || {};
+  const { utmCommands, utmPolicyMap } = convertUtmPolicies(config.security_policies, warnings, profileDefs);
+  const { idpCommands, idpPolicyMap } = convertIdpPolicies(config.security_policies, warnings, profileDefs);
   const { secIntelCommands, secIntelEnabled } = convertSecIntel(config.external_lists, config.security_policies, warnings);
 
   commands.push(...utmCommands);
@@ -79,6 +81,7 @@ export function convertToSrxSetCommands(config, interfaceMappings = {}, targetCo
   convertSyslogConfig(config.syslog_config, commands, warnings, summary);
   convertDhcpConfig(config.dhcp_config, commands, warnings, summary);
   convertQosConfig(config.qos_config, commands, warnings, summary);
+  convertL2Config(config, commands, warnings, summary);
 
   // Generate placeholder definitions for unmapped Customfwic applications
   if (customfwicApps.size > 0) {
@@ -326,14 +329,26 @@ function convertAddressGroups(groups, commands, warnings, summary) {
 function convertServiceObjects(services, commands, warnings, summary) {
   if (!services || services.length === 0) return;
 
+  predefServiceMap.clear();
+
   commands.push('# =============================================');
-  commands.push('# Applications (from PAN-OS Service Objects)');
+  commands.push('# Applications (from Service Objects)');
   commands.push('# =============================================');
 
   for (const svc of services) {
     const name = sanitizeJunosName(svc.name);
     const protocol = svc.protocol || 'tcp';
     const port = svc.port_range || '';
+
+    // Check if this service maps to a predefined Junos application
+    const predefApp = isPredefEquivalent(svc.name, protocol, port);
+    if (predefApp) {
+      predefServiceMap.set(svc.name, predefApp);
+      predefServiceMap.set(name, predefApp);
+      commands.push(`# Skipped: "${svc.name}" (${protocol}/${port}) → predefined ${predefApp}`);
+      summary.services_converted++;
+      continue;
+    }
 
     if (protocol === 'icmp' || protocol === 'icmp6') {
       // ICMP services use icmp-type/icmp-code instead of destination-port
@@ -392,11 +407,14 @@ function convertServiceGroups(groups, commands, warnings, summary) {
     const groupName = sanitizeJunosName(group.name);
 
     for (const member of group.members) {
-      const memberName = sanitizeJunosName(member);
-      if (groupNameSet.has(member)) {
-        commands.push(`set applications application-set ${groupName} application-set ${memberName}`);
+      // Check if member maps to a predefined Junos app
+      const predefName = predefServiceMap.get(member);
+      if (predefName) {
+        commands.push(`set applications application-set ${groupName} application ${predefName}`);
+      } else if (groupNameSet.has(member)) {
+        commands.push(`set applications application-set ${groupName} application-set ${sanitizeJunosName(member)}`);
       } else {
-        commands.push(`set applications application-set ${groupName} application ${memberName}`);
+        commands.push(`set applications application-set ${groupName} application ${sanitizeJunosName(member)}`);
       }
     }
 
@@ -448,7 +466,7 @@ function convertApplications(apps, commands, warnings, summary) {
  * Returns { utmCommands, utmPolicyMap } where utmPolicyMap maps
  * rule name → utm-policy name for attachment in convertSecurityPolicies.
  */
-function convertUtmPolicies(policies, warnings) {
+function convertUtmPolicies(policies, warnings, profileDefs = {}) {
   const utmCommands = [];
   const utmPolicyMap = {};
   if (!policies || policies.length === 0) return { utmCommands, utmPolicyMap };
@@ -493,43 +511,94 @@ function convertUtmPolicies(policies, warnings) {
     for (const [pType, pValue] of Object.entries(combo.profiles)) {
       const mapped = mapProfileToSrx(pType, pValue);
 
-      // AppFW and DLP don't map to SRX UTM — emit informational comments
+      const defKey = `${pType}:${pValue}`;
+      const profileDef = profileDefs[defKey];
+
+      // AppFW: generate actual rule-set if we have category data
       if (mapped.srxFeature === 'appfw') {
-        utmCommands.push(`# NOTE: FortiGate application-control "${pValue}" — configure SRX AppFW rule-set manually`);
+        if (profileDef && profileDef.categories && Object.keys(profileDef.categories).length > 0) {
+          const rsName = sanitizeJunosName(`appfw-${pValue}`);
+          utmCommands.push(`# Application Firewall rule-set from application-control "${pValue}"`);
+          let ruleNum = 0;
+          for (const [category, action] of Object.entries(profileDef.categories)) {
+            if (action === 'block' || action === 'block-all' || action === 'reset') {
+              ruleNum++;
+              utmCommands.push(`set security application-firewall rule-sets ${rsName} rule appfw-r${ruleNum} match dynamic-application-group junos:${sanitizeJunosName(category)}`);
+              utmCommands.push(`set security application-firewall rule-sets ${rsName} rule appfw-r${ruleNum} then deny`);
+            }
+          }
+          if (ruleNum > 0) {
+            utmCommands.push(`set security application-firewall rule-sets ${rsName} default-rule permit`);
+          } else {
+            utmCommands.push(`# No blocked categories found in "${pValue}" — configure AppFW manually if needed`);
+          }
+        } else {
+          utmCommands.push(`# NOTE: application-control "${pValue}" — configure SRX AppFW rule-set manually`);
+        }
         continue;
       }
       if (mapped.srxFeature === 'none') {
-        utmCommands.push(`# NOTE: FortiGate DLP profile "${pValue}" — SRX DLP requires ICAP integration`);
+        utmCommands.push(`# NOTE: DLP profile "${pValue}" — SRX DLP requires ICAP integration`);
+        warnings.push(createWarning('unsupported', `profile/dlp/${pValue}`,
+          `DLP profile "${pValue}" requires ICAP integration on SRX`,
+          'Configure an ICAP server and redirect profile for DLP inspection'));
         continue;
       }
 
-      if (mapped.srxFeature === 'unknown' || mapped.srxFeature === 'none' || mapped.srxFeature === 'ssl-proxy') {
-        warnings.push(createWarning('warning', `profile/${pType}`,
-          `${pType} profile "${pValue}" has no SRX equivalent — requires manual configuration`,
-          `Review SRX capabilities for ${pType} and configure manually if needed`));
+      if (mapped.srxFeature === 'ssl-proxy') {
+        utmCommands.push(`# NOTE: SSL/TLS decryption profile "${pValue}" — configure SRX ssl-proxy manually`);
+        warnings.push(createWarning('unsupported', `profile/decryption/${pValue}`,
+          `SSL/TLS decryption profile "${pValue}" maps to SRX ssl-proxy — not auto-generated`,
+          'Configure SRX SSL Forward Proxy with certificates manually'));
+        continue;
+      }
+      if (mapped.srxFeature === 'unknown') {
+        warnings.push(createWarning('unsupported', `profile/${pType}/${pValue}`,
+          `${pType} profile "${pValue}" has no SRX equivalent`,
+          `Review SRX capabilities for ${pType} and configure manually`));
         utmCommands.push(`# UNSUPPORTED: ${pType} profile "${pValue}" — no direct SRX equivalent`);
         continue;
       }
 
       if (mapped.srxFeature !== 'utm') continue;
 
-      // Emit feature profile definition once (with recommended defaults)
+      // Emit feature profile definition once (uses source-derived params when available)
       if (!emittedProfiles.has(mapped.srxProfile)) {
         emittedProfiles.add(mapped.srxProfile);
         if (mapped.srxType === 'anti-virus') {
+          const sizeLimit = (profileDef && profileDef.scanMode === 'full') ? 40000 : 20000;
           utmCommands.push(`set security utm feature-profile anti-virus profile ${mapped.srxProfile} fallback-options default log-and-permit`);
           utmCommands.push(`set security utm feature-profile anti-virus profile ${mapped.srxProfile} fallback-options content-size log-and-permit`);
-          utmCommands.push(`set security utm feature-profile anti-virus profile ${mapped.srxProfile} scan-options content-size-limit 20000`);
+          utmCommands.push(`set security utm feature-profile anti-virus profile ${mapped.srxProfile} scan-options content-size-limit ${sizeLimit}`);
           utmCommands.push(`set security utm feature-profile anti-virus profile ${mapped.srxProfile} scan-options timeout 180`);
         } else if (mapped.srxType === 'web-filtering') {
           utmCommands.push(`set security utm feature-profile web-filtering profile ${mapped.srxProfile} type juniper-enhanced`);
-          utmCommands.push(`set security utm feature-profile web-filtering profile ${mapped.srxProfile} default block`);
+          if (profileDef && profileDef.blockCategories && profileDef.blockCategories.length > 0) {
+            utmCommands.push(`# Block categories from source: ${profileDef.blockCategories.join(', ')}`);
+            utmCommands.push(`set security utm feature-profile web-filtering profile ${mapped.srxProfile} default block`);
+          } else {
+            utmCommands.push(`set security utm feature-profile web-filtering profile ${mapped.srxProfile} default log-and-permit`);
+          }
         } else if (mapped.srxType === 'content-filtering') {
-          utmCommands.push(`set security utm feature-profile content-filtering profile ${mapped.srxProfile} permit-command file-extension exe`);
-          utmCommands.push(`set security utm feature-profile content-filtering profile ${mapped.srxProfile} permit-command file-extension zip`);
+          if (profileDef && profileDef.blockedExtensions && profileDef.blockedExtensions.length > 0) {
+            for (const ext of profileDef.blockedExtensions) {
+              utmCommands.push(`set security utm feature-profile content-filtering profile ${mapped.srxProfile} block-extension ${sanitizeJunosName(ext)}`);
+            }
+          } else {
+            utmCommands.push(`set security utm feature-profile content-filtering profile ${mapped.srxProfile} permit-command file-extension exe`);
+            utmCommands.push(`set security utm feature-profile content-filtering profile ${mapped.srxProfile} permit-command file-extension zip`);
+          }
         } else if (mapped.srxType === 'dns-security') {
-          utmCommands.push(`# DNS Security: FortiGate dnsfilter profile "${pValue}" — configure SRX DNS Security (requires ATP license)`);
-          utmCommands.push(`set security utm feature-profile anti-virus profile ${mapped.srxProfile}`);
+          utmCommands.push(`# DNS Security from "${pValue}" — requires ATP Cloud license`);
+          if (profileDef && profileDef.blockedDomains && profileDef.blockedDomains.length > 0) {
+            for (const domain of profileDef.blockedDomains) {
+              utmCommands.push(`set services dns-filtering dns-filtering-rule ${sanitizeJunosName(pValue)} match-name ${domain}`);
+              utmCommands.push(`set services dns-filtering dns-filtering-rule ${sanitizeJunosName(pValue)} then action block`);
+            }
+          }
+          utmCommands.push(`set services dns-filtering default-action allow`);
+        } else if (mapped.srxType === 'anti-spam') {
+          utmCommands.push(`set security utm feature-profile anti-spam profile ${mapped.srxProfile} sbl-default-server`);
         } else {
           utmCommands.push(`set security utm feature-profile ${mapped.srxType} profile ${mapped.srxProfile}`);
         }
@@ -562,7 +631,7 @@ function convertUtmPolicies(policies, warnings) {
  * Scans policies for IDP-relevant profiles (spyware, vulnerability) and
  * generates SRX IDP policy definitions.
  */
-function convertIdpPolicies(policies, warnings) {
+function convertIdpPolicies(policies, warnings, profileDefs = {}) {
   const idpCommands = [];
   const idpPolicyMap = {};
   if (!policies || policies.length === 0) return { idpCommands, idpPolicyMap };
@@ -597,28 +666,59 @@ function convertIdpPolicies(policies, warnings) {
   idpCommands.push('# NOTE: Actions derived from source profile name heuristics — review for your environment');
   idpCommands.push('# =============================================');
 
+  const idpActionMap = {
+    'reset-both': 'drop-connection', 'reset-client': 'drop-connection',
+    'reset-server': 'drop-connection', 'drop': 'drop-packet',
+    'block': 'drop-connection', 'block-all': 'drop-connection',
+    'alert': 'no-action', 'monitor': 'no-action',
+    'pass': 'no-action', 'default': 'recommended',
+  };
+
   for (const [, combo] of comboMap) {
     const pName = combo.policyName;
     let ruleIdx = 0;
 
     for (const [pType, pValue] of Object.entries(combo.profiles)) {
-      ruleIdx++;
-      const ruleName = `${pType}-rule-${ruleIdx}`;
-      const base = `security idp idp-policy ${pName} rulebase-ips rule ${ruleName}`;
+      const defKey = `${pType}:${pValue}`;
+      const profileDef = profileDefs[defKey];
 
-      // Determine action based on source profile name heuristics
-      const nameLower = pValue.toLowerCase();
-      let idpAction = 'recommended';
-      if (nameLower.includes('strict') || nameLower.includes('critical')) {
-        idpAction = 'drop-connection';
-      } else if (nameLower.includes('alert') || nameLower.includes('monitor')) {
-        idpAction = 'no-action';
+      if (profileDef && profileDef.severityActions && Object.keys(profileDef.severityActions).length > 0) {
+        // Generate severity-specific IDP rules from source profile data
+        const severityOrder = ['critical', 'high', 'medium', 'low', 'info'];
+        for (const severity of severityOrder) {
+          const sourceAction = profileDef.severityActions[severity];
+          if (!sourceAction) continue;
+
+          ruleIdx++;
+          const ruleName = `${pType}-${severity}-r${ruleIdx}`;
+          const base = `security idp idp-policy ${pName} rulebase-ips rule ${ruleName}`;
+          const idpAction = idpActionMap[sourceAction] || 'recommended';
+          const attackGroup = severity.charAt(0).toUpperCase() + severity.slice(1);
+
+          idpCommands.push(`set ${base} match attacks predefined-attack-groups "${attackGroup} - Recommended"`);
+          idpCommands.push(`set ${base} then action ${idpAction}`);
+          idpCommands.push(`set ${base} then notification log-attacks`);
+          idpCommands.push(`# Mapped from ${pType} "${pValue}" severity ${severity} (${sourceAction}) → SRX ${idpAction}`);
+        }
+      } else {
+        // Fallback: name-based heuristics when no profile definitions available
+        ruleIdx++;
+        const ruleName = `${pType}-rule-${ruleIdx}`;
+        const base = `security idp idp-policy ${pName} rulebase-ips rule ${ruleName}`;
+
+        const nameLower = pValue.toLowerCase();
+        let idpAction = 'recommended';
+        if (nameLower.includes('strict') || nameLower.includes('critical')) {
+          idpAction = 'drop-connection';
+        } else if (nameLower.includes('alert') || nameLower.includes('monitor')) {
+          idpAction = 'no-action';
+        }
+
+        idpCommands.push(`set ${base} match attacks predefined-attack-groups "Recommended"`);
+        idpCommands.push(`set ${base} then action ${idpAction}`);
+        idpCommands.push(`set ${base} then notification log-attacks`);
+        idpCommands.push(`# IDP rule mapped from ${pType} profile "${pValue}" → action: ${idpAction}`);
       }
-
-      idpCommands.push(`set ${base} match attacks predefined-attack-groups "Recommended"`);
-      idpCommands.push(`set ${base} then action ${idpAction}`);
-      idpCommands.push(`set ${base} then notification log-attacks`);
-      idpCommands.push(`# IDP rule mapped from ${pType} profile "${pValue}" → action: ${idpAction}`);
     }
   }
 
@@ -839,6 +939,13 @@ function convertSecurityPolicies(policies, commands, warnings, summary, profileM
 const customfwicApps = new Map();
 
 /**
+ * Tracks service objects that are equivalent to predefined Junos applications.
+ * Map of serviceName → junosPredefinedName (e.g., "SSH" → "junos-ssh").
+ * Built during convertServiceObjects(), consumed by resolveApplications().
+ */
+const predefServiceMap = new Map();
+
+/**
  * Resolves application/service fields from any vendor to SRX application names.
  *
  * For SRX→SRX conversions, applications pass through 1:1 (already Junos names).
@@ -900,6 +1007,12 @@ function resolveApplications(applications, services, warnings, policyName, appGr
   if (services && services.length > 0) {
     for (const svc of services) {
       if (svc === 'application-default' || svc === 'any') continue;
+      // Check if this service was mapped to a predefined app during convertServiceObjects
+      const predefName = predefServiceMap.get(svc);
+      if (predefName) {
+        resolved.push(predefName);
+        continue;
+      }
       // Try mapping service name (catches FortiGate "HTTP", "HTTPS", etc.)
       const junosApp = mapAppToJunos(svc);
       if (junosApp) {
@@ -1644,6 +1757,109 @@ function convertQosConfig(qosConfig, commands, warnings, summary) {
       }
       summary.qos_configs_converted = (summary.qos_configs_converted || 0) + 1;
     }
+  }
+
+  commands.push('');
+}
+
+
+// ---------------------------------------------------------------------------
+// L2 / Bridge Domain / Virtual-Wire Configuration
+// ---------------------------------------------------------------------------
+
+/**
+ * Generates SRX bridge-domain and L2 interface (family bridge) commands.
+ *
+ * Maps:
+ *   - bridge_domains → set bridge-domains <name> domain-type bridge, vlan-id, routing-interface
+ *   - l2_interfaces → set interfaces <base> unit <n> family bridge [bridge-domain-name] [vlan-id]
+ *   - vwire_pairs → bridge-domain mapping with TODO comments (SRX has no direct vwire equivalent)
+ */
+function convertL2Config(config, commands, warnings, summary) {
+  const bridgeDomains = config.bridge_domains || [];
+  const l2Interfaces = config.l2_interfaces || [];
+  const vwirePairs = config.vwire_pairs || [];
+  const transparentMode = config.transparent_mode || false;
+
+  if (bridgeDomains.length === 0 && l2Interfaces.length === 0 && vwirePairs.length === 0 && !transparentMode) {
+    return;
+  }
+
+  commands.push('# =============================================');
+  commands.push('# L2 / Bridge Domain Configuration');
+  commands.push('# =============================================');
+
+  if (transparentMode) {
+    commands.push('# Source firewall was in transparent/L2 mode');
+    commands.push('# SRX equivalent: bridge-domains with family bridge interfaces');
+    commands.push('');
+  }
+
+  // Bridge domains
+  for (const bd of bridgeDomains) {
+    const bdName = sanitizeJunosName(bd.name);
+    commands.push(`set bridge-domains ${bdName} domain-type bridge`);
+    if (bd.vlan_id) {
+      commands.push(`set bridge-domains ${bdName} vlan-id ${bd.vlan_id}`);
+    }
+    if (bd.irb_interface) {
+      commands.push(`set bridge-domains ${bdName} routing-interface ${bd.irb_interface}`);
+    }
+    summary.bridge_domains_converted = (summary.bridge_domains_converted || 0) + 1;
+  }
+
+  if (bridgeDomains.length > 0) commands.push('');
+
+  // L2 interfaces — set family bridge
+  for (const l2if of l2Interfaces) {
+    const parts = l2if.name.match(/^(.+?)\.(\d+)$/);
+    if (parts) {
+      const [, base, unit] = parts;
+      commands.push(`set interfaces ${base} unit ${unit} family bridge`);
+      if (l2if.bridge_domain) {
+        commands.push(`set interfaces ${base} unit ${unit} family bridge bridge-domain-name ${sanitizeJunosName(l2if.bridge_domain)}`);
+      }
+      if (l2if.vlan) {
+        commands.push(`set interfaces ${base} unit ${unit} vlan-id ${l2if.vlan}`);
+      }
+    } else {
+      // No unit specified — default to unit 0
+      const base = l2if.name;
+      commands.push(`set interfaces ${base} unit 0 family bridge`);
+      if (l2if.bridge_domain) {
+        commands.push(`set interfaces ${base} unit 0 family bridge bridge-domain-name ${sanitizeJunosName(l2if.bridge_domain)}`);
+      }
+    }
+    summary.l2_interfaces_converted = (summary.l2_interfaces_converted || 0) + 1;
+  }
+
+  if (l2Interfaces.length > 0) commands.push('');
+
+  // Virtual-wire pairs — SRX has no direct equivalent; map to bridge-domain
+  for (const vw of vwirePairs) {
+    const bdName = sanitizeJunosName(`vwire-${vw.name}`);
+    commands.push(`# Virtual-wire pair "${vw.name}": ${vw.interface1} <-> ${vw.interface2}`);
+    commands.push(`# SRX does not support virtual-wire — mapped to bridge-domain`);
+    commands.push(`set bridge-domains ${bdName} domain-type bridge`);
+    if (vw.tag_allowed && vw.tag_allowed.length > 0) {
+      commands.push(`# Tag-allowed: ${vw.tag_allowed.join(', ')}`);
+      const firstTag = vw.tag_allowed[0];
+      if (firstTag && firstTag !== '0') {
+        commands.push(`set bridge-domains ${bdName} vlan-id ${firstTag}`);
+      }
+    }
+    commands.push(`# TODO: Assign interfaces to bridge-domain ${bdName}`);
+    commands.push(`# set interfaces <mapped-if1> unit 0 family bridge bridge-domain-name ${bdName}`);
+    commands.push(`# set interfaces <mapped-if2> unit 0 family bridge bridge-domain-name ${bdName}`);
+    commands.push('');
+
+    warnings.push(createWarning(
+      'warning', `l2/vwire/${vw.name}`,
+      `Virtual-wire pair "${vw.name}" (${vw.interface1} <-> ${vw.interface2}) mapped to bridge-domain — requires manual interface assignment`,
+      'Assign physical interfaces to the generated bridge-domain and configure family bridge'
+    ));
+
+    summary.vwire_pairs_converted = (summary.vwire_pairs_converted || 0) + 1;
   }
 
   commands.push('');

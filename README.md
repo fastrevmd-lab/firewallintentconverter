@@ -103,13 +103,15 @@ Click **Convert to SRX** to generate the output. Switch between **Set Commands**
 - **FortiGate / FortiOS parser** — Parses FortiOS `config`/`edit`/`set`/`next`/`end` block format including firewall policies, address objects, address groups, service objects, service groups, zones, VIPs (destination NAT), IP pools, central SNAT maps, and security profiles (AV, web filter, IPS, application control, SSL inspection, DNS filter, DLP, email filter)
 - **Cisco ASA / FTD parser** — Parses Cisco ASA/FTD configuration including interfaces (nameif, security-level, IP), object network/service definitions, object-group network/service/protocol groups, extended access-lists with remarks, access-group bindings, and object NAT (dynamic/static). Zones are derived from interface nameif + security-level
 - **Auto-detection** — Automatically identifies the source format (PAN-OS XML, Junos SRX, FortiOS, or Cisco ASA) and routes to the correct parser
-- **SRX output** — Generates Juniper SRX `set` commands or hierarchical XML, including zones, address books, application mappings, security policies, NAT rule-sets, schedulers, and UTM profiles (anti-virus, web-filtering, content-filtering, anti-spam). FortiGate Application Control emits an AppFW comment; FortiGate DLP notes ICAP integration requirement
+- **SRX output** — Generates Juniper SRX `set` commands or hierarchical XML, including zones, address books, application mappings, security policies, NAT rule-sets, schedulers, UTM profiles (anti-virus, web-filtering, content-filtering), IDP policies, and L2 bridge-domain/family-bridge config. FortiGate Application Control generates AppFW rule-set; FortiGate DLP notes ICAP integration requirement
 - **Implicit rules** — Automatically generates vendor-specific implicit rules (PAN-OS intra-zone allow + interzone deny, FortiGate intrazone per-zone + default deny, Cisco ASA security-level permits for unbound interfaces + default deny, SRX default deny). Implicit rules are visually distinguished in the UI (dimmed, italic, with "Implicit" chip) and tagged `added_by_fpic`
 - **FQDN support** — Parses FQDN/dns-name address objects from all vendors and converts to SRX `dns-name`. Cisco ASA `fqdn v4`/`v6` maps to SRX `ipv4-only`/`ipv6-only`. FortiGate wildcard-fqdn (`*.example.com`) generates a warning since SRX does not support wildcard dns-name
+- **L2 / transparent / virtual-wire** — Detects and converts L2 mode configurations from all vendors: PAN-OS virtual-wire pairs and L2 zones, FortiGate transparent opmode with virtual-switch and forward-domain grouping, Cisco ASA `firewall transparent` with bridge-groups and BVI interfaces, SRX bridge-domains with family bridge (round-trip). Generates SRX `set bridge-domains` and `set interfaces ... family bridge` commands. Virtual-wire pairs are mapped to bridge-domains with manual interface assignment TODOs since SRX has no native virtual-wire equivalent
 - **ICMP details** — Preserves ICMP type/code through the full pipeline (parser → intermediate → converter). Generates SRX `icmp-type`/`icmp-code` instead of `destination-port` for ICMP services
 - **Schedule support** — Parses schedules from all vendors (FortiGate recurring/onetime, PAN-OS schedule objects, Cisco ASA time-ranges, SRX schedulers) and converts to SRX `set schedulers scheduler` commands with `scheduler-name` references on policies
 - **Nested object groups** — Correctly resolves nested address groups and service groups, emitting `address-set` (not `address`) and `application-set` (not `application`) references for group members that are themselves groups
 - **Vendor-native security profiles** — FortiGate profiles (Application Control, Email Filter, DLP, DNS Filter) use FortiGate-native field names in the intermediate schema and display with correct FortiGate terminology. SRX view shows correct Junos terms (Anti-virus instead of WildFire, Anti-spam, AppSecure, DNS Security). PAN-OS profiles (WildFire, File Blocking) remain unchanged
+- **Predefined Junos app detection** — Services matching Junos predefined applications (junos-ssh, junos-http, junos-https, junos-dns-udp, etc.) are automatically detected and referenced instead of generating redundant custom definitions
 - **Application mapping** — 120+ cross-vendor application mappings (PAN-OS, FortiGate, Cisco ASA) to Junos predefined applications. Unmapped applications receive a `Customfwic` placeholder suffix with a warning to create a custom application definition on the SRX
 - **Application groups** — PAN-OS `<application-group>` entries are parsed with their members and expanded during conversion. The Applications tab shows groups with expandable member lists, and the SRX view displays per-app Junos mapping (e.g., `junos-ssh`) or `custom:app:'name'` for unmapped apps
 - **Sanitization** — One-click replacement of sensitive data (IPs, hostnames, keys) with placeholders before sharing or sending to an LLM. Originals are restored on export
@@ -163,7 +165,9 @@ Click **Convert to SRX** to generate the output. Switch between **Set Commands**
 - **NAT** — Source NAT, destination NAT, static NAT with zone-pair rule sets
 - **Address & service objects** — Named objects, groups, FQDN addresses
 - **Application mapping** — PAN-OS App-ID → Junos application, custom application placeholders
-- **Security profiles** — UTM policy generation from AV, web filter, IPS profiles; IDP policy from vulnerability profiles; SecIntel from EDL/threat feeds
+- **Security profiles** — UTM policy generation from source AV, web filter, file blocking profiles using source-derived parameters (block categories, file extensions, scan settings); IDP policies with severity-specific actions mapped from source vulnerability/spyware profiles (reset-both → drop-connection, alert → no-action); SecIntel from EDL/threat feeds
+- **L2 / bridge domains** — Bridge domain definitions, L2 interfaces with family bridge, VLAN IDs, IRB routing interfaces. Virtual-wire pairs mapped to bridge-domains
+- **Rule optimization** — Shadow detection (fully shadowed rules), reorder recommendations (deny after broader permit), redundant rule detection (subset of earlier permit), mergeable rule suggestions (adjacent rules differing in one dimension), consolidation opportunities (3+ rules combinable with address groups)
 - **Static routes** — Virtual router routes, VRF/routing-instance support, blackhole routes
 - **VPN / IPsec** — IKE proposals/policies/gateways, IPsec proposals/policies/VPNs, traffic selectors, proxy IDs
 - **HA → Chassis Cluster / MNHA** — Active/passive and active/active HA to SRX chassis cluster with redundancy groups, or Multinode High Availability (MNHA) for SRX4700 and supported models (SRX1500, SRX1600, SRX4100/4120/4200/4300, SRX4600, SRX5400/5600/5800, vSRX). MNHA generates `set chassis high-availability` commands with ICL, liveness detection, and services redundancy groups. SRX4700 targets automatically require MNHA. Only 2-node MNHA is supported at this time
@@ -184,10 +188,13 @@ Click **Convert to SRX** to generate the output. Switch between **Set Commands**
 The following features are **not converted** by this tool and must be configured manually on the target SRX:
 
 - **AAA / Authentication** — RADIUS, TACACS+, LDAP server configuration and authentication policies
-- **Dynamic Routing Protocols** — BGP, OSPF, RIP (only static routes are converted)
+- **Dynamic Routing Protocols** — BGP, OSPF, EVPN, VxLAN (only static routes are converted; planned for Rev8)
+- **User-ID / Identity Policies** — PAN-OS User-ID, FortiGate FSSO, Cisco IDFW user/group-based policies (planned for Rev8)
 - **SSL/TLS Decryption** — SSL proxy, certificate management, PKI configuration
 - **NetFlow / Telemetry** — sFlow, traffic monitoring, streaming telemetry
 - **Management Access** — Admin users, SNMP communities, SSH/API access restrictions
+
+See [TODO.md](TODO.md) for the full roadmap and planned features.
 
 ## Project Structure
 
@@ -196,6 +203,7 @@ firewall-intent-converter/
 ├── server.js                     # Express server (API + Vite middleware)
 ├── vite.config.js                # Vite config (React, publicDir: 'static')
 ├── package.json
+├── TODO.md                       # Roadmap & TODO (Rev1–Rev8+)
 ├── index.html                    # Entry HTML
 ├── src/                          # Server-side modules
 │   ├── parsers/
@@ -207,6 +215,8 @@ firewall-intent-converter/
 │   ├── converters/
 │   │   ├── srx-converter.js      # Intermediate JSON → SRX set commands
 │   │   └── srx-xml-builder.js    # Intermediate JSON → SRX XML
+│   ├── analysis/
+│   │   └── shadow-detector.js    # Rule shadowing, optimization, and consolidation analysis
 │   ├── validators/
 │   │   └── srx-validator.js      # SRX output validation
 │   └── interview/
@@ -229,7 +239,7 @@ firewall-intent-converter/
 │   │   ├── InterviewPanel.jsx    # Right panel — rule details, LLM review, accept
 │   │   ├── ReviewChatPanel.jsx   # Right panel — full-ruleset LLM chat review
 │   │   ├── SRXOutput.jsx         # Bottom panel — SRX output display
-│   │   ├── WarningsPanel.jsx     # Bottom panel — conversion warnings
+│   │   ├── WarningsPanel.jsx     # Bottom panel — conversion warnings + optimization suggestions
 │   │   ├── ModelSelector.jsx     # Modal — source/target hardware model picker
 │   │   ├── InterfaceMapper.jsx   # Modal — per-zone interface mapping
 │   │   ├── LLMSettings.jsx       # Modal — LLM provider config, MCP connection, 3 system prompts

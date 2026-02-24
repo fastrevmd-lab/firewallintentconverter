@@ -108,6 +108,7 @@ export function parsePanosConfig(configText) {
   const allExternalLists = [];
   const allSchedules = [];
   const allSecurityProfileObjects = [];
+  const allSecurityProfileDefinitions = {};
   const routingContexts = [];
 
   // Parse HA configuration (device-level, not per-vsys)
@@ -153,8 +154,10 @@ export function parsePanosConfig(configText) {
       }
     }
 
-    // Build security profile objects
+    // Build security profile objects + definitions
     allSecurityProfileObjects.push(...buildSecurityProfileObjects(securityPolicies));
+    const profileDefs = parseSecurityProfileDefinitions(vsys, warnings);
+    Object.assign(allSecurityProfileDefinitions, profileDefs);
 
     // Append implicit rules for this vsys
     let implicitIndex = securityPolicies.length + 1;
@@ -255,6 +258,8 @@ export function parsePanosConfig(configText) {
 
   // Parse interface configurations
   const interfaces = parseInterfaceConfig(config, allZones, warnings);
+  const vwirePairs = parseVwirePairs(config, warnings);
+  const hasL2 = allZones.some(z => z.zone_type === 'layer2' || z.zone_type === 'virtual-wire');
 
   // Re-index all policies across vsys for consistent ordering
   for (let i = 0; i < allSecurityPolicies.length; i++) {
@@ -273,6 +278,7 @@ export function parsePanosConfig(configText) {
     application_groups: allApplicationGroups,
     schedules: allSchedules,
     security_profile_objects: allSecurityProfileObjects,
+    security_profile_definitions: allSecurityProfileDefinitions,
     external_lists: allExternalLists,
     vpn_tunnels: vpnTunnels,
     ha_config: haConfig,
@@ -281,6 +287,10 @@ export function parsePanosConfig(configText) {
     dhcp_config: dhcpConfig,
     qos_config: qosConfig,
     interfaces,
+    transparent_mode: hasL2,
+    bridge_domains: [],
+    l2_interfaces: [],
+    vwire_pairs: vwirePairs,
     routing_contexts: routingContexts,
     static_routes: staticRoutes,
     target_context: null,
@@ -654,22 +664,38 @@ function parseZones(vsys, warnings) {
     const name = entry['@_name'] || 'unnamed-zone';
     const interfaces = [];
 
-    // PAN-OS zones have network → layer3 → member for L3 interfaces
+    // Detect zone type from which network sub-key is populated
+    let zoneType = 'layer3';
+
     const l3Members = getNestedValue(entry, 'network.layer3');
     if (l3Members) {
       interfaces.push(...extractMembers(l3Members));
+      zoneType = 'layer3';
     }
 
-    // Also check for layer2 interfaces
     const l2Members = getNestedValue(entry, 'network.layer2');
     if (l2Members) {
       interfaces.push(...extractMembers(l2Members));
+      zoneType = 'layer2';
+    }
+
+    const vwMembers = getNestedValue(entry, 'network.virtual-wire');
+    if (vwMembers) {
+      interfaces.push(...extractMembers(vwMembers));
+      zoneType = 'virtual-wire';
+    }
+
+    const tapMembers = getNestedValue(entry, 'network.tap');
+    if (tapMembers) {
+      interfaces.push(...extractMembers(tapMembers));
+      zoneType = 'tap';
     }
 
     return {
       name,
       description: entry.description || '',
       interfaces,
+      zone_type: zoneType,
     };
   });
 }
@@ -1101,6 +1127,88 @@ function parseAction(actionField) {
     return keys[0] || 'deny';
   }
   return 'deny';
+}
+
+// ---------------------------------------------------------------------------
+// Security Profile Definition Extractor
+// ---------------------------------------------------------------------------
+
+/**
+ * Parses actual PAN-OS security profile definitions (not just references from rules).
+ * Extracts severity→action mappings, blocked categories, file extensions, etc.
+ * Returns an object keyed by "type:name" for lookup by the converter.
+ */
+function parseSecurityProfileDefinitions(vsys, warnings) {
+  const defs = {};
+  const profilesContainer = vsys.profiles || vsys['profile-setting']?.profiles || {};
+
+  // Vulnerability protection profiles → severity→action
+  const vulnEntries = extractEntries(profilesContainer.vulnerability || {});
+  for (const entry of vulnEntries) {
+    const name = entry['@_name'] || '';
+    const severityActions = {};
+    const rules = extractEntries(entry.rules || {});
+    for (const rule of rules) {
+      const severities = extractMembers(rule.severity || {});
+      const action = rule.action ? Object.keys(rule.action)[0] : 'default';
+      for (const sev of severities) {
+        severityActions[sev] = action;
+      }
+    }
+    if (name) defs[`vulnerability:${name}`] = { type: 'vulnerability', name, severityActions };
+  }
+
+  // Anti-spyware profiles → severity→action
+  const spyEntries = extractEntries(profilesContainer.spyware || {});
+  for (const entry of spyEntries) {
+    const name = entry['@_name'] || '';
+    const severityActions = {};
+    const rules = extractEntries(entry.rules || {});
+    for (const rule of rules) {
+      const severities = extractMembers(rule.severity || {});
+      const action = rule.action ? Object.keys(rule.action)[0] : 'default';
+      for (const sev of severities) {
+        severityActions[sev] = action;
+      }
+    }
+    if (name) defs[`spyware:${name}`] = { type: 'spyware', name, severityActions };
+  }
+
+  // URL filtering profiles → block/allow categories
+  const urlEntries = extractEntries(profilesContainer['url-filtering'] || {});
+  for (const entry of urlEntries) {
+    const name = entry['@_name'] || '';
+    const blockCategories = extractMembers(entry.block || {});
+    const allowCategories = extractMembers(entry.allow || {});
+    const alertCategories = extractMembers(entry.alert || {});
+    if (name) defs[`url-filtering:${name}`] = { type: 'url-filtering', name, blockCategories, allowCategories, alertCategories };
+  }
+
+  // File blocking profiles → blocked file extensions
+  const fbEntries = extractEntries(profilesContainer['file-blocking'] || {});
+  for (const entry of fbEntries) {
+    const name = entry['@_name'] || '';
+    const blockedExtensions = [];
+    const rules = extractEntries(entry.rules || {});
+    for (const rule of rules) {
+      const action = rule.action || 'alert';
+      if (action === 'block' || action === 'block-continue') {
+        const fileTypes = extractMembers(rule['file-type'] || {});
+        blockedExtensions.push(...fileTypes);
+      }
+    }
+    if (name) defs[`file-blocking:${name}`] = { type: 'file-blocking', name, blockedExtensions };
+  }
+
+  // Antivirus profiles → scan mode
+  const avEntries = extractEntries(profilesContainer.virus || {});
+  for (const entry of avEntries) {
+    const name = entry['@_name'] || '';
+    const decoders = Object.keys(entry.decoder || {});
+    if (name) defs[`virus:${name}`] = { type: 'virus', name, decoders };
+  }
+
+  return defs;
 }
 
 // ---------------------------------------------------------------------------
@@ -1984,4 +2092,40 @@ function parseInterfaceConfig(config, zones, warnings) {
     warnings.push(createWarning('info', 'interfaces', `Parsed ${interfaces.length} interface(s)`, 'Interface configuration detected'));
   }
   return interfaces;
+}
+
+/**
+ * Parses PAN-OS virtual-wire pair definitions.
+ * Located at: devices > entry > network > virtual-wire > entry
+ */
+function parseVwirePairs(config, warnings) {
+  const pairs = [];
+  const devices = getNestedValue(config, 'devices');
+  if (!devices) return pairs;
+
+  const deviceEntries = extractEntries(devices);
+  for (const device of deviceEntries) {
+    const vwContainer = getNestedValue(device, 'network.virtual-wire');
+    if (!vwContainer) continue;
+
+    const entries = extractEntries(vwContainer);
+    for (const entry of entries) {
+      const name = entry['@_name'] || '';
+      if (!name) continue;
+      const interface1 = typeof entry.interface1 === 'string' ? entry.interface1 : '';
+      const interface2 = typeof entry.interface2 === 'string' ? entry.interface2 : '';
+      // tag-allowed can be a plain string ("100-200") or member list
+      const tagRaw = entry['tag-allowed'];
+      const tagAllowed = typeof tagRaw === 'string' ? tagRaw.split(',').map(s => s.trim()).filter(Boolean)
+        : extractMembers(tagRaw || {});
+
+      pairs.push({ name, interface1, interface2, tag_allowed: tagAllowed });
+
+      warnings.push(createWarning('warning', `vwire/${name}`,
+        `Virtual-wire pair "${name}" (${interface1} <-> ${interface2}) — SRX does not support virtual-wire mode`,
+        'Map to SRX L2 transparent mode with bridge-domain, or redesign as L3'));
+    }
+  }
+
+  return pairs;
 }

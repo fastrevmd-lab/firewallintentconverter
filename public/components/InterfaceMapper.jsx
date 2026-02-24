@@ -125,16 +125,30 @@ export default function InterfaceMapper({
   const sourceModelData = sourceModel ? PANOS_MODELS[sourceModel] : null;
   const targetPorts = targetModelData?.ports || [];
 
+  // Build L2 interface lookup from intermediateConfig
+  const l2InterfaceSet = useMemo(() => {
+    const s = new Set();
+    for (const l2if of (intermediateConfig?.l2_interfaces || [])) {
+      s.add(l2if.name);
+    }
+    // Also mark interfaces in virtual-wire pairs
+    for (const vw of (intermediateConfig?.vwire_pairs || [])) {
+      if (vw.interface1) s.add(vw.interface1);
+      if (vw.interface2) s.add(vw.interface2);
+    }
+    return s;
+  }, [intermediateConfig]);
+
   // Get all PAN-OS interfaces from zones
   const zoneInterfaces = useMemo(() => {
     const result = [];
     for (const zone of (intermediateConfig?.zones || [])) {
       for (const iface of (zone.interfaces || [])) {
-        result.push({ zoneName: zone.name, panosIface: iface });
+        result.push({ zoneName: zone.name, panosIface: iface, isL2: l2InterfaceSet.has(iface) || zone.zone_type === 'layer2' || zone.zone_type === 'virtual-wire' });
       }
     }
     return result;
-  }, [intermediateConfig]);
+  }, [intermediateConfig, l2InterfaceSet]);
 
   // Track which SRX ports are already assigned (only physical ones)
   const assignedSrxPorts = useMemo(() => {
@@ -276,7 +290,7 @@ export default function InterfaceMapper({
                 </tr>
               </thead>
               <tbody>
-                {zoneInterfaces.map(({ zoneName, panosIface }) => {
+                {zoneInterfaces.map(({ zoneName, panosIface, isL2 }) => {
                   const isTunnel = isTunnelInterface(panosIface);
                   const isLoopback = isLoopbackInterface(panosIface);
                   const currentSrx = mappings[panosIface] || '';
@@ -295,6 +309,11 @@ export default function InterfaceMapper({
                           {srcPort && (
                             <span className={`port-badge ${speedClass(srcPort.speed)}`}>
                               {srcPort.type === 'tunnel' ? 'Tunnel' : srcPort.type === 'loopback' ? 'Loopback' : `${srcPort.speed} ${srcPort.type}`}
+                            </span>
+                          )}
+                          {isL2 && (
+                            <span className="port-badge" style={{ background: '#1e40af', color: '#93c5fd', fontSize: 10, padding: '1px 5px' }}>
+                              L2
                             </span>
                           )}
                         </div>
@@ -386,6 +405,9 @@ export default function InterfaceMapper({
                         )}
                         {!isTunnel && !isLoopback && currentSrx && compat === 'downgrade' && (
                           <span style={{ color: 'var(--warning)', fontSize: 12 }}>Speed down</span>
+                        )}
+                        {isL2 && !isTunnel && !isLoopback && (
+                          <span style={{ color: '#93c5fd', fontSize: 11, display: 'block' }}>family bridge</span>
                         )}
                       </td>
                     </tr>

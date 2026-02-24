@@ -435,6 +435,99 @@ export function mapAppToJunos(appName) {
 export const mapPanosAppToJunos = mapAppToJunos;
 
 /**
+ * Reverse lookup: protocol/port → predefined Junos application name.
+ * Used to detect when a custom service object is equivalent to a predefined app
+ * so we can skip generating a redundant custom definition.
+ * Only covers exact single-port matches (not ranges).
+ */
+export const WELL_KNOWN_PORTS = {
+  'tcp/22':    'junos-ssh',
+  'tcp/23':    'junos-telnet',
+  'tcp/21':    'junos-ftp',
+  'tcp/20':    'junos-ftp-data',
+  'tcp/25':    'junos-smtp',
+  'tcp/465':   'junos-smtps',
+  'tcp/80':    'junos-http',
+  'tcp/443':   'junos-https',
+  'tcp/53':    'junos-dns-tcp',
+  'udp/53':    'junos-dns-udp',
+  'tcp/110':   'junos-pop3',
+  'tcp/995':   'junos-pop3s',
+  'tcp/143':   'junos-imap',
+  'tcp/993':   'junos-imaps',
+  'udp/69':    'junos-tftp',
+  'tcp/3389':  'junos-rdp',
+  'tcp/5900':  'junos-vnc',
+  'tcp/389':   'junos-ldap',
+  'tcp/3306':  'junos-mysql',
+  'tcp/1433':  'junos-ms-sql',
+  'tcp/1521':  'junos-sqlnet-v2',
+  'udp/161':   'junos-snmp',
+  'udp/123':   'junos-ntp',
+  'udp/514':   'junos-syslog',
+  'tcp/514':   'junos-syslog',
+  'tcp/79':    'junos-finger',
+  'tcp/70':    'junos-gopher',
+  'tcp/43':    'junos-whois',
+  'tcp/113':   'junos-ident',
+  'tcp/515':   'junos-lpr',
+  'udp/1812':  'junos-radius',
+  'udp/1813':  'junos-radius-accounting',
+  'tcp/119':   'junos-nntp',
+  'tcp/445':   'junos-smb-session',
+  'udp/137':   'junos-nbname',
+  'udp/138':   'junos-nbds',
+  'tcp/6000':  'junos-x-windows',
+  'tcp/179':   'junos-bgp',
+  'tcp/5060':  'junos-sip',
+  'udp/5060':  'junos-sip',
+  'tcp/1720':  'junos-h323',
+  'tcp/2000':  'junos-sccp',
+  'tcp/554':   'junos-rtsp',
+  'udp/500':   'junos-ike',
+  'udp/4500':  'junos-ike-nat',
+  'udp/1701':  'junos-l2tp',
+  'tcp/1723':  'junos-pptp',
+  'tcp/513':   'junos-rlogin',
+  'tcp/514':   'junos-rsh',
+  'udp/520':   'junos-rip',
+  'tcp/139':   'junos-netbios-session',
+  'tcp/2049':  'junos-nfs',
+  'udp/111':   'junos-sun-rpc-portmapper',
+  'tcp/111':   'junos-sun-rpc-portmapper',
+};
+
+/**
+ * Checks if a service object (by name + protocol + port) is equivalent to
+ * a predefined Junos application. Returns the Junos app name or null.
+ *
+ * Checks two paths:
+ *   1. Name mapping via mapAppToJunos() (e.g., "ssh" → "junos-ssh")
+ *   2. Protocol+port reverse lookup via WELL_KNOWN_PORTS (e.g., tcp/22 → "junos-ssh")
+ *
+ * @param {string} name - Service object name
+ * @param {string} protocol - Protocol (tcp, udp, etc.)
+ * @param {string} portRange - Port or port range string
+ * @returns {string|null} - Predefined Junos app name, or null if no match
+ */
+export function isPredefEquivalent(name, protocol, portRange) {
+  // 1. Check name mapping first
+  const nameMatch = mapAppToJunos(name);
+  if (nameMatch && JUNOS_PREDEFINED_APPS.has(nameMatch)) {
+    return nameMatch;
+  }
+
+  // 2. Check protocol+port reverse lookup (exact single-port only, no ranges/lists)
+  if (protocol && portRange && !portRange.includes(',') && !portRange.includes('-')) {
+    const key = `${protocol.toLowerCase()}/${portRange}`;
+    const portMatch = WELL_KNOWN_PORTS[key];
+    if (portMatch) return portMatch;
+  }
+
+  return null;
+}
+
+/**
  * Maps a PAN-OS security profile type to the corresponding SRX feature and profile name.
  *
  * Security profiles map to SRX as follows:

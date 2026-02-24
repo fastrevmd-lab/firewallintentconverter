@@ -2,6 +2,7 @@ node_modules/
 dist/
 .vite/
 .claude/
+tmp/
 
 # Secrets / API keys — never commit these
 .env

@@ -241,9 +241,13 @@ app.post('/api/convert', (req, res) => {
       output = convertToSrxSetCommands(intermediateConfig, interfaceMappings, targetContext);
     }
 
-    // Detect shadowed rules
-    const { shadowedCount } = detectShadowedRules(intermediateConfig.security_policies, output.warnings);
-    if (output.summary) output.summary.shadowed_rules = shadowedCount;
+    // Detect shadowed rules and optimization opportunities
+    const analysis = detectShadowedRules(intermediateConfig.security_policies, output.warnings);
+    if (output.summary) {
+      output.summary.shadowed_rules = analysis.shadowedCount;
+      output.summary.reorder_issues = analysis.reorderCount;
+      output.summary.optimization_suggestions = (analysis.redundantCount || 0) + (analysis.mergeableCount || 0) + (analysis.consolidateCount || 0);
+    }
 
     // Run validation on the generated output
     const validation = validateSrxOutput(intermediateConfig, output);

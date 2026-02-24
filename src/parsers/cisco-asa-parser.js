@@ -52,6 +52,8 @@ export function parseCiscoAsaConfig(configText) {
   const routingContexts = detectCiscoContexts(lines, warnings);
   const haConfig = parseCiscoHaConfig(lines, warnings);
   const screenConfig = parseCiscoScreenConfig(lines, warnings);
+  const transparentMode = detectCiscoTransparentMode(lines);
+  const { bridgeDomains, l2Interfaces } = parseBridgeGroups(blocks, interfaces, warnings);
 
   // Build zones from interfaces (ASA uses nameif + security-level as zones)
   const zones = buildZones(interfaces);
@@ -125,6 +127,10 @@ export function parseCiscoAsaConfig(configText) {
     routing_contexts: routingContexts,
     static_routes: staticRoutes,
     target_context: null,
+    transparent_mode: transparentMode,
+    bridge_domains: bridgeDomains,
+    l2_interfaces: l2Interfaces,
+    vwire_pairs: [],
     _cisco: {
       interfaces,
       objectGroupProtocols,
@@ -1619,6 +1625,105 @@ function extractVersion(lines) {
     }
   }
   return '';
+}
+
+
+// ---------------------------------------------------------------------------
+// Transparent Mode / Bridge Group Detection
+// ---------------------------------------------------------------------------
+
+/**
+ * Detects if the Cisco ASA is running in transparent (L2) firewall mode.
+ * Scans for the "firewall transparent" global command.
+ */
+function detectCiscoTransparentMode(lines) {
+  for (const line of lines) {
+    if (line.trim() === 'firewall transparent') return true;
+  }
+  return false;
+}
+
+/**
+ * Parses BVI (Bridge Virtual Interface) and bridge-group assignments.
+ *
+ * Cisco ASA transparent mode uses:
+ *   interface BVI1         — Bridge Virtual Interface (routed L3 on bridge)
+ *     ip address ...
+ *   interface GigabitEthernet0/0
+ *     bridge-group 1       — assigns physical interface to bridge group 1
+ *
+ * Returns { bridgeDomains: [], l2Interfaces: [] }
+ */
+function parseBridgeGroups(blocks, interfaces, warnings) {
+  const bridgeDomains = [];
+  const l2Interfaces = [];
+  const bviMap = {};       // bgId → { name, ip, interfaces }
+  const bgMembers = {};    // bgId → [interface names]
+
+  // First pass: find BVI interfaces
+  for (const block of blocks) {
+    const bviMatch = block.command.match(/^interface\s+BVI(\d+)/i);
+    if (!bviMatch) continue;
+    const bgId = bviMatch[1];
+    let ip = '';
+    for (const child of block.children) {
+      if (child.startsWith('ip address ')) {
+        ip = child.slice(11).trim();
+      }
+    }
+    bviMap[bgId] = { name: `BVI${bgId}`, ip, interfaces: [] };
+    if (!bgMembers[bgId]) bgMembers[bgId] = [];
+  }
+
+  // Second pass: find bridge-group assignments on physical interfaces
+  for (const block of blocks) {
+    if (!block.command.startsWith('interface ')) continue;
+    if (/^interface\s+BVI/i.test(block.command)) continue; // skip BVIs
+
+    const ifaceName = block.command.slice(10).trim();
+    let bridgeGroupId = null;
+    let mode = 'access';
+
+    for (const child of block.children) {
+      const bgMatch = child.match(/^bridge-group\s+(\d+)/i);
+      if (bgMatch) {
+        bridgeGroupId = bgMatch[1];
+      }
+    }
+
+    if (bridgeGroupId) {
+      if (!bgMembers[bridgeGroupId]) bgMembers[bridgeGroupId] = [];
+      bgMembers[bridgeGroupId].push(ifaceName);
+
+      l2Interfaces.push({
+        name: ifaceName,
+        mode,
+        vlan: '',
+        bridge_domain: `bridge-group-${bridgeGroupId}`,
+      });
+    }
+  }
+
+  // Build bridge domains from BVI map + member lists
+  for (const [bgId, members] of Object.entries(bgMembers)) {
+    const bvi = bviMap[bgId];
+    bridgeDomains.push({
+      name: `bridge-group-${bgId}`,
+      vlan_id: '',
+      interfaces: members,
+      irb_interface: bvi ? bvi.name : '',
+    });
+  }
+
+  if (bridgeDomains.length > 0) {
+    warnings.push(createWarning(
+      'warning', 'l2/bridge-group',
+      `Detected ${bridgeDomains.length} bridge group(s) in transparent mode — SRX uses bridge-domains with family bridge`,
+      'Review bridge-domain assignments and IRB interface mappings in the generated config'
+    ));
+  }
+
+  return { bridgeDomains, l2Interfaces };
 }
 
 

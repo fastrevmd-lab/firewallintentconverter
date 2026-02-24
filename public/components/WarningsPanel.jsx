@@ -15,6 +15,7 @@ const SEVERITY_META = {
   warning:            { icon: '\u26A0\uFE0F', label: 'Warning',      cssClass: 'warning' },
   unsupported:        { icon: '\u274C', label: 'Unsupported',        cssClass: 'unsupported' },
   interview_required: { icon: '\uD83D\uDCAC', label: 'Interview Req.', cssClass: 'interview' },
+  info:               { icon: '\uD83D\uDCA1', label: 'Optimization',  cssClass: 'info' },
 };
 
 export default function WarningsPanel({ warnings }) {
@@ -22,7 +23,7 @@ export default function WarningsPanel({ warnings }) {
 
   // Count by severity
   const counts = useMemo(() => {
-    const c = { all: 0, warning: 0, unsupported: 0, interview_required: 0 };
+    const c = { all: 0, warning: 0, unsupported: 0, interview_required: 0, info: 0 };
     for (const w of (warnings || [])) {
       c.all++;
       if (c[w.severity] !== undefined) c[w.severity]++;
@@ -76,6 +77,14 @@ export default function WarningsPanel({ warnings }) {
           onClick={() => setSeverityFilter('interview_required')}
           color="var(--status-interview)"
         />
+        {counts.info > 0 && (
+          <FilterButton
+            label={`Optimization (${counts.info})`}
+            active={severityFilter === 'info'}
+            onClick={() => setSeverityFilter('info')}
+            color="#38bdf8"
+          />
+        )}
       </div>
 
       {/* Warning list */}

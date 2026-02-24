@@ -10,7 +10,7 @@
  * Phase 2+: Full XML with NAT, routing, VPN, UTM.
  */
 
-import { sanitizeJunosName, mapAppToJunos, mapProfileToSrx, createWarning } from '../parsers/parser-utils.js';
+import { sanitizeJunosName, mapAppToJunos, mapProfileToSrx, createWarning, isPredefEquivalent } from '../parsers/parser-utils.js';
 
 /**
  * Builds a Junos XML configuration from the intermediate config.
@@ -23,6 +23,7 @@ export function buildSrxXml(config, interfaceMappings = {}, targetContext = null
   const warnings = [];
   const lines = [];
   xmlCustomfwicApps.clear();
+  xmlPredefServiceMap.clear();
 
   // Detect source vendor for 1:1 passthrough (SRX→SRX needs no app mapping)
   const sourceVendor = config.metadata?.source_vendor || '';
@@ -547,6 +548,15 @@ function buildApplicationsXml(serviceObjects, applications, serviceGroups, lines
     const protocol = app.protocol || 'tcp';
     const port = app.port_range || app.port || '';
 
+    // Check if this service maps to a predefined Junos application — skip if so
+    const predefApp = isPredefEquivalent(app.name, protocol, port);
+    if (predefApp) {
+      xmlPredefServiceMap.set(app.name, predefApp);
+      xmlPredefServiceMap.set(name, predefApp);
+      lines.push(`    <!-- Skipped: "${app.name}" (${protocol}/${port}) → predefined ${predefApp} -->`);
+      continue;
+    }
+
     if (protocol === 'icmp' || protocol === 'icmp6') {
       lines.push('    <application>');
       lines.push(`      <name>${escapeXml(name)}</name>`);
@@ -589,7 +599,12 @@ function buildApplicationsXml(serviceObjects, applications, serviceGroups, lines
     lines.push('    <application-set>');
     lines.push(`      <name>${escapeXml(groupName)}</name>`);
     for (const member of group.members) {
-      if (svcGroupNameSet.has(member)) {
+      const predefName = xmlPredefServiceMap.get(member);
+      if (predefName) {
+        lines.push('      <application>');
+        lines.push(`        <name>${escapeXml(predefName)}</name>`);
+        lines.push('      </application>');
+      } else if (svcGroupNameSet.has(member)) {
         lines.push('      <application-set>');
         lines.push(`        <name>${escapeXml(sanitizeJunosName(member))}</name>`);
         lines.push('      </application-set>');
@@ -895,6 +910,9 @@ function buildSecIntelXml(blockLists, lines) {
 /** Tracks unmapped apps for placeholder XML generation */
 const xmlCustomfwicApps = new Map();
 
+/** Tracks service objects that map to predefined Junos apps (XML path) */
+const xmlPredefServiceMap = new Map();
+
 function resolveApps(applications, services, warnings, policyName, appGroups = [], sourceVendor = '') {
   const resolved = [];
   const isSrxSource = sourceVendor === 'srx';
@@ -943,6 +961,12 @@ function resolveApps(applications, services, warnings, policyName, appGroups = [
   if (services && services.length > 0) {
     for (const svc of services) {
       if (svc === 'application-default' || svc === 'any') continue;
+      // Check if this service was mapped to a predefined app during buildApplicationsXml
+      const predefName = xmlPredefServiceMap.get(svc);
+      if (predefName) {
+        resolved.push(predefName);
+        continue;
+      }
       const junos = mapAppToJunos(svc);
       if (junos) {
         resolved.push(junos);

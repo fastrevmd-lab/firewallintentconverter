@@ -53,6 +53,11 @@ export function parseFortigateConfig(configText) {
   const vipObjects = parseVipObjects(tree, warnings);
   const schedules = parseSchedules(tree, warnings);
   const profileGroups = parseProfileGroups(tree, warnings);
+  const securityProfileDefinitions = parseSecurityProfileDefinitions(tree, warnings);
+  const transparentMode = detectTransparentMode(tree);
+  const { l2Interfaces, bridgeDomains: l2BridgeDomains } = transparentMode
+    ? parseSwitchInterfaces(tree, warnings)
+    : { l2Interfaces: [], bridgeDomains: [] };
   const staticRoutes = parseStaticRoutes(tree, warnings);
   const haConfig = parseHaConfig(tree, warnings);
   const screenConfig = parseScreenConfig(tree, warnings);
@@ -212,6 +217,7 @@ export function parseFortigateConfig(configText) {
     application_groups: [],
     schedules: intermediateSchedules,
     security_profile_objects: buildProfileObjects(securityPolicies, profileGroups),
+    security_profile_definitions: securityProfileDefinitions,
     external_lists: [],
     vpn_tunnels: vpnTunnels,
     ha_config: haConfig,
@@ -220,6 +226,10 @@ export function parseFortigateConfig(configText) {
     dhcp_config: dhcpConfig,
     qos_config: qosConfig,
     interfaces: normalizedInterfaces,
+    transparent_mode: transparentMode,
+    bridge_domains: l2BridgeDomains,
+    l2_interfaces: l2Interfaces,
+    vwire_pairs: [],
     routing_contexts: routingContexts,
     static_routes: staticRoutes,
     target_context: null,
@@ -1454,6 +1464,92 @@ function parseSchedules(tree, warnings) {
 
 
 // --- Profile Groups ---
+function detectTransparentMode(tree) {
+  const global = tree['system global'] || {};
+  const settings = tree['system settings'] || {};
+  const opmode = getString(global['opmode']) || getString(settings['opmode']) || 'nat';
+  return opmode.toLowerCase() === 'transparent';
+}
+
+/**
+ * Parse L2 interface information from virtual-switch config and forward-domain assignments
+ */
+function parseSwitchInterfaces(tree, warnings) {
+  const l2Interfaces = [];
+  const bridgeDomains = [];
+
+  // Parse system virtual-switch for L2 port groups
+  const vsSection = tree['system virtual-switch'] || {};
+  for (const [vsName, vsEntry] of Object.entries(vsSection)) {
+    if (typeof vsEntry !== 'object') continue;
+    const ports = [];
+    const portSection = vsEntry.port || {};
+    for (const [portName] of Object.entries(portSection)) {
+      if (typeof portName === 'string' && portName.startsWith('port')) {
+        ports.push(portName);
+      }
+    }
+    if (ports.length > 0) {
+      bridgeDomains.push({
+        name: vsName,
+        vlan_id: null,
+        interfaces: ports,
+        irb_interface: null,
+      });
+      for (const port of ports) {
+        l2Interfaces.push({
+          name: port,
+          mode: 'access',
+          vlan: null,
+          bridge_domain: vsName,
+        });
+      }
+    }
+  }
+
+  // Track which ports are already assigned to virtual-switch bridge domains
+  const vsPortSet = new Set(l2Interfaces.map(l => l.name));
+
+  // Also check interfaces for forward-domain assignments (transparent mode L2 grouping)
+  const ifSection = tree['system interface'] || {};
+  const forwardDomainGroups = {};
+  for (const [ifName, ifEntry] of Object.entries(ifSection)) {
+    if (typeof ifEntry !== 'object') continue;
+    const fd = getString(ifEntry['forward-domain']);
+    if (fd) {
+      if (!forwardDomainGroups[fd]) forwardDomainGroups[fd] = [];
+      forwardDomainGroups[fd].push(ifName);
+      // Only add if not already in l2Interfaces from virtual-switch
+      if (!l2Interfaces.find(l => l.name === ifName)) {
+        l2Interfaces.push({
+          name: ifName,
+          mode: 'access',
+          vlan: null,
+          bridge_domain: `forward-domain-${fd}`,
+        });
+      }
+    }
+  }
+
+  // Create bridge domains for forward-domain groups not already covered by virtual-switch
+  for (const [fdId, members] of Object.entries(forwardDomainGroups)) {
+    // Skip if all members are already assigned to a virtual-switch bridge domain
+    const uncoveredMembers = members.filter(m => !vsPortSet.has(m));
+    if (uncoveredMembers.length === 0) continue;
+    const bdName = `forward-domain-${fdId}`;
+    if (!bridgeDomains.find(bd => bd.name === bdName)) {
+      bridgeDomains.push({
+        name: bdName,
+        vlan_id: null,
+        interfaces: uncoveredMembers,
+        irb_interface: null,
+      });
+    }
+  }
+
+  return { l2Interfaces, bridgeDomains };
+}
+
 function parseProfileGroups(tree, warnings) {
   const groupSection = tree['firewall profile-group'] || {};
   const groups = {};
@@ -1476,6 +1572,89 @@ function parseProfileGroups(tree, warnings) {
   return groups;
 }
 
+
+// --- Extract security profile definitions from FortiGate config ---
+function parseSecurityProfileDefinitions(tree, warnings) {
+  const defs = {};
+
+  // IPS sensor → severity/action mappings
+  const ipsSection = tree['ips sensor'] || {};
+  for (const [name, entry] of Object.entries(ipsSection)) {
+    if (typeof entry !== 'object') continue;
+    const severityActions = {};
+    const entries = entry.entries || {};
+    for (const [, ipsEntry] of Object.entries(entries)) {
+      if (typeof ipsEntry !== 'object') continue;
+      const action = getString(ipsEntry.action) || 'default';
+      const severities = ensureArray(ipsEntry.severity);
+      for (const sev of severities) {
+        if (sev) severityActions[sev] = action;
+      }
+    }
+    defs[`vulnerability:${name}`] = { type: 'vulnerability', name, severityActions };
+  }
+
+  // Application control list → category/action mappings
+  const appSection = tree['application list'] || {};
+  for (const [name, entry] of Object.entries(appSection)) {
+    if (typeof entry !== 'object') continue;
+    const categories = {};
+    const entries = entry.entries || {};
+    for (const [, appEntry] of Object.entries(entries)) {
+      if (typeof appEntry !== 'object') continue;
+      const category = getString(appEntry.category) || 'unknown';
+      const action = getString(appEntry.action) || 'pass';
+      categories[category] = action;
+    }
+    defs[`application-control:${name}`] = { type: 'application-control', name, categories };
+  }
+
+  // Webfilter profile → block/allow categories
+  const wfSection = tree['webfilter profile'] || {};
+  for (const [name, entry] of Object.entries(wfSection)) {
+    if (typeof entry !== 'object') continue;
+    const blockCategories = [];
+    const allowCategories = [];
+    const ftgdFilter = entry['ftgd-wf'] || {};
+    const filters = ftgdFilter.filters || {};
+    for (const [, filter] of Object.entries(filters)) {
+      if (typeof filter !== 'object') continue;
+      const action = getString(filter.action) || 'warning';
+      const catId = getString(filter.id) || getString(filter.category) || '';
+      if (catId) {
+        if (action === 'block') blockCategories.push(catId);
+        else if (action === 'allow') allowCategories.push(catId);
+      }
+    }
+    defs[`url-filtering:${name}`] = { type: 'url-filtering', name, blockCategories, allowCategories };
+  }
+
+  // DNS filter profile → blocked domains
+  const dnsSection = tree['dnsfilter profile'] || {};
+  for (const [name, entry] of Object.entries(dnsSection)) {
+    if (typeof entry !== 'object') continue;
+    const blockedDomains = [];
+    const domainFilter = entry['domain-filter'] || {};
+    const dfEntries = domainFilter.entries || {};
+    for (const [, df] of Object.entries(dfEntries)) {
+      if (typeof df === 'object' && getString(df.action) === 'block') {
+        const domain = getString(df.domain);
+        if (domain) blockedDomains.push(domain);
+      }
+    }
+    defs[`dns-security:${name}`] = { type: 'dns-security', name, blockedDomains };
+  }
+
+  // Antivirus profile
+  const avSection = tree['antivirus profile'] || {};
+  for (const [name, entry] of Object.entries(avSection)) {
+    if (typeof entry !== 'object') continue;
+    const scanMode = getString(entry['scan-mode']) || 'default';
+    defs[`virus:${name}`] = { type: 'virus', name, scanMode };
+  }
+
+  return defs;
+}
 
 // --- Build security profile objects list ---
 function buildProfileObjects(policies, profileGroups) {

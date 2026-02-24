@@ -683,6 +683,7 @@ function computeUtmMap(policies) {
     const sp = policy.security_profiles || {};
     const utmP = {};
     for (const t of utmTypes) {
+      if (t === 'file-blocking') continue; // Not supported in SRX conversion
       if (sp[t]) utmP[t] = sp[t];
     }
     if (Object.keys(utmP).length === 0) continue;

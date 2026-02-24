@@ -722,7 +722,7 @@ function EditableChipsField({ label, values, onChange }) {
  */
 const SRX_SUBSCRIPTION_TOGGLES = [
   { key: 'ips',              label: 'IPS',              sub: 'IDP Policy',                 srxField: '_srx_idp',              initFrom: ['spyware', 'vulnerability'] },
-  { key: 'content-security', label: 'Content Security', sub: 'UTM Content Filtering',      srxField: '_srx_content_security', initFrom: ['url-filtering', 'file-blocking'] },
+  { key: 'content-security', label: 'Content Security', sub: 'UTM Content Filtering',      srxField: '_srx_content_security', initFrom: ['url-filtering'] },
   { key: 'decrypt',          label: 'Decrypt',          sub: 'SSL/TLS Inspection',         srxField: '_srx_decrypt' },
   { key: 'flow-av',          label: 'Flow-based AV',    sub: 'Flow-mode Antivirus',        srxField: '_srx_flow_av' },
   { key: 'antimalware',      label: 'Anti-malware',     sub: 'Anti-malware Protection',    srxField: '_srx_antimalware',      initFrom: ['virus', 'wildfire-analysis'] },

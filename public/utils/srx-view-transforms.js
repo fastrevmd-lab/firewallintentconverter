@@ -117,8 +117,8 @@ export function buildApplicationServices(rule) {
   const hasIdp = rule._srx_idp || profiles['spyware'] || profiles['vulnerability'];
   if (hasIdp) services.push('idp-policy');
 
-  // Content Security (UTM) — url-filtering + file-blocking shown under destinations
-  const hasUtm = profiles['url-filtering'] || profiles['file-blocking'];
+  // Content Security (UTM) — url-filtering only (file-blocking not supported on SRX)
+  const hasUtm = profiles['url-filtering'];
   if (hasUtm) services.push('utm-policy');
 
   // Flow-based AV

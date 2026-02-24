@@ -229,9 +229,9 @@ export default function PolicyTable({
       rows.push({ label: 'IPS', cls: 'ips', value });
     }
 
-    // Content Security — UTM (url-filtering + file-blocking)
-    if (policy._srx_content_security || sp['url-filtering'] || sp['file-blocking']) {
-      const value = policy._srx_content_security_profile || [sp['url-filtering'], sp['file-blocking']].filter(Boolean).join(', ') || 'enabled';
+    // Content Security — UTM (url-filtering)
+    if (policy._srx_content_security || sp['url-filtering']) {
+      const value = policy._srx_content_security_profile || sp['url-filtering'] || 'enabled';
       rows.push({ label: 'Content Security', cls: 'urlfilter', value });
     }
 
@@ -293,9 +293,8 @@ export default function PolicyTable({
     const addrs = type === 'src' ? policy.src_addresses : policy.dst_addresses;
     const isNegated = type === 'src' ? policy.negate_source : policy.negate_destination;
     const MAX_SHOW = 2;
-    // Content Security (URL filtering + file blocking) — show under destinations (matches Security Director)
+    // Content Security (URL filtering) — show under destinations
     const urlFilter = type === 'dst' ? (policy.security_profiles || {})['url-filtering'] : null;
-    const fileBlock = type === 'dst' ? (policy.security_profiles || {})['file-blocking'] : null;
 
     return (
       <div className="srx-cell-stack">
@@ -344,17 +343,11 @@ export default function PolicyTable({
             )}
           </>
         )}
-        {/* Content Security: URL Filtering + File Blocking (destinations only, matches Security Director) */}
+        {/* URL Filtering (destinations only) */}
         {urlFilter && (
           <div className="srx-cell-row">
             <span className="srx-cell-icon url">U</span>
             <span className="srx-cell-value" style={{ fontSize: 11 }}>{urlFilter}</span>
-          </div>
-        )}
-        {fileBlock && (
-          <div className="srx-cell-row">
-            <span className="srx-cell-icon url">F</span>
-            <span className="srx-cell-value" style={{ fontSize: 11 }}>{fileBlock}</span>
           </div>
         )}
       </div>

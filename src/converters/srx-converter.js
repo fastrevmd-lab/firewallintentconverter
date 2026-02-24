@@ -597,6 +597,13 @@ function convertUtmPolicies(policies, warnings, profileDefs = {}) {
           'Configure SRX SSL Forward Proxy with certificates manually'));
         continue;
       }
+      if (mapped.srxFeature === 'unsupported') {
+        utmCommands.push(`# NOTE: file-blocking profile "${pValue}" — not supported in SRX conversion`);
+        warnings.push(createWarning('unsupported', `profile/${pType}/${pValue}`,
+          `File-blocking profile "${pValue}" is not supported in Junos SRX conversion`,
+          'SRX does not have an equivalent file-blocking feature — review UTM content-filtering or ICAP for similar functionality'));
+        continue;
+      }
       if (mapped.srxFeature === 'unknown') {
         warnings.push(createWarning('unsupported', `profile/${pType}/${pValue}`,
           `${pType} profile "${pValue}" has no SRX equivalent`,

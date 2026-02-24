@@ -884,10 +884,16 @@ IMPORTANT: You MUST respond with ONLY valid JSON in the exact format below. No m
       "reason": "Why this change is recommended"
     }
   ],
+  "notes": [
+    "Informational observation or migration note that does not require a field change"
+  ],
   "verdict": "needs_changes" or "looks_good"
 }
 
-Valid field names and their types:
+Use "suggestions" ONLY for actionable field changes the user should apply to the rule.
+Use "notes" for informational observations, migration caveats, best-practice reminders, or anything that does not map to a specific field change. Notes will be saved as comments in the SRX config output.
+
+Valid field names for suggestions and their types:
 - name (string), action (string: allow/deny/drop/reject), description (string)
 - src_zones (array), dst_zones (array), src_addresses (array), dst_addresses (array)
 - applications (array), services (array)
@@ -895,7 +901,8 @@ Valid field names and their types:
 - profile_group (string), tags (array)
 
 For array fields, use JSON arrays like ["value1", "value2"].
-For boolean fields, use true or false (no quotes).` + licenseContext,
+For boolean fields, use true or false (no quotes).
+Both "suggestions" and "notes" arrays may be empty if nothing applies.` + licenseContext,
 
     user: `Review this firewall security rule being migrated from ${vendorLabel(sourceVendor)} to SRX (${targetModel || 'SRX'})${srxLicense ? ` (license: ${srxLicense})` : ''}:
 

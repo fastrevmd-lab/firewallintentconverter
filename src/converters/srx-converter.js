@@ -891,6 +891,13 @@ function convertSecurityPolicies(policies, commands, warnings, summary, profileM
 
     const hasIndividualProfiles = Object.keys(policy.security_profiles || {}).length > 0;
 
+    // Emit LLM review notes as comments above the policy
+    if (policy._llm_notes && policy._llm_notes.length > 0) {
+      for (const note of policy._llm_notes) {
+        commands.push(`# NOTE: ${note}`);
+      }
+    }
+
     // Handle zone-based policy paths
     for (const srcZone of srcZones) {
       for (const dstZone of dstZones) {

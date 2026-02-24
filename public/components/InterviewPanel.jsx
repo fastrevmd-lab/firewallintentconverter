@@ -42,6 +42,7 @@ export default function InterviewPanel({
   const [rawSuggestion, setRawSuggestion] = useState('');
   const [isLoadingSuggestion, setIsLoadingSuggestion] = useState(false);
   const [suggestionError, setSuggestionError] = useState('');
+  const [itemStates, setItemStates] = useState({}); // { 'suggestion-0': 'accepted'|'rejected', 'note-0': 'accepted'|'rejected' }
 
   const ruleWarnings = selectedRule
     ? (warnings || []).filter(w => w.element?.includes(selectedRule.name))
@@ -63,6 +64,7 @@ export default function InterviewPanel({
     setSuggestionError('');
     setStructuredSuggestion(null);
     setRawSuggestion('');
+    setItemStates({});
 
     try {
       // Build SRX context so the LLM sees both original PAN-OS and SRX translation
@@ -106,7 +108,7 @@ export default function InterviewPanel({
           jsonStr = jsonStr.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '');
         }
         const parsed = JSON.parse(jsonStr);
-        if (parsed.analysis && parsed.suggestions) {
+        if (parsed.analysis && (parsed.suggestions || parsed.notes)) {
           setStructuredSuggestion(parsed);
         } else {
           setRawSuggestion(result);
@@ -133,20 +135,38 @@ export default function InterviewPanel({
     onUpdateRule({ ...selectedRule, [field]: value });
   };
 
-  /** Import a single suggestion field change */
-  const handleImportSuggestion = (suggestion) => {
+  /** Accept a suggestion — apply the field change */
+  const handleAcceptSuggestion = (suggestion, index) => {
     if (!selectedRule || !onUpdateRule) return;
     handleFieldChange(suggestion.field, suggestion.suggested);
+    setItemStates(prev => ({ ...prev, [`suggestion-${index}`]: 'accepted' }));
   };
 
-  /** Import all suggestions at once */
-  const handleImportAll = () => {
-    if (!structuredSuggestion?.suggestions || !selectedRule || !onUpdateRule) return;
-    let updated = { ...selectedRule };
-    for (const s of structuredSuggestion.suggestions) {
-      updated = { ...updated, [s.field]: s.suggested };
+  /** Reject a suggestion — dismiss without applying */
+  const handleRejectSuggestion = (index) => {
+    setItemStates(prev => ({ ...prev, [`suggestion-${index}`]: 'rejected' }));
+  };
+
+  /** Accept a note — save to rule's _llm_notes array */
+  const handleAcceptNote = (noteText, index) => {
+    if (!selectedRule || !onUpdateRule) return;
+    const existing = selectedRule._llm_notes || [];
+    if (!existing.includes(noteText)) {
+      handleFieldChange('_llm_notes', [...existing, noteText]);
     }
-    onUpdateRule(updated);
+    setItemStates(prev => ({ ...prev, [`note-${index}`]: 'accepted' }));
+  };
+
+  /** Dismiss a note — don't save */
+  const handleDismissNote = (index) => {
+    setItemStates(prev => ({ ...prev, [`note-${index}`]: 'rejected' }));
+  };
+
+  /** Remove a persisted note from the rule */
+  const handleRemoveNote = (noteIndex) => {
+    if (!selectedRule || !onUpdateRule) return;
+    const updated = (selectedRule._llm_notes || []).filter((_, i) => i !== noteIndex);
+    handleFieldChange('_llm_notes', updated);
   };
 
   /** Handle toggling boolean fields */
@@ -307,6 +327,29 @@ export default function InterviewPanel({
             availableZones={zoneNames}
           />
         </div>
+
+        {/* Persistent LLM Notes */}
+        {(selectedRule._llm_notes || []).length > 0 && (
+          <div className="detail-section">
+            <h3>Notes</h3>
+            {selectedRule._llm_notes.map((note, i) => (
+              <div key={i} className="llm-note-item" style={{
+                display: 'flex', alignItems: 'flex-start', gap: 6,
+                padding: '6px 8px', marginBottom: 4,
+                background: 'rgba(0, 91, 90, 0.08)', borderRadius: 4,
+                fontSize: '12px', lineHeight: '1.4', color: 'var(--text-secondary)'
+              }}>
+                <span style={{ flex: 1 }}>{note}</span>
+                <button
+                  className="chip-remove"
+                  onClick={() => handleRemoveNote(i)}
+                  title="Remove note"
+                  style={{ flexShrink: 0 }}
+                >x</button>
+              </div>
+            ))}
+          </div>
+        )}
 
         {/* Addresses */}
         <div className="detail-section">
@@ -568,33 +611,78 @@ export default function InterviewPanel({
                   </span>
                 )}
 
-                {structuredSuggestion.suggestions?.map((s, i) => (
-                  <div key={i} className="suggestion-field-change">
-                    <div className="suggestion-field-name">{s.field}</div>
-                    <div className="suggestion-values">
-                      <span className="suggestion-current">{formatValue(s.current)}</span>
-                      <span className="suggestion-arrow">&rarr;</span>
-                      <span className="suggestion-new">{formatValue(s.suggested)}</span>
+                {/* Actionable field change suggestions */}
+                {structuredSuggestion.suggestions?.map((s, i) => {
+                  const state = itemStates[`suggestion-${i}`];
+                  return (
+                    <div key={`s-${i}`} className="suggestion-field-change" style={{
+                      opacity: state === 'rejected' ? 0.4 : 1,
+                      borderLeft: state === 'accepted' ? '3px solid var(--accent)' : state === 'rejected' ? '3px solid var(--text-muted)' : '3px solid transparent',
+                      paddingLeft: 8
+                    }}>
+                      <div className="suggestion-field-name">{s.field}</div>
+                      <div className="suggestion-values">
+                        <span className="suggestion-current">{formatValue(s.current)}</span>
+                        <span className="suggestion-arrow">&rarr;</span>
+                        <span className="suggestion-new">{formatValue(s.suggested)}</span>
+                      </div>
+                      <div className="suggestion-reason">{s.reason}</div>
+                      {state ? (
+                        <span style={{
+                          fontSize: '11px', fontWeight: 600, padding: '2px 8px', borderRadius: 3,
+                          background: state === 'accepted' ? 'rgba(0, 91, 90, 0.15)' : 'rgba(128,128,128,0.15)',
+                          color: state === 'accepted' ? 'var(--accent)' : 'var(--text-muted)'
+                        }}>
+                          {state === 'accepted' ? 'Applied' : 'Dismissed'}
+                        </span>
+                      ) : (
+                        <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
+                          <button className="suggestion-import-btn" onClick={() => handleAcceptSuggestion(s, i)}>
+                            Accept
+                          </button>
+                          <button className="suggestion-import-btn" onClick={() => handleRejectSuggestion(i)}
+                            style={{ background: 'rgba(128,128,128,0.15)', color: 'var(--text-secondary)' }}>
+                            Reject
+                          </button>
+                        </div>
+                      )}
                     </div>
-                    <div className="suggestion-reason">{s.reason}</div>
-                    <button
-                      className="suggestion-import-btn"
-                      onClick={() => handleImportSuggestion(s)}
-                    >
-                      Import
-                    </button>
-                  </div>
-                ))}
+                  );
+                })}
 
-                {structuredSuggestion.suggestions?.length > 1 && (
-                  <button
-                    className="btn btn-secondary btn-sm btn-block"
-                    onClick={handleImportAll}
-                    style={{ marginTop: 8 }}
-                  >
-                    Import All Suggestions
-                  </button>
-                )}
+                {/* Informational notes */}
+                {structuredSuggestion.notes?.map((note, i) => {
+                  const state = itemStates[`note-${i}`];
+                  return (
+                    <div key={`n-${i}`} className="suggestion-field-change" style={{
+                      opacity: state === 'rejected' ? 0.4 : 1,
+                      borderLeft: state === 'accepted' ? '3px solid var(--accent)' : state === 'rejected' ? '3px solid var(--text-muted)' : '3px solid rgba(0, 91, 90, 0.3)',
+                      paddingLeft: 8, marginTop: 6
+                    }}>
+                      <div className="suggestion-field-name" style={{ color: 'var(--text-secondary)' }}>Note</div>
+                      <div className="suggestion-reason">{note}</div>
+                      {state ? (
+                        <span style={{
+                          fontSize: '11px', fontWeight: 600, padding: '2px 8px', borderRadius: 3,
+                          background: state === 'accepted' ? 'rgba(0, 91, 90, 0.15)' : 'rgba(128,128,128,0.15)',
+                          color: state === 'accepted' ? 'var(--accent)' : 'var(--text-muted)'
+                        }}>
+                          {state === 'accepted' ? 'Saved' : 'Dismissed'}
+                        </span>
+                      ) : (
+                        <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
+                          <button className="suggestion-import-btn" onClick={() => handleAcceptNote(note, i)}>
+                            Accept
+                          </button>
+                          <button className="suggestion-import-btn" onClick={() => handleDismissNote(i)}
+                            style={{ background: 'rgba(128,128,128,0.15)', color: 'var(--text-secondary)' }}>
+                            Dismiss
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             )}
 

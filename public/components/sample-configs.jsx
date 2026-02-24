@@ -3297,4 +3297,612 @@ object network mail-server
  nat (dmz,outside) static 203.0.113.20
 `,
   },
+
+  // =========================================================================
+  // SAMPLE: Check Point R81 Basic
+  // =========================================================================
+  checkpoint_basic: {
+    vendor: 'checkpoint',
+    label: 'Basic (6 rules)',
+    description: 'Check Point R81: objects-dictionary + rulebase JSON, 3 zones, 6 rules, NAT, Gaia clish interfaces',
+    xml: `{
+  "objects-dictionary": [
+    { "uid": "any-obj", "name": "Any", "type": "CpmiAnyObject" },
+    { "uid": "act-accept", "name": "Accept", "type": "RulebaseAction" },
+    { "uid": "act-drop", "name": "Drop", "type": "RulebaseAction" },
+    { "uid": "track-log", "name": "Log", "type": "Track" },
+    { "uid": "track-none", "name": "None", "type": "Track" },
+    {
+      "uid": "host-web01",
+      "name": "Web-Server-01",
+      "type": "host",
+      "ipv4-address": "172.16.1.10"
+    },
+    {
+      "uid": "host-mail01",
+      "name": "Mail-Server-01",
+      "type": "host",
+      "ipv4-address": "172.16.1.20"
+    },
+    {
+      "uid": "host-db01",
+      "name": "DB-Server-01",
+      "type": "host",
+      "ipv4-address": "10.1.2.50"
+    },
+    {
+      "uid": "net-internal",
+      "name": "Internal-LAN",
+      "type": "network",
+      "ipv4-address": "10.1.0.0",
+      "subnet-mask": "255.255.0.0"
+    },
+    {
+      "uid": "net-dmz",
+      "name": "DMZ-Subnet",
+      "type": "network",
+      "ipv4-address": "172.16.1.0",
+      "subnet-mask": "255.255.255.0"
+    },
+    {
+      "uid": "net-guest",
+      "name": "Guest-WiFi",
+      "type": "network",
+      "ipv4-address": "10.99.0.0",
+      "subnet-mask": "255.255.255.0"
+    },
+    {
+      "uid": "grp-dmz-servers",
+      "name": "DMZ-Servers",
+      "type": "group",
+      "members": ["host-web01", "host-mail01"]
+    },
+    {
+      "uid": "svc-http",
+      "name": "http",
+      "type": "service-tcp",
+      "port": "80"
+    },
+    {
+      "uid": "svc-https",
+      "name": "https",
+      "type": "service-tcp",
+      "port": "443"
+    },
+    {
+      "uid": "svc-smtp",
+      "name": "smtp",
+      "type": "service-tcp",
+      "port": "25"
+    },
+    {
+      "uid": "svc-ssh",
+      "name": "ssh",
+      "type": "service-tcp",
+      "port": "22"
+    },
+    {
+      "uid": "svc-dns-udp",
+      "name": "domain-udp",
+      "type": "service-udp",
+      "port": "53"
+    },
+    {
+      "uid": "svc-icmp-echo",
+      "name": "echo-request",
+      "type": "service-icmp",
+      "icmp-type": 8,
+      "icmp-code": 0
+    },
+    {
+      "uid": "svcgrp-web",
+      "name": "Web-Services",
+      "type": "service-group",
+      "members": ["svc-http", "svc-https"]
+    },
+    {
+      "uid": "svcgrp-mail",
+      "name": "Mail-Services",
+      "type": "service-group",
+      "members": ["svc-smtp"]
+    },
+    {
+      "uid": "gw-main",
+      "name": "CP-GW-01",
+      "type": "simple-gateway",
+      "ipv4-address": "203.0.113.1",
+      "interfaces": [
+        { "name": "eth0", "ipv4-address": "10.1.1.254", "ipv4-mask-length": 24,
+          "topology": { "leads-to": { "name": "InternalZone" } } },
+        { "name": "eth1", "ipv4-address": "203.0.113.1", "ipv4-mask-length": 30,
+          "topology": { "leads-to": { "name": "ExternalZone" } } },
+        { "name": "eth2", "ipv4-address": "172.16.1.1", "ipv4-mask-length": 24,
+          "topology": { "leads-to": { "name": "DMZZone" } } }
+      ]
+    }
+  ],
+  "rulebase": [
+    {
+      "type": "access-section",
+      "name": "Inbound Policy",
+      "uid": "section-inbound",
+      "rulebase": [
+        {
+          "type": "access-rule",
+          "uid": "rule-1",
+          "name": "Allow-Inbound-Web",
+          "rule-number": 1,
+          "enabled": true,
+          "source": ["any-obj"],
+          "destination": ["host-web01"],
+          "service": ["svcgrp-web"],
+          "action": { "uid": "act-accept" },
+          "track": { "uid": "track-log" },
+          "install-on": ["gw-main"],
+          "comments": "Allow internet users to reach web server"
+        },
+        {
+          "type": "access-rule",
+          "uid": "rule-2",
+          "name": "Allow-Inbound-Mail",
+          "rule-number": 2,
+          "enabled": true,
+          "source": ["any-obj"],
+          "destination": ["host-mail01"],
+          "service": ["svcgrp-mail"],
+          "action": { "uid": "act-accept" },
+          "track": { "uid": "track-log" },
+          "install-on": ["gw-main"],
+          "comments": "Allow inbound SMTP to mail server"
+        }
+      ]
+    },
+    {
+      "type": "access-section",
+      "name": "Internal Policy",
+      "uid": "section-internal",
+      "rulebase": [
+        {
+          "type": "access-rule",
+          "uid": "rule-3",
+          "name": "Allow-Internal-Web",
+          "rule-number": 3,
+          "enabled": true,
+          "source": ["net-internal"],
+          "destination": ["any-obj"],
+          "service": ["svcgrp-web", "svc-dns-udp"],
+          "action": { "uid": "act-accept" },
+          "track": { "uid": "track-log" },
+          "comments": "Allow internal users web browsing and DNS"
+        },
+        {
+          "type": "access-rule",
+          "uid": "rule-4",
+          "name": "Allow-Admin-SSH",
+          "rule-number": 4,
+          "enabled": true,
+          "source": ["net-internal"],
+          "destination": ["grp-dmz-servers"],
+          "service": ["svc-ssh"],
+          "action": { "uid": "act-accept" },
+          "track": { "uid": "track-log" },
+          "comments": "Allow IT admins SSH to DMZ servers"
+        },
+        {
+          "type": "access-rule",
+          "uid": "rule-5",
+          "name": "Allow-Ping",
+          "rule-number": 5,
+          "enabled": true,
+          "source": ["net-internal"],
+          "destination": ["grp-dmz-servers"],
+          "service": ["svc-icmp-echo"],
+          "action": { "uid": "act-accept" },
+          "track": { "uid": "track-none" },
+          "comments": "Allow ICMP echo for monitoring"
+        }
+      ]
+    },
+    {
+      "type": "access-rule",
+      "uid": "rule-6",
+      "name": "Cleanup-Rule",
+      "rule-number": 6,
+      "enabled": true,
+      "source": ["any-obj"],
+      "destination": ["any-obj"],
+      "service": ["any-obj"],
+      "action": { "uid": "act-drop" },
+      "track": { "uid": "track-log" },
+      "comments": "Default deny-all cleanup rule"
+    }
+  ],
+  "nat-rulebase": {
+    "rulebase": [
+      {
+        "type": "nat-rule",
+        "uid": "nat-1",
+        "name": "Hide-Internal",
+        "enabled": true,
+        "original-source": { "uid": "net-internal" },
+        "original-destination": { "uid": "any-obj" },
+        "original-service": { "uid": "any-obj" },
+        "translated-source": { "uid": "gw-main" },
+        "translated-destination": { "uid": "any-obj" },
+        "translated-service": { "uid": "any-obj" },
+        "method": "hide",
+        "comments": "Hide NAT for internal network"
+      },
+      {
+        "type": "nat-rule",
+        "uid": "nat-2",
+        "name": "Static-WebServer",
+        "enabled": true,
+        "original-source": { "uid": "any-obj" },
+        "original-destination": { "uid": "host-web01" },
+        "original-service": { "uid": "svcgrp-web" },
+        "translated-source": { "uid": "any-obj" },
+        "translated-destination": { "uid": "host-web01" },
+        "translated-service": { "uid": "svcgrp-web" },
+        "method": "static",
+        "comments": "Static NAT for web server"
+      }
+    ]
+  }
+}
+
+--- GAIA CLISH ---
+set hostname CP-GW-01
+add interface eth0
+add interface eth1
+add interface eth2
+set interface eth0 ipv4-address 10.1.1.254 mask-length 24
+set interface eth1 ipv4-address 203.0.113.1 mask-length 30
+set interface eth2 ipv4-address 172.16.1.1 mask-length 24
+set static-route 0.0.0.0/0 nexthop gateway address 203.0.113.2 on
+set static-route 10.0.0.0/8 nexthop gateway address 10.1.1.1 on`,
+  },
+
+  // =========================================================================
+  // SAMPLE: SonicWall TZ Basic
+  // =========================================================================
+  sonicwall_basic: {
+    vendor: 'sonicwall',
+    label: 'Basic (6 rules)',
+    description: 'SonicWall TZ: REST API JSON, 3 zones, address/service objects, 6 access rules, source NAT',
+    xml: `{
+  "firmware_version": "7.0.1-5095",
+  "zones": [
+    { "name": "LAN", "security_type": "trusted", "uuid": "zone-lan-001" },
+    { "name": "WAN", "security_type": "untrusted", "uuid": "zone-wan-001" },
+    { "name": "DMZ", "security_type": "public", "uuid": "zone-dmz-001" }
+  ],
+  "interfaces": {
+    "ipv4": [
+      {
+        "name": "X0",
+        "zone": "LAN",
+        "ip_assignment": { "mode": { "static": { "ip": "10.1.1.1", "netmask": "255.255.255.0" } } },
+        "enabled": true,
+        "description": "LAN interface"
+      },
+      {
+        "name": "X1",
+        "zone": "WAN",
+        "ip_assignment": { "mode": { "static": { "ip": "203.0.113.1", "netmask": "255.255.255.252" } } },
+        "enabled": true,
+        "description": "WAN interface"
+      },
+      {
+        "name": "X2",
+        "zone": "DMZ",
+        "ip_assignment": { "mode": { "static": { "ip": "172.16.1.1", "netmask": "255.255.255.0" } } },
+        "enabled": true,
+        "description": "DMZ interface"
+      }
+    ]
+  },
+  "address_objects": {
+    "ipv4": [
+      { "name": "LAN-Subnet", "network": { "ip": "10.1.1.0", "mask": "255.255.255.0" }, "description": "Internal LAN" },
+      { "name": "Web-Server", "host": { "ip": "172.16.1.10" }, "description": "DMZ web server" },
+      { "name": "Mail-Server", "host": { "ip": "172.16.1.20" }, "description": "DMZ mail server" },
+      { "name": "DB-Server", "host": { "ip": "10.1.2.50" }, "description": "Internal database" },
+      { "name": "DNS-Server", "host": { "ip": "10.1.1.53" }, "description": "Internal DNS resolver" },
+      { "name": "Admin-PC", "host": { "ip": "10.1.1.100" }, "description": "IT admin workstation" }
+    ],
+    "fqdn": [
+      { "name": "Updates-FQDN", "domain": "updates.vendor.com", "description": "Vendor update server" }
+    ]
+  },
+  "address_groups": {
+    "ipv4": [
+      {
+        "name": "DMZ-Servers",
+        "address_object": { "ipv4": [{ "name": "Web-Server" }, { "name": "Mail-Server" }] },
+        "description": "All DMZ servers"
+      },
+      {
+        "name": "Critical-Servers",
+        "address_object": { "ipv4": [{ "name": "DB-Server" }, { "name": "DNS-Server" }] },
+        "address_group": { "ipv4": [{ "name": "DMZ-Servers" }] },
+        "description": "All servers including DMZ"
+      }
+    ]
+  },
+  "service_objects": [
+    { "name": "HTTP", "protocol": { "tcp": true }, "port_range": { "begin": 80, "end": 80 }, "description": "HTTP" },
+    { "name": "HTTPS", "protocol": { "tcp": true }, "port_range": { "begin": 443, "end": 443 }, "description": "HTTPS" },
+    { "name": "SMTP", "protocol": { "tcp": true }, "port_range": { "begin": 25, "end": 25 }, "description": "SMTP" },
+    { "name": "SSH-Mgmt", "protocol": { "tcp": true }, "port_range": { "begin": 22, "end": 22 }, "description": "SSH" },
+    { "name": "DNS-UDP", "protocol": { "udp": true }, "port_range": { "begin": 53, "end": 53 }, "description": "DNS" },
+    { "name": "PGSQL", "protocol": { "tcp": true }, "port_range": { "begin": 5432, "end": 5432 }, "description": "PostgreSQL" }
+  ],
+  "service_groups": [
+    { "name": "Web-Services", "service_object": [{ "name": "HTTP" }, { "name": "HTTPS" }], "description": "Web traffic" },
+    { "name": "Mail-Services", "service_object": [{ "name": "SMTP" }], "description": "Mail protocols" }
+  ],
+  "access_rules": {
+    "ipv4": [
+      {
+        "name": "Allow-LAN-Web",
+        "uuid": "rule-001",
+        "from": "LAN",
+        "to": "WAN",
+        "source": { "address": [{ "name": "LAN-Subnet" }] },
+        "destination": { "any": true },
+        "service": [{ "name": "Web-Services" }],
+        "action": "allow",
+        "enabled": true,
+        "logging": true,
+        "dpi": true,
+        "priority": { "manual": 1 },
+        "comment": "Allow LAN users to browse web"
+      },
+      {
+        "name": "Allow-LAN-DNS",
+        "uuid": "rule-002",
+        "from": "LAN",
+        "to": "WAN",
+        "source": { "address": [{ "name": "DNS-Server" }] },
+        "destination": { "any": true },
+        "service": [{ "name": "DNS-UDP" }],
+        "action": "allow",
+        "enabled": true,
+        "logging": false,
+        "priority": { "manual": 2 },
+        "comment": "Allow DNS resolver to query external"
+      },
+      {
+        "name": "Allow-Inbound-Web",
+        "uuid": "rule-003",
+        "from": "WAN",
+        "to": "DMZ",
+        "source": { "any": true },
+        "destination": { "address": [{ "name": "Web-Server" }] },
+        "service": [{ "name": "Web-Services" }],
+        "action": "allow",
+        "enabled": true,
+        "logging": true,
+        "dpi": true,
+        "priority": { "manual": 1 },
+        "comment": "Allow inbound HTTPS to web server"
+      },
+      {
+        "name": "Allow-Inbound-Mail",
+        "uuid": "rule-004",
+        "from": "WAN",
+        "to": "DMZ",
+        "source": { "any": true },
+        "destination": { "address": [{ "name": "Mail-Server" }] },
+        "service": [{ "name": "Mail-Services" }],
+        "action": "allow",
+        "enabled": true,
+        "logging": true,
+        "priority": { "manual": 2 },
+        "comment": "Allow inbound SMTP to mail server"
+      },
+      {
+        "name": "Allow-Admin-SSH",
+        "uuid": "rule-005",
+        "from": "LAN",
+        "to": "DMZ",
+        "source": { "address": [{ "name": "Admin-PC" }] },
+        "destination": { "address": [{ "name": "DMZ-Servers" }] },
+        "service": [{ "name": "SSH-Mgmt" }],
+        "action": "allow",
+        "enabled": true,
+        "logging": true,
+        "priority": { "manual": 1 },
+        "comment": "Allow admin SSH to DMZ servers"
+      },
+      {
+        "name": "Deny-All-Default",
+        "uuid": "rule-006",
+        "from": "WAN",
+        "to": "LAN",
+        "source": { "any": true },
+        "destination": { "any": true },
+        "service": [{ "any": true }],
+        "action": "deny",
+        "enabled": true,
+        "logging": true,
+        "priority": { "manual": 99 },
+        "comment": "Default deny all inbound traffic"
+      }
+    ]
+  },
+  "nat_policies": {
+    "ipv4": [
+      {
+        "name": "LAN-Outbound-NAT",
+        "uuid": "nat-001",
+        "inbound": "LAN",
+        "outbound": "WAN",
+        "original_source": { "address": [{ "name": "LAN-Subnet" }] },
+        "original_destination": { "any": true },
+        "translated_source": { "name": "X1 IP" },
+        "translated_destination": { "original": true },
+        "enabled": true,
+        "comment": "Source NAT for LAN to WAN"
+      },
+      {
+        "name": "WebServer-DNAT",
+        "uuid": "nat-002",
+        "inbound": "WAN",
+        "outbound": "DMZ",
+        "original_source": { "any": true },
+        "original_destination": { "address": [{ "name": "X1 IP" }] },
+        "translated_source": { "original": true },
+        "translated_destination": { "name": "Web-Server" },
+        "enabled": true,
+        "comment": "Destination NAT for web server"
+      }
+    ]
+  },
+  "route_policies": {
+    "ipv4": [
+      {
+        "destination": { "name": "0.0.0.0" },
+        "mask": { "name": "0.0.0.0" },
+        "gateway": "203.0.113.2",
+        "interface": "X1",
+        "metric": 1,
+        "comment": "Default route via WAN"
+      }
+    ]
+  }
+}`,
+  },
+
+  // =========================================================================
+  // SAMPLE: Huawei USG Basic
+  // =========================================================================
+  huawei_basic: {
+    vendor: 'huawei_usg',
+    label: 'Basic (6 rules)',
+    description: 'Huawei USG6000E: VRP CLI, 3 zones, address/service sets, 6 security rules, NAT, static routes',
+    xml: `#
+sysname USG6000E-HQ
+#
+hrp enable
+hrp standby-device 10.1.1.253
+#
+interface GigabitEthernet0/0/0
+ ip address 10.1.1.254 255.255.255.0
+ description LAN-Interface
+#
+interface GigabitEthernet0/0/1
+ ip address 203.0.113.1 255.255.255.252
+ description WAN-Interface
+#
+interface GigabitEthernet0/0/2
+ ip address 172.16.1.1 255.255.255.0
+ description DMZ-Interface
+#
+firewall zone trust
+ priority 85
+ add interface GigabitEthernet0/0/0
+#
+firewall zone untrust
+ priority 5
+ add interface GigabitEthernet0/0/1
+#
+firewall zone dmz
+ priority 50
+ add interface GigabitEthernet0/0/2
+#
+ip address-set LAN-Subnet type object
+ address 0 10.1.1.0 mask 255.255.255.0
+#
+ip address-set Web-Server type object
+ address 0 172.16.1.10 mask 255.255.255.255
+#
+ip address-set Mail-Server type object
+ address 0 172.16.1.20 mask 255.255.255.255
+#
+ip address-set DB-Server type object
+ address 0 10.1.2.50 mask 255.255.255.255
+#
+ip address-set Admin-PC type object
+ address 0 10.1.1.100 mask 255.255.255.255
+#
+ip address-set DMZ-Servers type group
+ address address-set Web-Server
+ address address-set Mail-Server
+#
+ip service-set Web-Services type group
+ service service-set HTTP
+ service service-set HTTPS
+#
+ip service-set Custom-PGSQL type object
+ service protocol tcp destination-port 5432
+#
+time-range Business-Hours
+ period-range 08:00:00 to 18:00:00 working-day
+#
+security-policy
+ rule name Allow-LAN-Web
+  source-zone trust
+  destination-zone untrust
+  source-address address-set LAN-Subnet
+  service service-set Web-Services
+  service DNS
+  action permit
+  counting enable
+  description Allow internal users web browsing and DNS
+ rule name Allow-Inbound-Web
+  source-zone untrust
+  destination-zone dmz
+  destination-address address-set Web-Server
+  service HTTP
+  service HTTPS
+  action permit
+  counting enable
+  description Allow internet users to reach web server
+ rule name Allow-Inbound-Mail
+  source-zone untrust
+  destination-zone dmz
+  destination-address address-set Mail-Server
+  service SMTP
+  action permit
+  counting enable
+  description Allow inbound SMTP to mail server
+ rule name Allow-Admin-SSH
+  source-zone trust
+  destination-zone dmz
+  source-address address-set Admin-PC
+  destination-address address-set DMZ-Servers
+  service SSH
+  action permit
+  counting enable
+  time-range Business-Hours
+  description Allow admin SSH access to DMZ servers during business hours
+ rule name Allow-LAN-to-DB
+  source-zone trust
+  destination-zone trust
+  source-address address-set LAN-Subnet
+  destination-address address-set DB-Server
+  service service-set Custom-PGSQL
+  action permit
+  counting enable
+  description Allow LAN access to PostgreSQL database
+ rule name Deny-All-Default
+  source-zone untrust
+  destination-zone trust
+  action deny
+  counting enable
+  description Default deny all inbound traffic
+#
+nat-policy
+ rule name LAN-Outbound-NAT
+  source-zone trust
+  destination-zone untrust
+  source-address address-set LAN-Subnet
+  action source-nat easy-ip
+#
+ip route-static 0.0.0.0 0.0.0.0 203.0.113.2
+ip route-static 10.0.0.0 255.0.0.0 10.1.1.1
+#`,
+  },
 };

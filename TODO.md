@@ -54,24 +54,30 @@
 - [x] **L2 / transparent / virtual-wire support** — All four parsers detect L2 mode: PAN-OS virtual-wire pairs + L2 zones, FortiGate transparent opmode + virtual-switch + forward-domain grouping, Cisco ASA `firewall transparent` + bridge-groups + BVI interfaces, SRX bridge-domains + family bridge. Converter generates `set bridge-domains` + `set interfaces ... family bridge` commands. UI shows Bridge Domains / L2 Interfaces / Virtual-Wire Pairs sections in RoutingEditor, L2 badges in InterfaceMapper
 - [x] **Rule optimization / consolidation** — Extended shadow detector with 4 new analysis categories: redundant rules (subset of earlier permit), mergeable rules (adjacent, differ in one dimension), reorder recommendations (deny after broader permit), consolidation opportunities (3+ rules combinable into address group). Warnings panel updated with `info` severity and Optimization filter
 
+### Rev5 — Multi-Firewall Logical Systems
+- [x] (Skipped — deferred to future revision)
+
+### Rev6 — Additional Vendor Parsers
+- [x] **Check Point R80+/R81+ parser** — SmartConsole JSON export with UID-based object resolution from `objects-dictionary`, nested access-sections and inline-layer flattening, host/network/range/FQDN/group objects, service-tcp/udp/icmp/group objects, NAT rulebase (hide/static), optional Gaia clish text for interfaces and static routes, gateway topology zone derivation
+- [x] **SonicWall SonicOS parser** — Dual-format support: REST API JSON (preferred) and CLI text fallback. Zones with security-type mapping (trusted/untrusted/public), IPv4/IPv6 address objects (host/network/range/FQDN/MAC with warnings), address groups, service objects with protocol/port, service groups, access rules with priority ordering, NAT policies (source/destination/combined), interfaces, route policies, built-in object resolution (X0 IP, X1 Subnet, etc.)
+- [x] **Huawei USG parser** — VRP CLI (`display current-configuration`) with `#`-delimited section parsing. Firewall zones with priority, `ip address-set` type object (host/network/range/FQDN) and type group, `ip service-set` type object and group, `security-policy` rules with zone-pair routing, `nat-policy` SNAT and `nat server` DNAT, `time-range` schedules, IKE/IPsec VPN detection, `hrp` HA configuration, predefined service mapping (HTTP, HTTPS, DNS, SSH, etc.), static routes
+- [x] **Vendor-specific sample configs** — Realistic sample configs for Check Point (6 rules, objects-dictionary + rulebase JSON with Gaia clish), SonicWall (6 rules, REST API JSON with zones/objects/NAT), and Huawei USG (6 rules, VRP CLI with zones/address-sets/security-policy)
+- [x] **Hardware model databases** — Check Point (CP-1600 through CP-28000), SonicWall (TZ-270 through NSsp-13700), Huawei (USG6510E through USG6680E) with throughput specs, port counts, and auto-detection heuristics
+- [x] **Interface auto-mapping** — Check Point `eth` → `ge-`, SonicWall `X` → `ge-`, Huawei `GigabitEthernet` → `ge-` and `XGigabitEthernet` → `xe-`, FortiGate `port` → `ge-` naming auto-mapped to SRX interfaces
+- [x] **Vendor-specific platform views** — Check Point SmartConsole-style table (sections, Accept/Drop, Track, Install On), SonicWall zone-pair table (priority, DPI, Allow/Deny), Huawei USG zone-pair table (Permit/Deny, profiles)
+- [x] **Full UI integration** — ModelSelector vendor labels, InterfaceMapper source model lookup, THROUGHPUT_LABELS, LLM vendorLabel, auto-detection routing, ConfigInput dropdown entries with help text
+
 ---
 
 ## Planned Revisions
 
-### Rev5 — Multi-Firewall Logical Systems
+### Rev7 — Multi-Firewall Logical Systems
 - [ ] Multi-firewall collapse into logical-systems/tenants
 - [ ] Import multiple configs and merge into a single SRX with logical-system separation
 - [ ] Logical-system-aware address books, policies, and NAT
 - [ ] Cross-logical-system traffic handling (lt- tunnel interfaces)
 
-### Rev6 — Additional Vendor Parsers
-- [ ] Check Point (R80+/SmartConsole export format) parser
-- [ ] SonicWall (SonicOS) parser
-- [ ] Huawei USG parser
-- [ ] Vendor-specific sample configs for each new parser
-- [ ] Cross-vendor application mapping extensions for new vendors
-
-### Rev7 — UX & Workflow Enhancements
+### Rev8 — UX & Workflow Enhancements
 - [ ] **"I am new here" guided walkthrough** — Dismissible tooltip bubbles that walk first-time users through the import → review → convert workflow
 - [ ] **Enhanced sanitization + mapping table** — Strip corporate branding, show before/after mapping table, provide pre-branded sample configs
 - [ ] **Post-conversion diff view** — Side-by-side comparison of source vs generated SRX policy coverage with match highlighting
@@ -80,7 +86,7 @@
 - [ ] **Greenfield templates** — Pre-built config templates for common deployments (branch office, DC edge, remote access VPN, hub-and-spoke)
 - [ ] **Config syntax validation** — SRX commit-check equivalent (syntax validation, reference checks, conflict detection)
 
-### Rev8 — Dynamic Routing & Identity
+### Rev9 — Dynamic Routing & Identity
 - [ ] **Dynamic routing protocols** — Parse and convert BGP, OSPF, EVPN, and VxLAN configurations from all supported source vendors to SRX equivalents:
   - BGP: neighbor config, AS numbers, route policies, address families, communities, peer groups
   - OSPF: areas, interfaces, authentication, stub/NSSA, route redistribution
@@ -107,8 +113,8 @@
 - **SSL/TLS Decryption** — SSL proxy, certificate management, PKI not converted
 - **NetFlow / Telemetry** — sFlow, streaming telemetry not converted
 - **Management Access** — Admin users, SNMP communities, SSH/API access not converted
-- **Dynamic Routing** — Only static routes currently (Rev8 planned)
-- **User Identity** — User-ID / FSSO / IDFW not converted currently (Rev8 planned)
+- **Dynamic Routing** — Only static routes currently (Rev9 planned)
+- **User Identity** — User-ID / FSSO / IDFW not converted currently (Rev9 planned)
 - **Virtual-Wire** — SRX has no native vwire; mapped to bridge-domain with TODO comments for interface assignment
 - **MNHA** — Only 2-node configurations supported
 - **Application Mapping** — ~120 apps mapped; unmapped apps get `Customfwic` suffix + warning

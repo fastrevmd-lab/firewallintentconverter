@@ -17,10 +17,16 @@ import {
   SRX_SOURCE_MODELS,
   FORTIGATE_SOURCE_MODELS,
   CISCO_SOURCE_MODELS,
+  CHECKPOINT_SOURCE_MODELS,
+  SONICWALL_SOURCE_MODELS,
+  HUAWEI_SOURCE_MODELS,
   detectPanosModel,
   detectSrxModel,
   detectFortigateModel,
   detectCiscoModel,
+  detectCheckpointModel,
+  detectSonicwallModel,
+  detectHuaweiModel,
   suggestSrxModel,
   getThroughputDisplay,
   THROUGHPUT_LABELS,
@@ -55,6 +61,9 @@ export default function ModelSelector({
   const isSrxSource = sourceVendor === 'srx';
   const isFortigateSource = sourceVendor === 'fortigate';
   const isCiscoSource = sourceVendor === 'cisco_asa';
+  const isCheckpointSource = sourceVendor === 'checkpoint';
+  const isSonicwallSource = sourceVendor === 'sonicwall';
+  const isHuaweiSource = sourceVendor === 'huawei_usg';
 
   // Auto-detect source model on mount
   useEffect(() => {
@@ -66,6 +75,12 @@ export default function ModelSelector({
         detected = detectFortigateModel(intermediateConfig);
       } else if (isCiscoSource) {
         detected = detectCiscoModel(intermediateConfig);
+      } else if (isCheckpointSource) {
+        detected = detectCheckpointModel(intermediateConfig);
+      } else if (isSonicwallSource) {
+        detected = detectSonicwallModel(intermediateConfig);
+      } else if (isHuaweiSource) {
+        detected = detectHuaweiModel(intermediateConfig);
       } else {
         detected = detectPanosModel(intermediateConfig);
       }
@@ -74,7 +89,7 @@ export default function ModelSelector({
         setSelectedSource(detected.model);
       }
     }
-  }, [intermediateConfig, sourceModel, isSrxSource, isFortigateSource, isCiscoSource]);
+  }, [intermediateConfig, sourceModel, isSrxSource, isFortigateSource, isCiscoSource, isCheckpointSource, isSonicwallSource, isHuaweiSource]);
 
   // Re-suggest SRX whenever source or metric changes
   useEffect(() => {
@@ -87,7 +102,7 @@ export default function ModelSelector({
     }
   }, [selectedSource, throughputMetric]);
 
-  const sourceModelsDb = isSrxSource ? SRX_SOURCE_MODELS : isFortigateSource ? FORTIGATE_SOURCE_MODELS : isCiscoSource ? CISCO_SOURCE_MODELS : PANOS_MODELS;
+  const sourceModelsDb = isSrxSource ? SRX_SOURCE_MODELS : isFortigateSource ? FORTIGATE_SOURCE_MODELS : isCiscoSource ? CISCO_SOURCE_MODELS : isCheckpointSource ? CHECKPOINT_SOURCE_MODELS : isSonicwallSource ? SONICWALL_SOURCE_MODELS : isHuaweiSource ? HUAWEI_SOURCE_MODELS : PANOS_MODELS;
   const sourceInfo = sourceModelsDb[selectedSource];
   const targetRaw = SRX_MODELS[selectedTarget];
   // Override ports when an SRX4700 port profile is selected
@@ -97,7 +112,7 @@ export default function ModelSelector({
   }, [targetRaw, selectedPortProfile]);
 
   // Group models by tier for dropdown optgroups
-  const sourceGroups = useMemo(() => groupByTier(sourceModelsDb), [isSrxSource, isFortigateSource, isCiscoSource]);
+  const sourceGroups = useMemo(() => groupByTier(sourceModelsDb), [isSrxSource, isFortigateSource, isCiscoSource, isCheckpointSource, isSonicwallSource, isHuaweiSource]);
   const srxGroups = useMemo(() => groupByTier(SRX_MODELS), []);
 
   const metricLabel = METRIC_PREFIX[throughputMetric] || 'L7';
@@ -165,7 +180,7 @@ export default function ModelSelector({
           {!greenfieldMode && (
           <div className="model-section">
             <h3 className="model-section-title">
-              Source Firewall ({isSrxSource ? 'Juniper SRX' : isFortigateSource ? 'FortiGate' : isCiscoSource ? 'Cisco ASA/FTD' : 'PAN-OS'})
+              Source Firewall ({isSrxSource ? 'Juniper SRX' : isFortigateSource ? 'FortiGate' : isCiscoSource ? 'Cisco ASA/FTD' : isCheckpointSource ? 'Check Point' : isSonicwallSource ? 'SonicWall' : isHuaweiSource ? 'Huawei USG' : 'PAN-OS'})
             </h3>
 
             {detection && (
@@ -182,7 +197,7 @@ export default function ModelSelector({
               value={selectedSource}
               onChange={(e) => setSelectedSource(e.target.value)}
             >
-              <option value="">-- Select {isSrxSource ? 'SRX' : isFortigateSource ? 'FortiGate' : isCiscoSource ? 'Cisco' : 'PAN-OS'} Model (optional) --</option>
+              <option value="">-- Select {isSrxSource ? 'SRX' : isFortigateSource ? 'FortiGate' : isCiscoSource ? 'Cisco' : isCheckpointSource ? 'Check Point' : isSonicwallSource ? 'SonicWall' : isHuaweiSource ? 'Huawei' : 'PAN-OS'} Model (optional) --</option>
               {Object.entries(sourceGroups).map(([tier, models]) => (
                 <optgroup key={tier} label={tierLabel(tier)}>
                   {models.map(m => (
@@ -195,7 +210,7 @@ export default function ModelSelector({
             </select>
 
             {sourceInfo && (
-              <ModelInfoCard model={sourceInfo} vendor={isSrxSource ? 'srx' : isFortigateSource ? 'fortigate' : isCiscoSource ? 'cisco_asa' : 'panos'} metric={throughputMetric} />
+              <ModelInfoCard model={sourceInfo} vendor={isSrxSource ? 'srx' : isFortigateSource ? 'fortigate' : isCiscoSource ? 'cisco_asa' : isCheckpointSource ? 'checkpoint' : isSonicwallSource ? 'sonicwall' : isHuaweiSource ? 'huawei_usg' : 'panos'} metric={throughputMetric} />
             )}
           </div>
           )}

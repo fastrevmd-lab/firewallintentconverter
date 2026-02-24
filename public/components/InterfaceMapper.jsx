@@ -21,7 +21,25 @@
  * it's removed from other dropdowns.
  */
 import React, { useState, useMemo } from 'react';
-import { PANOS_MODELS, SRX_MODELS, getSrx4700Ports } from '../data/hardware-db.js';
+import {
+  PANOS_MODELS, SRX_MODELS, SRX_SOURCE_MODELS,
+  FORTIGATE_SOURCE_MODELS, CISCO_SOURCE_MODELS,
+  CHECKPOINT_SOURCE_MODELS, SONICWALL_SOURCE_MODELS, HUAWEI_SOURCE_MODELS,
+  getSrx4700Ports,
+} from '../data/hardware-db.js';
+
+/** Look up the correct source model database for a given vendor */
+function getSourceModelDb(vendor) {
+  switch (vendor) {
+    case 'srx': return SRX_SOURCE_MODELS;
+    case 'fortigate': return FORTIGATE_SOURCE_MODELS;
+    case 'cisco_asa': return CISCO_SOURCE_MODELS;
+    case 'checkpoint': return CHECKPOINT_SOURCE_MODELS;
+    case 'sonicwall': return SONICWALL_SOURCE_MODELS;
+    case 'huawei_usg': return HUAWEI_SOURCE_MODELS;
+    default: return PANOS_MODELS;
+  }
+}
 
 /** SRX tunnel interface types for the dropdown */
 const SRX_TUNNEL_TYPES = [
@@ -35,9 +53,9 @@ function isTunnelInterface(ifaceName) {
   return /^tunnel\.\d+$/i.test(ifaceName);
 }
 
-/** Detect if a PAN-OS interface is a loopback */
+/** Detect if an interface is a loopback (PAN-OS loopback.X, Huawei LoopBackN) */
 function isLoopbackInterface(ifaceName) {
-  return /^loopback\.\d+$/i.test(ifaceName);
+  return /^loopback\.\d+$/i.test(ifaceName) || /^LoopBack\d+$/i.test(ifaceName);
 }
 
 /** Extract unit number from PAN-OS logical interface */
@@ -122,7 +140,9 @@ export default function InterfaceMapper({
     return units;
   });
 
-  const sourceModelData = sourceModel ? PANOS_MODELS[sourceModel] : null;
+  const sourceVendor = intermediateConfig?.metadata?.source_vendor;
+  const sourceModelDb = getSourceModelDb(sourceVendor);
+  const sourceModelData = sourceModel ? sourceModelDb[sourceModel] : null;
   const targetPorts = targetModelData?.ports || [];
 
   // Build L2 interface lookup from intermediateConfig

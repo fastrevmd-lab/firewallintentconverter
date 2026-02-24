@@ -1,0 +1,1423 @@
+/**
+ * Check Point R80+/R81+ Configuration Parser
+ * ============================================
+ *
+ * Parses Check Point firewall configurations (from mgmt_cli JSON exports /
+ * ShowPolicyPackage tool) into the vendor-neutral intermediate JSON schema.
+ *
+ * Handles:
+ *   - objects-dictionary → UID resolution (hosts, networks, ranges, services, groups)
+ *   - access-rule rulebase with nested access-section / inline-layer flattening
+ *   - NAT rulebase (hide/static NAT)
+ *   - Gateway topology → zone derivation
+ *   - Gaia clish text (interfaces + static routes) appended after JSON
+ *   - group-with-exclusion objects
+ *   - Service objects: tcp, udp, icmp, icmp6, other, groups
+ *   - DNS-domain (FQDN) objects
+ *   - Address ranges
+ *
+ * Input formats:
+ *   1. Single mgmt_cli show-access-rulebase JSON response
+ *   2. ShowPolicyPackage combined JSON (multiple sections)
+ *   3. JSON + Gaia clish text separated by "--- GAIA CLISH ---"
+ */
+
+import { createWarning, sanitizeJunosName } from './parser-utils.js';
+
+// ---------------------------------------------------------------------------
+// Main Parser Entry Point
+// ---------------------------------------------------------------------------
+
+/**
+ * Parses a Check Point configuration into the intermediate JSON schema.
+ *
+ * @param {string} configText - Raw Check Point config (JSON, or JSON + Gaia clish text)
+ * @returns {{ intermediateConfig: Object, warnings: Object[], parseStats: Object }}
+ */
+export function parseCheckPointConfig(configText) {
+  const warnings = [];
+
+  // 1. Split JSON and optional Gaia clish text
+  const { jsonText, gaiaText } = splitJsonAndGaia(configText, warnings);
+
+  // 2. Parse JSON
+  let configJson;
+  try {
+    configJson = JSON.parse(jsonText);
+  } catch (e) {
+    throw new Error(`Invalid Check Point configuration: not valid JSON — ${e.message}`);
+  }
+
+  // 3. Build UID → object map from objects-dictionary arrays
+  const uidMap = buildUidMap(configJson, warnings);
+
+  // 4. Extract version and gateway info
+  const version = extractVersion(configJson);
+  const gatewayName = extractGatewayName(configJson);
+
+  // 5. Parse objects by type
+  const addressObjects = parseAddressObjects(uidMap, warnings);
+  const addressGroups = parseAddressGroups(uidMap, warnings);
+  const serviceObjects = parseServiceObjects(uidMap, warnings);
+  const serviceGroups = parseServiceGroups(uidMap, warnings);
+
+  // 6. Flatten and parse rulebase → security policies
+  const { policies: securityPolicies, layerCount } = parseRulebase(configJson, uidMap, warnings);
+
+  // 7. Parse NAT rulebase
+  const natRules = parseNatRulebase(configJson, uidMap, warnings);
+
+  // 8. Derive zones from gateway topology
+  const zones = deriveZones(configJson, uidMap, warnings);
+
+  // 9. Parse Gaia clish text for interfaces and static routes
+  const { interfaces: gaiaInterfaces, staticRoutes: gaiaRoutes } = parseGaiaClish(gaiaText, warnings);
+
+  // 10. Normalize interfaces
+  const normalizedInterfaces = gaiaInterfaces.map(iface => ({
+    name: iface.name,
+    ip: iface.ip,
+    zone: iface.zone || '',
+    vlan: iface.vlan || '',
+    type: iface.vlan ? 'vlan' : 'physical',
+    description: iface.description || '',
+    status: iface.status || 'up',
+    speed: '',
+  }));
+
+  // 11. Build intermediate config
+  const intermediateConfig = {
+    zones,
+    address_objects: addressObjects,
+    address_groups: addressGroups,
+    service_objects: serviceObjects,
+    service_groups: serviceGroups,
+    security_policies: securityPolicies,
+    nat_rules: natRules,
+    applications: [],
+    application_groups: [],
+    schedules: [],
+    security_profile_objects: [],
+    external_lists: [],
+    vpn_tunnels: [],
+    ha_config: null,
+    screen_config: [],
+    syslog_config: [],
+    dhcp_config: [],
+    qos_config: [],
+    interfaces: normalizedInterfaces,
+    routing_contexts: [{ name: 'default', type: 'default', virtual_routers: [], zones: [] }],
+    static_routes: gaiaRoutes,
+    target_context: null,
+    transparent_mode: false,
+    bridge_domains: [],
+    l2_interfaces: [],
+    vwire_pairs: [],
+    _checkpoint: {
+      uidMap: null, // don't include the full map, too large
+      layerCount: layerCount,
+      gatewayName: gatewayName || '',
+    },
+    metadata: {
+      source_vendor: 'checkpoint',
+      source_version: version,
+      export_date: new Date().toISOString(),
+      rule_count: securityPolicies.length,
+      nat_rule_count: natRules.length,
+      object_count: addressObjects.length + serviceObjects.length,
+      zone_count: zones.length,
+      interface_count: normalizedInterfaces.length,
+      vpn_tunnel_count: 0,
+      syslog_server_count: 0,
+      dhcp_config_count: 0,
+      qos_profile_count: 0,
+      routing_context_count: 1,
+      static_route_count: gaiaRoutes.length,
+      ha_enabled: false,
+      multi_vsys: false,
+    },
+  };
+
+  return {
+    intermediateConfig,
+    warnings,
+    parseStats: intermediateConfig.metadata,
+  };
+}
+
+
+// ---------------------------------------------------------------------------
+// JSON / Gaia Clish Splitter
+// ---------------------------------------------------------------------------
+
+/**
+ * Splits input text into a JSON portion and an optional Gaia clish text portion.
+ * Supports explicit "--- GAIA CLISH ---" markers, or auto-detects where JSON ends.
+ */
+function splitJsonAndGaia(configText, warnings) {
+  const trimmed = configText.trim();
+
+  // Check for explicit marker
+  const markerIndex = trimmed.indexOf('--- GAIA CLISH ---');
+  if (markerIndex !== -1) {
+    return {
+      jsonText: trimmed.substring(0, markerIndex).trim(),
+      gaiaText: trimmed.substring(markerIndex + '--- GAIA CLISH ---'.length).trim(),
+    };
+  }
+
+  // Try parsing as pure JSON first
+  try {
+    JSON.parse(trimmed);
+    return { jsonText: trimmed, gaiaText: '' };
+  } catch (_e) {
+    // Not pure JSON — find where JSON ends
+  }
+
+  // Find end of JSON object/array by tracking brace/bracket depth
+  const jsonEnd = findJsonEnd(trimmed);
+  if (jsonEnd > 0) {
+    const jsonPart = trimmed.substring(0, jsonEnd).trim();
+    const rest = trimmed.substring(jsonEnd).trim();
+
+    // Verify the JSON part is valid
+    try {
+      JSON.parse(jsonPart);
+      if (rest) {
+        warnings.push(createWarning('info', 'format',
+          'Detected Gaia clish text appended after JSON block',
+          'Interface and route data extracted from clish commands'));
+      }
+      return { jsonText: jsonPart, gaiaText: rest };
+    } catch (_e2) {
+      // Fall through — can't parse
+    }
+  }
+
+  // Last resort: return as-is and let JSON.parse fail with a useful error
+  return { jsonText: trimmed, gaiaText: '' };
+}
+
+/**
+ * Finds the index just past the end of the first complete JSON object or array.
+ * Tracks brace/bracket nesting, respects strings.
+ */
+function findJsonEnd(text) {
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+  let started = false;
+
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+
+    if (escape) {
+      escape = false;
+      continue;
+    }
+
+    if (ch === '\\' && inString) {
+      escape = true;
+      continue;
+    }
+
+    if (ch === '"' && !escape) {
+      inString = !inString;
+      continue;
+    }
+
+    if (inString) continue;
+
+    if (ch === '{' || ch === '[') {
+      depth++;
+      started = true;
+    } else if (ch === '}' || ch === ']') {
+      depth--;
+      if (depth === 0 && started) {
+        return i + 1;
+      }
+    }
+  }
+
+  return -1;
+}
+
+
+// ---------------------------------------------------------------------------
+// UID Map Builder
+// ---------------------------------------------------------------------------
+
+/**
+ * Builds a UID → object lookup map from all objects-dictionary arrays
+ * found anywhere in the config JSON.
+ */
+function buildUidMap(configJson, warnings) {
+  const uidMap = new Map();
+
+  // Collect objects-dictionary arrays from various locations
+  const dictionaries = [];
+
+  if (Array.isArray(configJson['objects-dictionary'])) {
+    dictionaries.push(configJson['objects-dictionary']);
+  }
+
+  // ShowPolicyPackage format may have "objects" at top level
+  if (Array.isArray(configJson['objects'])) {
+    dictionaries.push(configJson['objects']);
+  }
+
+  // May be nested in access-layers or other sub-structures
+  if (Array.isArray(configJson['access-layers'])) {
+    for (const layer of configJson['access-layers']) {
+      if (Array.isArray(layer['objects-dictionary'])) {
+        dictionaries.push(layer['objects-dictionary']);
+      }
+    }
+  }
+
+  // NAT rulebase may have its own objects-dictionary
+  if (configJson['nat-rulebase'] && Array.isArray(configJson['nat-rulebase']['objects-dictionary'])) {
+    dictionaries.push(configJson['nat-rulebase']['objects-dictionary']);
+  }
+
+  // Rulebase entries may embed objects-dictionary
+  if (Array.isArray(configJson['rulebase'])) {
+    collectNestedDictionaries(configJson['rulebase'], dictionaries);
+  }
+
+  // Populate the map
+  let duplicateCount = 0;
+  for (const dict of dictionaries) {
+    for (const obj of dict) {
+      if (!obj || !obj.uid) continue;
+      if (uidMap.has(obj.uid)) {
+        duplicateCount++;
+      }
+      uidMap.set(obj.uid, obj);
+    }
+  }
+
+  if (duplicateCount > 0) {
+    warnings.push(createWarning('info', 'uid-map',
+      `${duplicateCount} duplicate UID(s) encountered in objects-dictionary — last definition wins`,
+      'This is normal when multiple layers share objects'));
+  }
+
+  // Register well-known special UIDs by scanning for known names/types
+  registerSpecialObjects(uidMap);
+
+  const objectCount = uidMap.size;
+  if (objectCount === 0) {
+    warnings.push(createWarning('warning', 'objects-dictionary',
+      'No objects-dictionary found in the configuration — UID resolution will use raw UIDs',
+      'Ensure the export includes objects-dictionary (mgmt_cli --show-all or SmartConsole export)'));
+  }
+
+  return uidMap;
+}
+
+/**
+ * Recursively collects objects-dictionary arrays from nested structures.
+ */
+function collectNestedDictionaries(arr, dictionaries) {
+  if (!Array.isArray(arr)) return;
+  for (const item of arr) {
+    if (!item) continue;
+    if (Array.isArray(item['objects-dictionary'])) {
+      dictionaries.push(item['objects-dictionary']);
+    }
+    if (Array.isArray(item['rulebase'])) {
+      collectNestedDictionaries(item['rulebase'], dictionaries);
+    }
+  }
+}
+
+/**
+ * Registers well-known Check Point objects (Any, Accept, Drop, etc.) in the UID map
+ * so they can be resolved by UID when referenced in rules.
+ */
+function registerSpecialObjects(uidMap) {
+  for (const [uid, obj] of uidMap.entries()) {
+    if (!obj || !obj.name) continue;
+    const name = obj.name;
+    const type = obj.type || '';
+
+    // Tag special objects for easy identification during resolution
+    if (name === 'Any' || type === 'CpmiAnyObject') {
+      obj._special = 'any';
+    } else if (name === 'All_Internet') {
+      obj._special = 'any';
+    }
+
+    // Action objects
+    if (name === 'Accept' || name === 'Inner Layer') {
+      obj._action = 'allow';
+    } else if (name === 'Drop') {
+      obj._action = 'deny';
+    } else if (name === 'Reject') {
+      obj._action = 'deny';
+    }
+
+    // Track type objects
+    if (name === 'Log' || name === 'Alert') {
+      obj._track = true;
+    } else if (name === 'None') {
+      obj._track = false;
+    }
+  }
+}
+
+
+// ---------------------------------------------------------------------------
+// UID Resolution Helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolves a UID (string or { uid: "..." } object) to the corresponding object
+ * from the UID map. Returns the object or null.
+ */
+function resolveUid(uidOrObj, uidMap) {
+  if (!uidOrObj) return null;
+  const uid = typeof uidOrObj === 'string' ? uidOrObj : (uidOrObj.uid || null);
+  if (!uid) return null;
+  return uidMap.get(uid) || null;
+}
+
+/**
+ * Resolves a UID to its object name, or the raw UID if unresolved.
+ */
+function resolveUidToName(uidOrObj, uidMap, warnings, context) {
+  const obj = resolveUid(uidOrObj, uidMap);
+  if (obj) {
+    if (obj._special === 'any') return 'any';
+    return obj.name || extractUidString(uidOrObj);
+  }
+  const raw = extractUidString(uidOrObj);
+  if (raw && raw !== 'any') {
+    warnings.push(createWarning('warning', context || 'uid-resolve',
+      `Could not resolve UID "${raw}" — using UID as name`,
+      'Ensure objects-dictionary includes all referenced objects'));
+  }
+  return raw || 'any';
+}
+
+/**
+ * Extracts the UID string from either a plain string or { uid: "..." } object.
+ */
+function extractUidString(uidOrObj) {
+  if (!uidOrObj) return '';
+  if (typeof uidOrObj === 'string') return uidOrObj;
+  return uidOrObj.uid || '';
+}
+
+/**
+ * Resolves an array of UIDs (strings or objects) to an array of names.
+ * Filters out 'any' duplicates and collapses to ['any'] if all are 'any'.
+ */
+function resolveUidArray(uidArray, uidMap, warnings, context) {
+  if (!uidArray || !Array.isArray(uidArray) || uidArray.length === 0) return ['any'];
+
+  const names = [];
+  for (const uidOrObj of uidArray) {
+    const name = resolveUidToName(uidOrObj, uidMap, warnings, context);
+    if (name) names.push(name);
+  }
+
+  if (names.length === 0) return ['any'];
+
+  // If all resolved to 'any', collapse
+  const nonAny = names.filter(n => n !== 'any');
+  if (nonAny.length === 0) return ['any'];
+
+  return nonAny.length > 0 ? nonAny : ['any'];
+}
+
+/**
+ * Resolves a UID to an action string ('allow' or 'deny').
+ */
+function resolveAction(uidOrObj, uidMap) {
+  const obj = resolveUid(uidOrObj, uidMap);
+  if (obj) {
+    if (obj._action) return obj._action;
+    const name = (obj.name || '').toLowerCase();
+    if (name === 'accept' || name === 'inner layer') return 'allow';
+    if (name === 'drop' || name === 'reject') return 'deny';
+  }
+  // Check if the UID itself is a known action name
+  const raw = extractUidString(uidOrObj);
+  const rawLower = (raw || '').toLowerCase();
+  if (rawLower === 'accept' || rawLower.includes('accept')) return 'allow';
+  if (rawLower === 'drop' || rawLower === 'reject' || rawLower.includes('drop')) return 'deny';
+  return 'allow';
+}
+
+/**
+ * Resolves the track/log setting from a rule's track field.
+ * Returns true if logging is enabled (Log or Alert), false otherwise.
+ */
+function resolveTrack(trackField, uidMap) {
+  if (!trackField) return false;
+
+  // track may be { type: { uid: "..." } } or { type: "uid-string" }
+  // or directly a UID string
+  let trackTypeRef = trackField;
+  if (trackField.type) {
+    trackTypeRef = trackField.type;
+  }
+
+  const obj = resolveUid(trackTypeRef, uidMap);
+  if (obj) {
+    if (obj._track === true) return true;
+    if (obj._track === false) return false;
+    const name = (obj.name || '').toLowerCase();
+    if (name === 'log' || name === 'alert' || name === 'full log' || name === 'extended log') return true;
+    if (name === 'none') return false;
+  }
+
+  // Check raw string
+  const raw = extractUidString(trackTypeRef);
+  const rawLower = (raw || '').toLowerCase();
+  if (rawLower === 'log' || rawLower === 'alert') return true;
+  if (rawLower === 'none') return false;
+
+  return false;
+}
+
+/**
+ * Resolves service UIDs to service name strings (protocol/port or name).
+ */
+function resolveServiceArray(uidArray, uidMap, warnings) {
+  if (!uidArray || !Array.isArray(uidArray) || uidArray.length === 0) return ['any'];
+
+  const names = [];
+  for (const uidOrObj of uidArray) {
+    const obj = resolveUid(uidOrObj, uidMap);
+    if (obj) {
+      if (obj._special === 'any') {
+        names.push('any');
+        continue;
+      }
+      const svcName = formatServiceName(obj);
+      if (svcName) names.push(svcName);
+    } else {
+      const raw = extractUidString(uidOrObj);
+      if (raw) names.push(raw);
+    }
+  }
+
+  if (names.length === 0) return ['any'];
+  const nonAny = names.filter(n => n !== 'any');
+  if (nonAny.length === 0) return ['any'];
+  return nonAny;
+}
+
+/**
+ * Formats a service object into a name or protocol/port string.
+ */
+function formatServiceName(obj) {
+  if (!obj) return 'any';
+  const type = obj.type || '';
+  const name = obj.name || '';
+
+  // Any service
+  if (name === 'Any' || type === 'CpmiAnyObject') return 'any';
+
+  // For service objects, prefer the object name (will be resolved by service objects)
+  if (type.startsWith('service-')) return name;
+  if (type === 'group' || type === 'service-group') return name;
+
+  return name || 'any';
+}
+
+
+// ---------------------------------------------------------------------------
+// Version / Gateway Extraction
+// ---------------------------------------------------------------------------
+
+function extractVersion(configJson) {
+  // Check various locations for version info
+  if (configJson['api-server-version']) return configJson['api-server-version'];
+  if (configJson['current-session'] && configJson['current-session']['api-server-version']) {
+    return configJson['current-session']['api-server-version'];
+  }
+  // Check in gateways
+  if (Array.isArray(configJson['gateways'])) {
+    for (const gw of configJson['gateways']) {
+      if (gw['version']) return gw['version'];
+      if (gw['os-name']) return gw['os-name'];
+    }
+  }
+  return '';
+}
+
+function extractGatewayName(configJson) {
+  if (configJson['name']) return configJson['name'];
+  if (Array.isArray(configJson['gateways']) && configJson['gateways'].length > 0) {
+    return configJson['gateways'][0].name || '';
+  }
+  if (configJson['gateway'] && configJson['gateway'].name) {
+    return configJson['gateway'].name;
+  }
+  return '';
+}
+
+
+// ---------------------------------------------------------------------------
+// Address Object Parser
+// ---------------------------------------------------------------------------
+
+function parseAddressObjects(uidMap, warnings) {
+  const addressObjects = [];
+
+  for (const [_uid, obj] of uidMap) {
+    if (!obj || !obj.type) continue;
+    const type = obj.type;
+    const name = obj.name || '';
+
+    // Skip special/any objects
+    if (obj._special === 'any') continue;
+    if (!name || name === 'Any' || name === 'All_Internet') continue;
+
+    if (type === 'host') {
+      const ip = obj['ipv4-address'] || obj['ipv6-address'] || '';
+      if (!ip) continue;
+      addressObjects.push({
+        name: sanitizeJunosName(name),
+        type: 'host',
+        value: ip.includes(':') ? ip : `${ip}/32`,
+        description: obj.comments || '',
+        tags: obj.tags ? resolveTagNames(obj.tags, uidMap) : [],
+      });
+    } else if (type === 'network') {
+      const subnet = obj['subnet4'] || obj['subnet6'] || '';
+      const maskLen = obj['mask-length4'] || obj['mask-length6'] || obj['mask-length'] || '';
+      if (!subnet) continue;
+      addressObjects.push({
+        name: sanitizeJunosName(name),
+        type: 'subnet',
+        value: `${subnet}/${maskLen}`,
+        description: obj.comments || '',
+        tags: obj.tags ? resolveTagNames(obj.tags, uidMap) : [],
+      });
+    } else if (type === 'address-range') {
+      const first = obj['ipv4-address-first'] || obj['ipv6-address-first'] || '';
+      const last = obj['ipv4-address-last'] || obj['ipv6-address-last'] || '';
+      if (!first || !last) continue;
+      addressObjects.push({
+        name: sanitizeJunosName(name),
+        type: 'range',
+        value: `${first}-${last}`,
+        description: obj.comments || '',
+        tags: obj.tags ? resolveTagNames(obj.tags, uidMap) : [],
+      });
+    } else if (type === 'dns-domain') {
+      // DNS domain names in Check Point start with "." (e.g. ".example.com")
+      const domain = name.startsWith('.') ? name.substring(1) : name;
+      addressObjects.push({
+        name: sanitizeJunosName(name.replace(/^\./, '')),
+        type: 'fqdn',
+        value: domain,
+        description: obj.comments || '',
+        tags: obj.tags ? resolveTagNames(obj.tags, uidMap) : [],
+      });
+      warnings.push(createWarning('info', `address/${name}`,
+        `FQDN/dns-domain "${name}" → SRX dns-name requires SRX 12.1+ and DNS resolution at commit time`,
+        'Verify SRX version supports dns-name, or replace with static IP'));
+    }
+  }
+
+  return addressObjects;
+}
+
+/**
+ * Resolves tag UIDs or objects to tag name strings.
+ */
+function resolveTagNames(tags, uidMap) {
+  if (!tags || !Array.isArray(tags)) return [];
+  return tags.map(t => {
+    if (typeof t === 'string') {
+      const obj = uidMap.get(t);
+      return obj ? (obj.name || t) : t;
+    }
+    if (t && t.name) return t.name;
+    if (t && t.uid) {
+      const obj = uidMap.get(t.uid);
+      return obj ? (obj.name || t.uid) : t.uid;
+    }
+    return '';
+  }).filter(Boolean);
+}
+
+
+// ---------------------------------------------------------------------------
+// Address Group Parser
+// ---------------------------------------------------------------------------
+
+function parseAddressGroups(uidMap, warnings) {
+  const addressGroups = [];
+
+  for (const [_uid, obj] of uidMap) {
+    if (!obj || !obj.type) continue;
+    const type = obj.type;
+    const name = obj.name || '';
+
+    if (type === 'group' && Array.isArray(obj.members)) {
+      // Standard group — resolve member UIDs to names
+      const members = obj.members.map(m => {
+        const memberObj = resolveUid(m, uidMap);
+        if (memberObj) {
+          if (memberObj._special === 'any') return 'any';
+          return memberObj.name || extractUidString(m);
+        }
+        return extractUidString(m);
+      }).filter(Boolean);
+
+      // Only include if it looks like a network/address group (not service group)
+      // Heuristic: check first resolved member's type
+      const firstMemberUid = obj.members[0];
+      const firstMember = resolveUid(firstMemberUid, uidMap);
+      if (firstMember && isServiceType(firstMember.type)) continue;
+
+      addressGroups.push({
+        name: sanitizeJunosName(name),
+        members: members.map(m => sanitizeJunosName(m)),
+        description: obj.comments || '',
+        tags: obj.tags ? resolveTagNames(obj.tags, uidMap) : [],
+      });
+    } else if (type === 'group-with-exclusion') {
+      // Use the "include" group, warn about excluded members
+      const includeRef = obj.include || obj['include'];
+      const exceptRef = obj.except || obj['except'];
+
+      const includeObj = resolveUid(includeRef, uidMap);
+      let members = [];
+      if (includeObj && Array.isArray(includeObj.members)) {
+        members = includeObj.members.map(m => {
+          const memberObj = resolveUid(m, uidMap);
+          return memberObj ? (memberObj.name || extractUidString(m)) : extractUidString(m);
+        }).filter(Boolean);
+      } else if (includeObj) {
+        members = [includeObj.name || extractUidString(includeRef)];
+      }
+
+      const exceptName = exceptRef
+        ? (resolveUid(exceptRef, uidMap)?.name || extractUidString(exceptRef))
+        : 'unknown';
+
+      addressGroups.push({
+        name: sanitizeJunosName(name),
+        members: members.map(m => sanitizeJunosName(m)),
+        description: obj.comments || `Exclusion group (excludes: ${exceptName})`,
+        tags: obj.tags ? resolveTagNames(obj.tags, uidMap) : [],
+      });
+
+      warnings.push(createWarning('warning', `address-group/${name}`,
+        `Group-with-exclusion "${name}" — exclusion of "${exceptName}" cannot be represented in SRX address-book`,
+        'Manually remove excluded addresses from the group, or use address-set with negate in policy'));
+    }
+  }
+
+  return addressGroups;
+}
+
+/**
+ * Checks whether a Check Point object type is a service type.
+ */
+function isServiceType(type) {
+  if (!type) return false;
+  return type.startsWith('service-') || type === 'service-group';
+}
+
+
+// ---------------------------------------------------------------------------
+// Service Object Parser
+// ---------------------------------------------------------------------------
+
+function parseServiceObjects(uidMap, warnings) {
+  const serviceObjects = [];
+
+  for (const [_uid, obj] of uidMap) {
+    if (!obj || !obj.type) continue;
+    const type = obj.type;
+    const name = obj.name || '';
+
+    // Skip special/any
+    if (obj._special === 'any') continue;
+    if (!name || name === 'Any') continue;
+
+    if (type === 'service-tcp') {
+      serviceObjects.push({
+        name: sanitizeJunosName(name),
+        protocol: 'tcp',
+        port_range: normalizePort(obj.port),
+        source_port: normalizePort(obj['source-port']) || '',
+        description: obj.comments || '',
+      });
+    } else if (type === 'service-udp') {
+      serviceObjects.push({
+        name: sanitizeJunosName(name),
+        protocol: 'udp',
+        port_range: normalizePort(obj.port),
+        source_port: normalizePort(obj['source-port']) || '',
+        description: obj.comments || '',
+      });
+    } else if (type === 'service-icmp' || type === 'service-icmp6') {
+      const proto = type === 'service-icmp' ? 'icmp' : 'icmp6';
+      const icmpType = obj['icmp-type'] !== undefined ? String(obj['icmp-type']) : '';
+      const icmpCode = obj['icmp-code'] !== undefined ? String(obj['icmp-code']) : '';
+      let portRange = 'any';
+      if (icmpType) {
+        portRange = icmpCode ? `${icmpType}/${icmpCode}` : icmpType;
+      }
+      serviceObjects.push({
+        name: sanitizeJunosName(name),
+        protocol: proto,
+        port_range: portRange,
+        source_port: '',
+        description: obj.comments || '',
+      });
+    } else if (type === 'service-other') {
+      // Map IP protocol number
+      const ipProto = obj['ip-protocol'] !== undefined ? String(obj['ip-protocol']) : '';
+      const protoName = mapIpProtocolNumber(ipProto);
+      serviceObjects.push({
+        name: sanitizeJunosName(name),
+        protocol: protoName,
+        port_range: 'any',
+        source_port: '',
+        description: obj.comments || '',
+      });
+    }
+  }
+
+  return serviceObjects;
+}
+
+/**
+ * Normalizes a Check Point port field.
+ * Can be a string like "80", "8000-8100", ">1024", or a number.
+ * Returns the string as-is (pass-through) or "any" for empty/missing.
+ */
+function normalizePort(port) {
+  if (port === undefined || port === null || port === '') return 'any';
+  return String(port);
+}
+
+/**
+ * Maps an IP protocol number to a name.
+ */
+function mapIpProtocolNumber(protoNum) {
+  const map = {
+    '1': 'icmp', '6': 'tcp', '17': 'udp', '47': 'gre',
+    '50': 'esp', '51': 'ah', '89': 'ospf', '132': 'sctp',
+  };
+  return map[String(protoNum)] || `ip-proto-${protoNum}`;
+}
+
+
+// ---------------------------------------------------------------------------
+// Service Group Parser
+// ---------------------------------------------------------------------------
+
+function parseServiceGroups(uidMap, warnings) {
+  const serviceGroups = [];
+
+  for (const [_uid, obj] of uidMap) {
+    if (!obj || !obj.type) continue;
+
+    // Check Point uses both "service-group" and "group" types for service groups.
+    // For "group" type, we need to verify members are services.
+    if (obj.type === 'service-group' ||
+        (obj.type === 'group' && Array.isArray(obj.members) && isServiceGroup(obj, uidMap))) {
+      const name = obj.name || '';
+      if (!name || name === 'Any') continue;
+
+      const members = (obj.members || []).map(m => {
+        const memberObj = resolveUid(m, uidMap);
+        if (memberObj) {
+          return sanitizeJunosName(memberObj.name || extractUidString(m));
+        }
+        return sanitizeJunosName(extractUidString(m));
+      }).filter(Boolean);
+
+      serviceGroups.push({
+        name: sanitizeJunosName(name),
+        members,
+        description: obj.comments || '',
+      });
+    }
+  }
+
+  return serviceGroups;
+}
+
+/**
+ * Heuristic check: is this "group" actually a service group?
+ * Checks the type of the first resolvable member.
+ */
+function isServiceGroup(obj, uidMap) {
+  if (!Array.isArray(obj.members) || obj.members.length === 0) return false;
+  for (const m of obj.members) {
+    const member = resolveUid(m, uidMap);
+    if (member && member.type) {
+      return isServiceType(member.type);
+    }
+  }
+  return false;
+}
+
+
+// ---------------------------------------------------------------------------
+// Rulebase Parser
+// ---------------------------------------------------------------------------
+
+/**
+ * Parses the access rulebase from the config JSON.
+ * Handles flattening of access-sections and inline layers.
+ *
+ * @returns {{ policies: Object[], layerCount: number }}
+ */
+function parseRulebase(configJson, uidMap, warnings) {
+  const policies = [];
+  let ruleIndex = 1;
+  let layerCount = 0;
+
+  // Collect all rulebases to process
+  const rulebases = [];
+
+  // Format 1: top-level "rulebase" array
+  if (Array.isArray(configJson['rulebase'])) {
+    rulebases.push({ rules: configJson['rulebase'], layerName: 'default' });
+    layerCount++;
+  }
+
+  // Format 2: nested in "access-layers"
+  if (Array.isArray(configJson['access-layers'])) {
+    for (const layer of configJson['access-layers']) {
+      if (Array.isArray(layer['rulebase'])) {
+        const layerName = layer.name || layer.uid || `layer-${layerCount + 1}`;
+        rulebases.push({ rules: layer['rulebase'], layerName });
+        layerCount++;
+      }
+    }
+  }
+
+  // Format: top-level may be the rulebase response directly
+  if (rulebases.length === 0 && configJson['total'] !== undefined && Array.isArray(configJson['rulebase'])) {
+    rulebases.push({ rules: configJson['rulebase'], layerName: 'default' });
+    layerCount = 1;
+  }
+
+  // Process each rulebase
+  for (const { rules, layerName } of rulebases) {
+    const flatRules = flattenRulebase(rules, uidMap, layerName, '', warnings);
+    for (const rule of flatRules) {
+      const policy = buildPolicyFromRule(rule, uidMap, ruleIndex, layerName, warnings);
+      if (policy) {
+        policies.push(policy);
+        ruleIndex++;
+      }
+    }
+  }
+
+  if (policies.length === 0 && layerCount === 0) {
+    warnings.push(createWarning('warning', 'rulebase',
+      'No access rulebase found in configuration',
+      'Ensure the export includes the access policy rulebase (show-access-rulebase)'));
+  }
+
+  return { policies, layerCount: layerCount || 1 };
+}
+
+/**
+ * Recursively flattens a rulebase, expanding access-section containers
+ * and inline-layer references.
+ *
+ * @returns {Object[]} - Flat array of access-rule objects
+ */
+function flattenRulebase(rules, uidMap, layerName, sectionName, warnings) {
+  const flat = [];
+
+  for (const item of rules) {
+    if (!item) continue;
+    const type = item.type || '';
+
+    if (type === 'access-section') {
+      // Section container — recurse into nested rulebase
+      const nestedName = item.name || sectionName;
+      if (Array.isArray(item.rulebase)) {
+        const nested = flattenRulebase(item.rulebase, uidMap, layerName, nestedName, warnings);
+        flat.push(...nested);
+      }
+    } else if (type === 'access-rule') {
+      // Attach section name for metadata
+      item._sectionName = sectionName;
+      item._layerName = layerName;
+      flat.push(item);
+
+      // Check for inline-layer and recurse if found
+      if (item['inline-layer']) {
+        const inlineLayerRef = item['inline-layer'];
+        const inlineObj = resolveUid(inlineLayerRef, uidMap);
+        if (inlineObj && Array.isArray(inlineObj.rulebase)) {
+          const inlineFlat = flattenRulebase(inlineObj.rulebase, uidMap, inlineObj.name || layerName, sectionName, warnings);
+          flat.push(...inlineFlat);
+        }
+      }
+    } else if (type === 'place-holder') {
+      // Skip placeholder rules
+    } else {
+      // Unknown type — might be a section or rule variant
+      if (Array.isArray(item.rulebase)) {
+        const nested = flattenRulebase(item.rulebase, uidMap, layerName, item.name || sectionName, warnings);
+        flat.push(...nested);
+      }
+    }
+  }
+
+  return flat;
+}
+
+/**
+ * Builds a security policy from a flattened access-rule.
+ */
+function buildPolicyFromRule(rule, uidMap, ruleIndex, layerName, warnings) {
+  if (!rule) return null;
+
+  const ruleUid = rule.uid || '';
+  const ruleName = rule.name || `Rule-${ruleIndex}`;
+  const ruleNumber = rule['rule-number'] || rule['position'] || ruleIndex;
+  const enabled = rule.enabled !== false; // default to enabled
+  const comments = rule.comments || rule.comment || '';
+  const sectionName = rule._sectionName || '';
+
+  // Resolve source and destination addresses
+  const srcAddrs = resolveUidArray(rule.source, uidMap, warnings, `rule/${ruleName}/source`);
+  const dstAddrs = resolveUidArray(rule.destination, uidMap, warnings, `rule/${ruleName}/destination`);
+
+  // Resolve services
+  const serviceNames = resolveServiceArray(rule.service, uidMap, warnings);
+
+  // Resolve action
+  const action = resolveAction(rule.action, uidMap);
+
+  // Resolve track/log
+  const logEnabled = resolveTrack(rule.track, uidMap);
+
+  // Resolve install-on
+  const installOnNames = resolveInstallOn(rule['install-on'], uidMap);
+
+  // Negation flags
+  const negateSource = rule['source-negate'] === true;
+  const negateDest = rule['destination-negate'] === true;
+
+  // Derive zones (Check Point doesn't have traditional zones — use defaults)
+  // Zone derivation is done at the config level, not per-rule
+  const srcZones = [];
+  const dstZones = [];
+
+  return {
+    name: sanitizeJunosName(ruleName),
+    src_zones: srcZones,
+    dst_zones: dstZones,
+    src_addresses: srcAddrs.map(a => a === 'any' ? 'any' : sanitizeJunosName(a)),
+    dst_addresses: dstAddrs.map(a => a === 'any' ? 'any' : sanitizeJunosName(a)),
+    negate_source: negateSource,
+    negate_destination: negateDest,
+    applications: [],  // Check Point doesn't have app-id in traditional rules
+    services: serviceNames.map(s => s === 'any' ? 'any' : sanitizeJunosName(s)),
+    action,
+    log_start: false,
+    log_end: logEnabled,
+    profile_group: '',
+    security_profiles: {},
+    description: comments,
+    tags: [],
+    disabled: !enabled,
+    schedule: '',
+    _rule_index: ruleIndex,
+    _checkpoint: {
+      uid: ruleUid,
+      layer: layerName,
+      ruleNumber,
+      installOn: installOnNames,
+      section: sectionName,
+    },
+  };
+}
+
+/**
+ * Resolves install-on UIDs to object names.
+ */
+function resolveInstallOn(installOn, uidMap) {
+  if (!installOn || !Array.isArray(installOn)) return [];
+  return installOn.map(uidOrObj => {
+    const obj = resolveUid(uidOrObj, uidMap);
+    if (obj) {
+      if (obj._special === 'any' || obj.name === 'Policy Targets') return 'all';
+      return obj.name || extractUidString(uidOrObj);
+    }
+    return extractUidString(uidOrObj);
+  }).filter(Boolean);
+}
+
+
+// ---------------------------------------------------------------------------
+// NAT Rulebase Parser
+// ---------------------------------------------------------------------------
+
+function parseNatRulebase(configJson, uidMap, warnings) {
+  const natRules = [];
+  let ruleIndex = 1;
+
+  // Look for NAT rulebase in various locations
+  const natRulebases = [];
+
+  if (configJson['nat-rulebase']) {
+    const natRb = configJson['nat-rulebase'];
+    if (Array.isArray(natRb.rulebase)) {
+      natRulebases.push(natRb.rulebase);
+    } else if (Array.isArray(natRb)) {
+      natRulebases.push(natRb);
+    }
+  }
+  if (Array.isArray(configJson['nat-rules'])) {
+    natRulebases.push(configJson['nat-rules']);
+  }
+
+  for (const rulebase of natRulebases) {
+    const flatRules = flattenNatRulebase(rulebase);
+    for (const rule of flatRules) {
+      const natRule = buildNatRule(rule, uidMap, ruleIndex, warnings);
+      if (natRule) {
+        natRules.push(natRule);
+        ruleIndex++;
+      }
+    }
+  }
+
+  if (natRules.length > 0) {
+    warnings.push(createWarning('info', 'nat',
+      `Parsed ${natRules.length} NAT rule(s) from Check Point config`,
+      'Review NAT translations for SRX source/destination NAT compatibility'));
+  }
+
+  return natRules;
+}
+
+/**
+ * Flattens NAT rulebase (may have nested sections like access rulebase).
+ */
+function flattenNatRulebase(rules) {
+  if (!Array.isArray(rules)) return [];
+  const flat = [];
+  for (const item of rules) {
+    if (!item) continue;
+    if (item.type === 'nat-section' && Array.isArray(item.rulebase)) {
+      flat.push(...flattenNatRulebase(item.rulebase));
+    } else if (item.type === 'nat-rule') {
+      flat.push(item);
+    } else if (Array.isArray(item.rulebase)) {
+      flat.push(...flattenNatRulebase(item.rulebase));
+    } else {
+      // Treat as a nat-rule if it has source/destination fields
+      if (item['original-source'] || item['original-destination']) {
+        flat.push(item);
+      }
+    }
+  }
+  return flat;
+}
+
+/**
+ * Builds a NAT rule from a Check Point nat-rule object.
+ */
+function buildNatRule(rule, uidMap, ruleIndex, warnings) {
+  if (!rule) return null;
+
+  const origSrc = resolveUidToName(rule['original-source'], uidMap, warnings, 'nat/orig-src');
+  const origDst = resolveUidToName(rule['original-destination'], uidMap, warnings, 'nat/orig-dst');
+  const origSvc = resolveUidToName(rule['original-service'], uidMap, warnings, 'nat/orig-svc');
+  const transSrc = resolveUidToName(rule['translated-source'], uidMap, warnings, 'nat/trans-src');
+  const transDst = resolveUidToName(rule['translated-destination'], uidMap, warnings, 'nat/trans-dst');
+  const transSvc = resolveUidToName(rule['translated-service'], uidMap, warnings, 'nat/trans-svc');
+
+  // Determine NAT type from method field
+  const method = (rule.method || '').toLowerCase();
+  let type = 'source';
+  if (method === 'static') {
+    type = 'static';
+  } else if (method === 'hide') {
+    type = 'source';
+  }
+  // If translated-destination differs from original, it's destination NAT
+  if (transDst !== origDst && transDst !== 'any' && origDst !== transDst) {
+    if (type === 'source' && method !== 'hide') {
+      type = 'destination';
+    }
+  }
+
+  // Build translated_src
+  let translated_src = null;
+  if (transSrc && transSrc !== 'any' && transSrc !== origSrc) {
+    if (method === 'static') {
+      translated_src = { type: 'static', address: transSrc, addresses: [transSrc] };
+    } else {
+      translated_src = { type: 'dynamic-ip-pool', addresses: [transSrc] };
+    }
+  }
+
+  return {
+    name: sanitizeJunosName(rule.name || `NAT-${ruleIndex}`),
+    type,
+    src_zones: [],
+    dst_zones: [],
+    src_addresses: [origSrc === 'any' ? 'any' : sanitizeJunosName(origSrc)],
+    dst_addresses: [origDst === 'any' ? 'any' : sanitizeJunosName(origDst)],
+    translated_src,
+    translated_dst: (transDst && transDst !== 'any' && transDst !== origDst)
+      ? sanitizeJunosName(transDst) : null,
+    translated_port: (transSvc && transSvc !== 'any' && transSvc !== origSvc)
+      ? sanitizeJunosName(transSvc) : null,
+    description: rule.comments || `NAT rule ${ruleIndex}`,
+    _rule_index: ruleIndex,
+  };
+}
+
+
+// ---------------------------------------------------------------------------
+// Zone Derivation
+// ---------------------------------------------------------------------------
+
+/**
+ * Derives zones from gateway topology data.
+ *
+ * Check Point doesn't have traditional firewall zones. We derive them from:
+ * 1. Object topology (external/internal markers)
+ * 2. Specific zone names set on objects
+ * 3. Gateway interface topology
+ *
+ * Falls back to a default "checkpoint" zone if no topology data is available.
+ */
+function deriveZones(configJson, uidMap, warnings) {
+  const zones = [];
+  const zoneMap = {}; // zoneName → { interfaces: [], description }
+
+  // Check for gateway topology data
+  const gateways = configJson['gateways'] || [];
+  if (Array.isArray(gateways)) {
+    for (const gw of gateways) {
+      if (!gw) continue;
+
+      // Check interfaces within gateway
+      const interfaces = gw.interfaces || gw['topology'] || [];
+      if (Array.isArray(interfaces)) {
+        for (const iface of interfaces) {
+          if (!iface) continue;
+
+          const ifaceName = iface.name || '';
+          let zoneName = '';
+
+          // Check for specific zone set on the object
+          if (iface['specific-zone']) {
+            const zoneObj = resolveUid(iface['specific-zone'], uidMap);
+            zoneName = zoneObj ? zoneObj.name : extractUidString(iface['specific-zone']);
+          } else if (iface['topology']) {
+            const topo = (typeof iface['topology'] === 'string')
+              ? iface['topology']
+              : (iface['topology'].name || '');
+
+            if (topo.toLowerCase() === 'external') {
+              zoneName = 'untrust';
+            } else if (topo.toLowerCase() === 'internal') {
+              zoneName = 'trust';
+            } else {
+              zoneName = sanitizeJunosName(topo || 'checkpoint');
+            }
+          }
+
+          if (zoneName) {
+            if (!zoneMap[zoneName]) {
+              zoneMap[zoneName] = { interfaces: [], description: '' };
+            }
+            if (ifaceName) {
+              zoneMap[zoneName].interfaces.push(ifaceName);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // Scan UID map for objects with topology or zone info
+  for (const [_uid, obj] of uidMap) {
+    if (!obj) continue;
+
+    // Simple gateway/interface objects may have topology
+    if (obj['topology'] && obj.name) {
+      const topo = typeof obj['topology'] === 'string' ? obj['topology'] : (obj['topology'].name || '');
+      let zoneName = '';
+      if (topo.toLowerCase() === 'external') zoneName = 'untrust';
+      else if (topo.toLowerCase() === 'internal') zoneName = 'trust';
+
+      if (zoneName && !zoneMap[zoneName]) {
+        zoneMap[zoneName] = { interfaces: [], description: `Derived from topology: ${topo}` };
+      }
+    }
+  }
+
+  // Convert zoneMap to zones array
+  for (const [name, data] of Object.entries(zoneMap)) {
+    zones.push({
+      name: sanitizeJunosName(name),
+      description: data.description || `Check Point topology zone: ${name}`,
+      interfaces: data.interfaces,
+    });
+  }
+
+  // If no zones were derived, create a default zone
+  if (zones.length === 0) {
+    zones.push({
+      name: 'checkpoint',
+      description: 'Default zone — Check Point does not use traditional zones',
+      interfaces: [],
+    });
+    warnings.push(createWarning('info', 'zones',
+      'No topology or zone data found — created default "checkpoint" zone',
+      'Assign zones manually in the Zone Editor based on your network topology'));
+  }
+
+  return zones;
+}
+
+
+// ---------------------------------------------------------------------------
+// Gaia Clish Text Parser
+// ---------------------------------------------------------------------------
+
+/**
+ * Parses Gaia clish text for interface and static route definitions.
+ *
+ * Expected formats:
+ *   set interface eth0 ipv4-address 10.0.0.1 mask-length 24
+ *   set interface eth0 state on
+ *   set interface eth0 comments "LAN interface"
+ *   set static-route 0.0.0.0/0 nexthop gateway address 10.0.0.254 on
+ *   set static-route 10.1.0.0/16 nexthop gateway address 10.0.0.1 on
+ */
+function parseGaiaClish(gaiaText, warnings) {
+  const interfaces = [];
+  const staticRoutes = [];
+
+  if (!gaiaText || !gaiaText.trim()) {
+    return { interfaces, staticRoutes };
+  }
+
+  const lines = gaiaText.split('\n').map(l => l.trim()).filter(l => l);
+  const ifaceMap = {}; // ifaceName → { ip, maskLen, state, comments, vlan }
+
+  for (const line of lines) {
+    // Interface commands
+    const ifaceMatch = line.match(
+      /^set\s+interface\s+(\S+)\s+ipv4-address\s+(\S+)\s+mask-length\s+(\d+)/
+    );
+    if (ifaceMatch) {
+      const [, name, ip, maskLen] = ifaceMatch;
+      if (!ifaceMap[name]) ifaceMap[name] = { name, ip: '', zone: '', vlan: '', description: '', status: 'up' };
+      ifaceMap[name].ip = `${ip}/${maskLen}`;
+      continue;
+    }
+
+    const stateMatch = line.match(/^set\s+interface\s+(\S+)\s+state\s+(on|off)/);
+    if (stateMatch) {
+      const [, name, state] = stateMatch;
+      if (!ifaceMap[name]) ifaceMap[name] = { name, ip: '', zone: '', vlan: '', description: '', status: 'up' };
+      ifaceMap[name].status = state === 'on' ? 'up' : 'shutdown';
+      continue;
+    }
+
+    const commentMatch = line.match(/^set\s+interface\s+(\S+)\s+comments?\s+"?([^"]*)"?/);
+    if (commentMatch) {
+      const [, name, comment] = commentMatch;
+      if (!ifaceMap[name]) ifaceMap[name] = { name, ip: '', zone: '', vlan: '', description: '', status: 'up' };
+      ifaceMap[name].description = comment;
+      continue;
+    }
+
+    // VLAN interface
+    const vlanMatch = line.match(/^set\s+interface\s+(\S+)\.(\d+)\s+/);
+    if (vlanMatch) {
+      const fullName = `${vlanMatch[1]}.${vlanMatch[2]}`;
+      if (!ifaceMap[fullName]) ifaceMap[fullName] = { name: fullName, ip: '', zone: '', vlan: vlanMatch[2], description: '', status: 'up' };
+      // Re-parse for IP if present
+      const vlanIpMatch = line.match(
+        /^set\s+interface\s+\S+\s+ipv4-address\s+(\S+)\s+mask-length\s+(\d+)/
+      );
+      if (vlanIpMatch) {
+        ifaceMap[fullName].ip = `${vlanIpMatch[1]}/${vlanIpMatch[2]}`;
+      }
+      continue;
+    }
+
+    // Static routes: set static-route <prefix/len> nexthop gateway address <gw> on
+    const routeMatch = line.match(
+      /^set\s+static-route\s+(\S+)\s+nexthop\s+gateway\s+address\s+(\S+)\s+(on|off)/
+    );
+    if (routeMatch) {
+      const [, destination, gateway, state] = routeMatch;
+      if (state === 'on') {
+        staticRoutes.push({
+          name: `gaia-route-${staticRoutes.length + 1}`,
+          destination,
+          next_hop: gateway,
+          next_hop_type: 'ip-address',
+          interface: '',
+          metric: 0,
+          admin_distance: 0,
+          description: '',
+          vrf: '',
+          routing_context: '',
+        });
+      }
+      continue;
+    }
+
+    // Static routes with interface: set static-route <prefix/len> nexthop gateway logical <iface> on
+    const routeIfMatch = line.match(
+      /^set\s+static-route\s+(\S+)\s+nexthop\s+gateway\s+logical\s+(\S+)\s+(on|off)/
+    );
+    if (routeIfMatch) {
+      const [, destination, iface, state] = routeIfMatch;
+      if (state === 'on') {
+        staticRoutes.push({
+          name: `gaia-route-${staticRoutes.length + 1}`,
+          destination,
+          next_hop: '',
+          next_hop_type: 'interface',
+          interface: iface,
+          metric: 0,
+          admin_distance: 0,
+          description: '',
+          vrf: '',
+          routing_context: '',
+        });
+      }
+      continue;
+    }
+  }
+
+  // Convert ifaceMap to array (only interfaces with IP addresses)
+  for (const [name, iface] of Object.entries(ifaceMap)) {
+    if (iface.ip) {
+      interfaces.push(iface);
+    }
+  }
+
+  if (interfaces.length > 0 || staticRoutes.length > 0) {
+    warnings.push(createWarning('info', 'gaia-clish',
+      `Parsed ${interfaces.length} interface(s) and ${staticRoutes.length} static route(s) from Gaia clish text`,
+      'Interface and routing data extracted from Gaia clish configuration'));
+  }
+
+  return { interfaces, staticRoutes };
+}

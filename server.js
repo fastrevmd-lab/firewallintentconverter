@@ -17,6 +17,9 @@ import { parsePanosConfig } from './src/parsers/panos-parser.js';
 import { parseSrxConfig } from './src/parsers/srx-parser.js';
 import { parseFortigateConfig } from './src/parsers/fortigate-parser.js';
 import { parseCiscoAsaConfig } from './src/parsers/cisco-asa-parser.js';
+import { parseCheckPointConfig } from './src/parsers/checkpoint-parser.js';
+import { parseSonicWallConfig } from './src/parsers/sonicwall-parser.js';
+import { parseHuaweiConfig } from './src/parsers/huawei-parser.js';
 import { detectVendor } from './src/parsers/parser-utils.js';
 import { convertToSrxSetCommands } from './src/converters/srx-converter.js';
 import { buildSrxXml } from './src/converters/srx-xml-builder.js';
@@ -59,6 +62,12 @@ app.post('/api/parse', (req, res) => {
       result = parseFortigateConfig(configText);
     } else if (detection.vendor === 'cisco_asa') {
       result = parseCiscoAsaConfig(configText);
+    } else if (detection.vendor === 'checkpoint') {
+      result = parseCheckPointConfig(configText);
+    } else if (detection.vendor === 'sonicwall') {
+      result = parseSonicWallConfig(configText);
+    } else if (detection.vendor === 'huawei_usg') {
+      result = parseHuaweiConfig(configText);
     } else {
       result = parsePanosConfig(configText);
     }

@@ -642,6 +642,41 @@ export function detectVendor(configText) {
     return { vendor: 'srx', format: 'set', confidence: 0.7 };
   }
 
+  // Check Point R80+: JSON with objects-dictionary + rulebase
+  try {
+    if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+      const probe = trimmed.slice(0, 2000);
+      if (probe.includes('"objects-dictionary"') && probe.includes('"rulebase"')) {
+        return { vendor: 'checkpoint', format: 'json', confidence: 0.95 };
+      }
+      if (probe.includes('"access-section"') || probe.includes('"access-rule"')) {
+        return { vendor: 'checkpoint', format: 'json', confidence: 0.90 };
+      }
+      if (probe.includes('"access_rules"') && probe.includes('"address_objects"')) {
+        return { vendor: 'sonicwall', format: 'json', confidence: 0.95 };
+      }
+      if (probe.includes('"zones"') && probe.includes('"address_objects"') && probe.includes('"ipv4"')) {
+        return { vendor: 'sonicwall', format: 'json', confidence: 0.90 };
+      }
+    }
+  } catch (e) { /* not JSON — continue */ }
+
+  // SonicWall CLI: address-object + access-rule keywords
+  if (trimmed.includes('address-object ipv4') && trimmed.includes('access-rule ipv4')) {
+    return { vendor: 'sonicwall', format: 'text', confidence: 0.90 };
+  }
+
+  // Huawei USG VRP: security-policy + firewall zone
+  if (trimmed.includes('security-policy') && trimmed.includes('firewall zone')) {
+    return { vendor: 'huawei_usg', format: 'text', confidence: 0.95 };
+  }
+  if (trimmed.includes('sysname') && trimmed.includes('firewall zone')) {
+    return { vendor: 'huawei_usg', format: 'text', confidence: 0.90 };
+  }
+  if (trimmed.includes('ip address-set') && trimmed.includes('type object')) {
+    return { vendor: 'huawei_usg', format: 'text', confidence: 0.85 };
+  }
+
   // Default: assume PAN-OS XML if it looks like XML
   if (trimmed.startsWith('<')) {
     return { vendor: 'panos', format: 'xml', confidence: 0.5 };

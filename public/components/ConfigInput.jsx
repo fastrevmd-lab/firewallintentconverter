@@ -66,6 +66,9 @@ export default function ConfigInput({
           <option value="panos">PAN-OS</option>
           <option value="fortigate">FortiGate</option>
           <option value="cisco_asa">Cisco ASA/FTD</option>
+          <option value="checkpoint">Check Point R80+</option>
+          <option value="sonicwall">SonicWall SonicOS</option>
+          <option value="huawei_usg">Huawei USG</option>
         </select>
       </div>
 
@@ -179,6 +182,12 @@ export default function ConfigInput({
                 ? "Paste your FortiGate configuration here...\n\nSupported format:\n\u2022 FortiOS config (config/edit/set/next/end)"
                 : selectedVendor === 'cisco_asa'
                 ? "Paste your Cisco ASA/FTD configuration here...\n\nSupported formats:\n\u2022 ASA running-config (access-list, object, nat)\n\u2022 FTD show running-config output"
+                : selectedVendor === 'checkpoint'
+                ? "Paste your Check Point configuration here...\n\nSupported formats:\n\u2022 mgmt_cli JSON (show-access-rulebase)\n\u2022 ShowPolicyPackage JSON export\n\u2022 Optional: Gaia clish after JSON"
+                : selectedVendor === 'sonicwall'
+                ? "Paste your SonicWall configuration here...\n\nSupported formats:\n\u2022 REST API JSON (/api/sonicos/* combined)\n\u2022 CLI text (show current-config)"
+                : selectedVendor === 'huawei_usg'
+                ? "Paste your Huawei USG configuration here...\n\nSupported format:\n\u2022 VRP CLI (display current-configuration)"
                 : "Paste your PAN-OS configuration here...\n\nSupported format:\n\u2022 PAN-OS XML configuration"
               }
               spellCheck={false}

@@ -808,6 +808,9 @@ function vendorLabel(sourceVendor) {
     case 'srx': return 'Junos SRX';
     case 'fortigate': return 'FortiGate';
     case 'cisco_asa': return 'Cisco ASA/FTD';
+    case 'checkpoint': return 'Check Point';
+    case 'sonicwall': return 'SonicWall';
+    case 'huawei_usg': return 'Huawei USG';
     case 'greenfield': return 'Greenfield';
     default: return sourceVendor || 'firewall';
   }

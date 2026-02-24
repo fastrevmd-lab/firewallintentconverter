@@ -4,7 +4,7 @@
 
 <h1 align="center"><span style="color: #005b5a;">Firewall to Intent Converter</span></h1>
 
-<p align="center">A browser-based tool that converts firewall configurations into an intermediate format for review, editing, and conversion to Juniper SRX. Supports <b>PAN-OS XML</b>, <b>Junos SRX</b>, <b>FortiGate / FortiOS</b>, and <b>Cisco ASA / FTD</b> as source formats, plus a <b>Greenfield</b> mode that builds an SRX configuration from scratch via LLM-guided interview. Paste or upload a config (or start a greenfield interview), review and edit the parsed rules through an interactive UI, optionally get AI-powered best-practice suggestions, then export as SRX set commands or XML.</p>
+<p align="center">A browser-based tool that converts firewall configurations into an intermediate format for review, editing, and conversion to Juniper SRX. Supports <b>PAN-OS XML</b>, <b>Junos SRX</b>, <b>FortiGate / FortiOS</b>, <b>Cisco ASA / FTD</b>, <b>Check Point R80+</b>, <b>SonicWall SonicOS</b>, and <b>Huawei USG</b> as source formats, plus a <b>Greenfield</b> mode that builds an SRX configuration from scratch via LLM-guided interview. Paste or upload a config (or start a greenfield interview), review and edit the parsed rules through an interactive UI, optionally get AI-powered best-practice suggestions, then export as SRX set commands or XML.</p>
 # Quick Start
 
 ### Prerequisites
@@ -36,7 +36,7 @@ NODE_ENV=production node server.js   # Serves static dist/ + API
 
 ### 1a. Load a Configuration (Import Mode)
 
-Select your source vendor from the dropdown (Junos SRX, PAN-OS, FortiGate, or Cisco ASA/FTD), then paste a configuration into the left panel or click one of the built-in sample configs. Then click **Parse**. The tool auto-detects the source format.
+Select your source vendor from the dropdown (Junos SRX, PAN-OS, FortiGate, Cisco ASA/FTD, Check Point, SonicWall, or Huawei USG), then paste a configuration into the left panel or click one of the built-in sample configs. Then click **Parse**. The tool auto-detects the source format.
 
 ### 1b. Greenfield Mode (Build from Scratch)
 
@@ -50,7 +50,7 @@ Toggle between **from LLM Interview** and **to SRX** tabs to see the configurati
 
 ### 2. Select Hardware Models
 
-After parsing, a modal prompts you to select the source model and target SRX model. The tool auto-detects the likely source model from interface names (PAN-OS, SRX, FortiGate, or Cisco). For FortiGate sources, all current F/G-series and legacy E-series models are available. For Cisco sources, all Firepower 1000/2100/3100/4100/4200 series, virtual appliances, and EOS ASA 5500-X models are available. You can also select the SRX subscription (Base/A1/A2/P1/P2). Skip this or change it later via the **Models** button.
+After parsing, a modal prompts you to select the source model and target SRX model. The tool auto-detects the likely source model from interface names (PAN-OS, SRX, FortiGate, Cisco, Check Point, SonicWall, or Huawei). For FortiGate sources, all current F/G-series and legacy E-series models are available. For Cisco sources, all Firepower 1000/2100/3100/4100/4200 series, virtual appliances, and EOS ASA 5500-X models are available. For Check Point, SonicWall, and Huawei USG, full model ranges are available with throughput specs. You can also select the SRX subscription (Base/A1/A2/P1/P2). Skip this or change it later via the **Models** button.
 
 ### 3. Map Interfaces
 
@@ -102,7 +102,10 @@ Click **Convert to SRX** to generate the output. Switch between **Set Commands**
 - **Junos SRX parser** — Parses SRX `set` commands and hierarchical curly-brace format into the same intermediate schema (zones, address-book objects, address sets, security policies, NAT rule-sets, applications)
 - **FortiGate / FortiOS parser** — Parses FortiOS `config`/`edit`/`set`/`next`/`end` block format including firewall policies, address objects, address groups, service objects, service groups, zones, VIPs (destination NAT), IP pools, central SNAT maps, and security profiles (AV, web filter, IPS, application control, SSL inspection, DNS filter, DLP, email filter)
 - **Cisco ASA / FTD parser** — Parses Cisco ASA/FTD configuration including interfaces (nameif, security-level, IP), object network/service definitions, object-group network/service/protocol groups, extended access-lists with remarks, access-group bindings, and object NAT (dynamic/static). Zones are derived from interface nameif + security-level
-- **Auto-detection** — Automatically identifies the source format (PAN-OS XML, Junos SRX, FortiOS, or Cisco ASA) and routes to the correct parser
+- **Check Point R80+/R81+ parser** — Parses Check Point SmartConsole JSON export (`mgmt_cli show-access-rulebase`) including objects-dictionary with UID resolution, nested access-sections and inline layers, host/network/range/FQDN/group objects, service-tcp/udp/icmp objects, service groups, NAT rulebase (hide/static), and optional Gaia clish text for interfaces and static routes
+- **SonicWall SonicOS parser** — Parses SonicWall REST API JSON export (preferred) or CLI text fallback. Handles zones with security-type mapping, IPv4/IPv6 address objects (host/network/range/FQDN/MAC), address groups, service objects, service groups, access rules with priority ordering, NAT policies (source/destination/combined), interfaces, and route policies
+- **Huawei USG parser** — Parses Huawei VRP CLI (`display current-configuration`) including firewall zones with priority, `ip address-set` objects (type object and type group), `ip service-set` definitions, `security-policy` rules with zone-pair routing, `nat-policy` and `nat server` rules, `time-range` schedules, basic IKE/IPsec VPN detection, `hrp` HA configuration, and static routes
+- **Auto-detection** — Automatically identifies the source format (PAN-OS XML, Junos SRX, FortiOS, Cisco ASA, Check Point JSON, SonicWall JSON/CLI, or Huawei VRP) and routes to the correct parser
 - **SRX output** — Generates Juniper SRX `set` commands or hierarchical XML, including zones, address books, application mappings, security policies, NAT rule-sets, schedulers, UTM profiles (anti-virus, web-filtering, content-filtering), IDP policies, and L2 bridge-domain/family-bridge config. FortiGate Application Control generates AppFW rule-set; FortiGate DLP notes ICAP integration requirement
 - **Implicit rules** — Automatically generates vendor-specific implicit rules (PAN-OS intra-zone allow + interzone deny, FortiGate intrazone per-zone + default deny, Cisco ASA security-level permits for unbound interfaces + default deny, SRX default deny). Implicit rules are visually distinguished in the UI (dimmed, italic, with "Implicit" chip) and tagged `added_by_fpic`
 - **FQDN support** — Parses FQDN/dns-name address objects from all vendors and converts to SRX `dns-name`. Cisco ASA `fqdn v4`/`v6` maps to SRX `ipv4-only`/`ipv6-only`. FortiGate wildcard-fqdn (`*.example.com`) generates a warning since SRX does not support wildcard dns-name
@@ -117,11 +120,14 @@ Click **Convert to SRX** to generate the output. Switch between **Set Commands**
 - **Sanitization** — One-click replacement of sensitive data (IPs, hostnames, keys) with placeholders before sharing or sending to an LLM. Originals are restored on export
 
 ### Dual Platform View
-- **"from" / "to" toggle** — Switch between source view ("from PAN-OS", "from SRX", "from FortiGate", or "from Cisco ASA") and target view ("to SRX") above the tab bar
+- **"from" / "to" toggle** — Switch between source view ("from PAN-OS", "from SRX", "from FortiGate", "from Cisco ASA", "from Check Point", "from SonicWall", or "from Huawei") and target view ("to SRX") above the tab bar
 - **SRX-style table** — When source is SRX (or viewing the "to SRX" tab), policies display in a zone-grouped table with SRX terminology (permit/deny/reject, security-zone, address-book)
 - **PAN-OS-style table** — When source is PAN-OS, the "from" tab shows the familiar PAN-OS table layout with allow/deny actions
 - **FortiGate-style table** — When source is FortiGate, the "from" tab shows a FortiOS-style policy table with FortiGate terminology (ACCEPT/DENY, From/To interfaces, Schedule, NAT toggle, security profile icons for AV/WF/IPS/App/SSL/DNS/EM/DLP)
 - **Cisco ASDM-style table** — When source is Cisco ASA/FTD, the "from" tab shows a Cisco ASDM-style access control table with ACE numbering, Permit/Deny actions, ACL name badges, security level indicators, protocol chips, interface labels, log status, and hit counts
+- **Check Point SmartConsole-style table** — When source is Check Point, the "from" tab shows a SmartConsole-style table with section grouping, Accept/Drop actions, Track type, and Install On targets
+- **SonicWall-style table** — When source is SonicWall, the "from" tab shows a zone-pair table with priority ordering, DPI status column, and Allow/Deny actions
+- **Huawei USG-style table** — When source is Huawei, the "from" tab shows a zone-pair named-rule table with Permit/Deny actions and security profile indicators
 - **Negate support** — Source/destination address negation flags (PAN-OS `negate-source`/`negate-destination`, SRX `except`) displayed and editable in both views
 - **Profile group expansion** — PAN-OS profile group references are automatically resolved into individual security profiles
 
@@ -135,10 +141,13 @@ Click **Convert to SRX** to generate the output. Switch between **Set Commands**
 - **Add / delete rules** — Create new rules or remove existing ones from the UI
 
 ### Hardware Awareness
-- **Model selector** — Pick source firewall model (PAN-OS, SRX, FortiGate, or Cisco, including EOS/legacy models) and target SRX model from a built-in hardware database with port counts and throughput specs. Throughput numbers are best-effort from publicly available data
-- **Auto-detection** — Heuristics detect the likely source model from interface naming in the config (PAN-OS `ethernet`, SRX `ge-`/`xe-`/`et-`, FortiGate `port`/`wan`/`internal`/`dmz`, Cisco `GigabitEthernet`/`Ethernet1/`/`TenGigabitEthernet` formats)
+- **Model selector** — Pick source firewall model (PAN-OS, SRX, FortiGate, Cisco, Check Point, SonicWall, or Huawei USG, including EOS/legacy models) and target SRX model from a built-in hardware database with port counts and throughput specs. Throughput numbers are best-effort from publicly available data
+- **Auto-detection** — Heuristics detect the likely source model from interface naming in the config (PAN-OS `ethernet`, SRX `ge-`/`xe-`/`et-`, FortiGate `port`/`wan`/`internal`/`dmz`, Cisco `GigabitEthernet`/`Ethernet1/`/`TenGigabitEthernet`, Check Point `eth`, SonicWall `X`, Huawei `GigabitEthernet`/`XGigabitEthernet` formats)
 - **FortiGate models** — Full F-series (40F through 4400F), G-series (70G through 900G), and EOS E-series (30E through 500E) with port counts and throughput specs
 - **Cisco models** — Firepower 1000 series (FPR-1010 through FPR-1150), 2100 series (FPR-2110 through FPR-2140), 3100 series (FPR-3105 through FPR-3140), 4100 series (FPR-4112 through FPR-4145), 4200 series (FPR-4215 through FPR-4245), virtual (ASAv, FTDv), and EOS ASA 5500-X series (ASA-5506-X through ASA-5555-X)
+- **Check Point models** — Branch through data center appliances (CP-1600 through CP-28000) with throughput specs
+- **SonicWall models** — TZ series (TZ-270 through TZ-670), NSa series (NSa-2700 through NSa-6700), and NSsp series (NSsp-10700, NSsp-13700) with throughput specs
+- **Huawei USG models** — USG6000E series (USG6510E through USG6680E) with GigabitEthernet and XGigabitEthernet port counts
 - **EOS SRX models** — Legacy/End-of-Sale SRX models (SRX100, SRX210, SRX240, SRX550, SRX650, SRX1400, SRX3400, SRX3600, etc.) available as source models for migration projects
 - **Interface mapper** — Per-zone mapping of source interfaces to SRX interfaces with auto-mapping, tunnel, and loopback support
 - **SRX subscriptions** — Select the target SRX subscription level (Base, A1 Advanced Data Protection, A2 Advanced Edge Protection, P1 Premium Data Protection, P2 Premium Edge Protection) to gate feature availability and inform LLM reviews. Includes footnote explaining SDC (Security Director Cloud) and ATP (Advanced Threat Protection) capabilities
@@ -211,6 +220,9 @@ firewall-intent-converter/
 │   │   ├── srx-parser.js         # Junos SRX set/hierarchical → intermediate JSON
 │   │   ├── fortigate-parser.js   # FortiOS config/edit/set → intermediate JSON
 │   │   ├── cisco-asa-parser.js   # Cisco ASA/FTD → intermediate JSON
+│   │   ├── checkpoint-parser.js  # Check Point R80+/R81+ JSON → intermediate JSON
+│   │   ├── sonicwall-parser.js   # SonicWall SonicOS JSON/CLI → intermediate JSON
+│   │   ├── huawei-parser.js      # Huawei USG VRP CLI → intermediate JSON
 │   │   └── parser-utils.js       # Shared parsing helpers + vendor detection
 │   ├── converters/
 │   │   ├── srx-converter.js      # Intermediate JSON → SRX set commands
@@ -243,12 +255,12 @@ firewall-intent-converter/
 │   │   ├── ModelSelector.jsx     # Modal — source/target hardware model picker
 │   │   ├── InterfaceMapper.jsx   # Modal — per-zone interface mapping
 │   │   ├── LLMSettings.jsx       # Modal — LLM provider config, MCP connection, 3 system prompts
-│   │   └── sample-configs.jsx    # Built-in sample configs (PAN-OS, SRX, FortiGate, Cisco)
+│   │   └── sample-configs.jsx    # Built-in sample configs (PAN-OS, SRX, FortiGate, Cisco, Check Point, SonicWall, Huawei)
 │   ├── utils/
 │   │   ├── llm-client.js         # Browser-side LLM API client (multi-provider)
 │   │   └── srx-view-transforms.js # SRX display transforms + license tier data
 │   └── data/
-│       └── hardware-db.js        # PAN-OS, SRX, FortiGate + Cisco model database (current + EOS)
+│       └── hardware-db.js        # PAN-OS, SRX, FortiGate, Cisco, Check Point, SonicWall + Huawei model database (current + EOS)
 └── dist/                         # Production build output (generated)
 ```
 
@@ -256,7 +268,7 @@ firewall-intent-converter/
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST` | `/api/parse` | Parse config text (PAN-OS XML, Junos SRX, FortiOS, or Cisco ASA) into vendor-neutral intermediate JSON. Auto-detects source format. |
+| `POST` | `/api/parse` | Parse config text (PAN-OS XML, Junos SRX, FortiOS, Cisco ASA, Check Point JSON, SonicWall JSON/CLI, or Huawei VRP) into vendor-neutral intermediate JSON. Auto-detects source format. |
 | `POST` | `/api/convert` | Convert intermediate JSON to SRX output (set commands or XML) |
 | `POST` | `/api/sanitize` | Replace sensitive data in config text with placeholders |
 

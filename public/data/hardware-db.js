@@ -913,10 +913,13 @@ export function getThroughputDisplay(model, metric = 'l7') {
  * SRX:    L4 = Firewall (IMIX), L7 = NGFW/AppSecure, Threat = IPS/Threat
  */
 export const THROUGHPUT_LABELS = {
-  panos:     { l4: 'L4 Firewall', l7: 'L7 App-ID', threat: 'Threat Prevention' },
-  srx:       { l4: 'L4 Firewall (IMIX)', l7: 'L7 NGFW', threat: 'IPS/Threat' },
-  fortigate: { l4: 'L4 Firewall', l7: 'NGFW', threat: 'Threat Protection' },
-  cisco_asa: { l4: 'L4 Firewall', l7: 'NGFW (FTD)', threat: 'IPS/Threat' },
+  panos:      { l4: 'L4 Firewall', l7: 'L7 App-ID', threat: 'Threat Prevention' },
+  srx:        { l4: 'L4 Firewall (IMIX)', l7: 'L7 NGFW', threat: 'IPS/Threat' },
+  fortigate:  { l4: 'L4 Firewall', l7: 'NGFW', threat: 'Threat Protection' },
+  cisco_asa:  { l4: 'L4 Firewall', l7: 'NGFW (FTD)', threat: 'IPS/Threat' },
+  checkpoint: { l4: 'L4 Firewall', l7: 'NGFW', threat: 'Threat Prevention' },
+  sonicwall:  { l4: 'L4 Firewall', l7: 'DPI', threat: 'Threat Prevention' },
+  huawei_usg: { l4: 'L4 Firewall', l7: 'NGFW', threat: 'IPS/AV' },
 };
 
 /** Short metric prefix for dropdown labels */
@@ -1972,4 +1975,322 @@ export function detectCiscoModel(intermediateConfig) {
   }
 
   return { model: 'FPR-1010', confidence: 0.3 };
+}
+
+
+// ---------------------------------------------------------------------------
+// Check Point Models
+// ---------------------------------------------------------------------------
+
+function genCpPorts(prefix, start, end, type, speed) {
+  const ports = [];
+  for (let i = start; i <= end; i++) {
+    const name = `${prefix}${i}`;
+    ports.push({ name, type, speed, label: name });
+  }
+  return ports;
+}
+
+export const CHECKPOINT_MODELS = {
+  'CP-1600': {
+    name: '1600', tier: 'branch',
+    description: 'Small office security gateway',
+    throughput: { l4: '3 Gbps', l7: '400 Mbps', threat: '340 Mbps' },
+    ports: genCpPorts('eth', 0, 7, 'copper', '1G'),
+  },
+  'CP-1800': {
+    name: '1800', tier: 'branch',
+    description: 'Small/medium branch security gateway',
+    throughput: { l4: '5 Gbps', l7: '1 Gbps', threat: '770 Mbps' },
+    ports: genCpPorts('eth', 0, 7, 'copper', '1G'),
+  },
+  'CP-3200': {
+    name: '3200', tier: 'branch',
+    description: 'Mid-range branch security gateway',
+    throughput: { l4: '5.5 Gbps', l7: '1.5 Gbps', threat: '1 Gbps' },
+    ports: [...genCpPorts('eth', 0, 7, 'copper', '1G'), ...genCpPorts('eth', 8, 9, 'SFP', '1G')],
+  },
+  'CP-5200': {
+    name: '5200', tier: 'midrange',
+    description: 'Small enterprise security gateway',
+    throughput: { l4: '20 Gbps', l7: '4.5 Gbps', threat: '3.4 Gbps' },
+    ports: [...genCpPorts('eth', 0, 7, 'copper', '1G'), ...genCpPorts('eth', 8, 11, 'SFP+', '10G')],
+  },
+  'CP-5400': {
+    name: '5400', tier: 'midrange',
+    description: 'Mid-range enterprise security gateway',
+    throughput: { l4: '28 Gbps', l7: '5 Gbps', threat: '3.9 Gbps' },
+    ports: [...genCpPorts('eth', 0, 7, 'copper', '1G'), ...genCpPorts('eth', 8, 11, 'SFP+', '10G')],
+  },
+  'CP-5600': {
+    name: '5600', tier: 'midrange',
+    description: 'Enterprise security gateway',
+    throughput: { l4: '34 Gbps', l7: '6 Gbps', threat: '5 Gbps' },
+    ports: [...genCpPorts('eth', 0, 7, 'copper', '1G'), ...genCpPorts('eth', 8, 15, 'SFP+', '10G')],
+  },
+  'CP-6200': {
+    name: '6200', tier: 'enterprise',
+    description: 'Large enterprise security gateway',
+    throughput: { l4: '34 Gbps', l7: '8.5 Gbps', threat: '5 Gbps' },
+    ports: [...genCpPorts('eth', 0, 7, 'copper', '1G'), ...genCpPorts('eth', 8, 15, 'SFP+', '10G'), ...genCpPorts('eth', 16, 17, 'QSFP28', '40G')],
+  },
+  'CP-6600': {
+    name: '6600', tier: 'enterprise',
+    description: 'High-performance enterprise security gateway',
+    throughput: { l4: '60 Gbps', l7: '13.5 Gbps', threat: '8 Gbps' },
+    ports: [...genCpPorts('eth', 0, 7, 'copper', '1G'), ...genCpPorts('eth', 8, 19, 'SFP+', '10G'), ...genCpPorts('eth', 20, 23, 'QSFP28', '40G')],
+  },
+  'CP-6700': {
+    name: '6700', tier: 'enterprise',
+    description: 'Premium enterprise security gateway',
+    throughput: { l4: '63 Gbps', l7: '21 Gbps', threat: '11 Gbps' },
+    ports: [...genCpPorts('eth', 0, 7, 'copper', '1G'), ...genCpPorts('eth', 8, 19, 'SFP+', '10G'), ...genCpPorts('eth', 20, 23, 'QSFP28', '40G')],
+  },
+  'CP-6900': {
+    name: '6900', tier: 'datacenter',
+    description: 'Data center security gateway',
+    throughput: { l4: '82 Gbps', l7: '24.4 Gbps', threat: '15 Gbps' },
+    ports: [...genCpPorts('eth', 0, 3, 'copper', '1G'), ...genCpPorts('eth', 4, 15, 'SFP+', '10G'), ...genCpPorts('eth', 16, 19, 'QSFP28', '100G')],
+  },
+  'CP-16000': {
+    name: '16000', tier: 'datacenter',
+    description: 'Scalable data center chassis',
+    throughput: { l4: '148 Gbps', l7: '35 Gbps', threat: '22 Gbps' },
+    ports: [...genCpPorts('eth', 0, 3, 'copper', '10G'), ...genCpPorts('eth', 4, 19, 'SFP28', '25G'), ...genCpPorts('eth', 20, 27, 'QSFP28', '100G')],
+  },
+  'CP-26000': {
+    name: '26000', tier: 'datacenter',
+    description: 'High-end data center chassis',
+    throughput: { l4: '320 Gbps', l7: '55 Gbps', threat: '34 Gbps' },
+    ports: [...genCpPorts('eth', 0, 3, 'copper', '10G'), ...genCpPorts('eth', 4, 27, 'SFP28', '25G'), ...genCpPorts('eth', 28, 35, 'QSFP28', '100G')],
+  },
+  'CP-28000': {
+    name: '28000', tier: 'datacenter',
+    description: 'Premium data center chassis',
+    throughput: { l4: '500 Gbps', l7: '82 Gbps', threat: '50 Gbps' },
+    ports: [...genCpPorts('eth', 0, 3, 'copper', '10G'), ...genCpPorts('eth', 4, 35, 'SFP28', '25G'), ...genCpPorts('eth', 36, 43, 'QSFP28', '100G')],
+  },
+};
+
+export const CHECKPOINT_SOURCE_MODELS = { ...CHECKPOINT_MODELS };
+
+export function detectCheckpointModel(intermediateConfig) {
+  if (!intermediateConfig?.zones) return null;
+  const ruleCount = intermediateConfig.security_policies?.length || 0;
+  if (ruleCount > 500) return { model: 'CP-6600', confidence: 0.4 };
+  if (ruleCount > 200) return { model: 'CP-5600', confidence: 0.4 };
+  if (ruleCount > 50) return { model: 'CP-5200', confidence: 0.4 };
+  return { model: 'CP-3200', confidence: 0.3 };
+}
+
+
+// ---------------------------------------------------------------------------
+// SonicWall Models
+// ---------------------------------------------------------------------------
+
+function genSwPorts(start, end) {
+  const ports = [];
+  for (let i = start; i <= end; i++) {
+    ports.push({ name: `X${i}`, type: 'copper', speed: '1G', label: `X${i}` });
+  }
+  return ports;
+}
+
+export const SONICWALL_MODELS = {
+  'TZ-270': {
+    name: 'TZ 270', tier: 'branch',
+    description: 'Entry-level branch firewall',
+    throughput: { l4: '2 Gbps', l7: '750 Mbps', threat: '750 Mbps' },
+    ports: genSwPorts(0, 7),
+  },
+  'TZ-370': {
+    name: 'TZ 370', tier: 'branch',
+    description: 'Small office firewall',
+    throughput: { l4: '3 Gbps', l7: '1 Gbps', threat: '1 Gbps' },
+    ports: genSwPorts(0, 7),
+  },
+  'TZ-470': {
+    name: 'TZ 470', tier: 'branch',
+    description: 'Branch office firewall',
+    throughput: { l4: '3.5 Gbps', l7: '1.5 Gbps', threat: '1.5 Gbps' },
+    ports: genSwPorts(0, 7),
+  },
+  'TZ-570': {
+    name: 'TZ 570', tier: 'branch',
+    description: 'Medium branch firewall with 10G',
+    throughput: { l4: '4 Gbps', l7: '2 Gbps', threat: '2 Gbps' },
+    ports: [...genSwPorts(0, 7), { name: 'X8', type: 'SFP+', speed: '10G', label: 'X8 (10G)' }, { name: 'X9', type: 'SFP+', speed: '10G', label: 'X9 (10G)' }],
+  },
+  'TZ-670': {
+    name: 'TZ 670', tier: 'branch',
+    description: 'Advanced branch with 10G SFP+',
+    throughput: { l4: '6 Gbps', l7: '3 Gbps', threat: '2.5 Gbps' },
+    ports: [...genSwPorts(0, 7), { name: 'X8', type: 'SFP+', speed: '10G', label: 'X8 (10G)' }, { name: 'X9', type: 'SFP+', speed: '10G', label: 'X9 (10G)' }],
+  },
+  'NSa-2700': {
+    name: 'NSa 2700', tier: 'midrange',
+    description: 'Mid-size enterprise firewall',
+    throughput: { l4: '5.5 Gbps', l7: '3.5 Gbps', threat: '3 Gbps' },
+    ports: [...genSwPorts(0, 15), { name: 'X16', type: 'SFP+', speed: '10G', label: 'X16' }, { name: 'X17', type: 'SFP+', speed: '10G', label: 'X17' }, { name: 'X18', type: 'SFP+', speed: '10G', label: 'X18' }],
+  },
+  'NSa-3700': {
+    name: 'NSa 3700', tier: 'midrange',
+    description: 'Enterprise firewall',
+    throughput: { l4: '5.5 Gbps', l7: '4 Gbps', threat: '3.5 Gbps' },
+    ports: [...genSwPorts(0, 15), ...Array.from({ length: 4 }, (_, i) => ({ name: `X${16 + i}`, type: 'SFP+', speed: '10G', label: `X${16 + i}` }))],
+  },
+  'NSa-4700': {
+    name: 'NSa 4700', tier: 'enterprise',
+    description: 'High-performance enterprise',
+    throughput: { l4: '18 Gbps', l7: '9.5 Gbps', threat: '6 Gbps' },
+    ports: [...genSwPorts(0, 23), ...Array.from({ length: 4 }, (_, i) => ({ name: `X${24 + i}`, type: 'SFP+', speed: '10G', label: `X${24 + i}` }))],
+  },
+  'NSa-5700': {
+    name: 'NSa 5700', tier: 'enterprise',
+    description: 'Large enterprise firewall',
+    throughput: { l4: '28 Gbps', l7: '15 Gbps', threat: '8 Gbps' },
+    ports: [...genSwPorts(0, 23), ...Array.from({ length: 8 }, (_, i) => ({ name: `X${24 + i}`, type: 'SFP+', speed: '10G', label: `X${24 + i}` }))],
+  },
+  'NSa-6700': {
+    name: 'NSa 6700', tier: 'datacenter',
+    description: 'Data center / large campus',
+    throughput: { l4: '36 Gbps', l7: '20 Gbps', threat: '12 Gbps' },
+    ports: [...genSwPorts(0, 15), ...Array.from({ length: 8 }, (_, i) => ({ name: `X${16 + i}`, type: 'SFP+', speed: '10G', label: `X${16 + i}` })), ...Array.from({ length: 4 }, (_, i) => ({ name: `X${24 + i}`, type: 'SFP28', speed: '25G', label: `X${24 + i}` }))],
+  },
+  'NSsp-10700': {
+    name: 'NSsp 10700', tier: 'datacenter',
+    description: 'High-end data center firewall',
+    throughput: { l4: '42 Gbps', l7: '28 Gbps', threat: '17 Gbps' },
+    ports: [...Array.from({ length: 16 }, (_, i) => ({ name: `X${i}`, type: 'SFP+', speed: '10G', label: `X${i}` })), ...Array.from({ length: 4 }, (_, i) => ({ name: `X${16 + i}`, type: 'QSFP28', speed: '100G', label: `X${16 + i}` }))],
+  },
+  'NSsp-13700': {
+    name: 'NSsp 13700', tier: 'datacenter',
+    description: 'Premium data center firewall',
+    throughput: { l4: '60 Gbps', l7: '42 Gbps', threat: '24 Gbps' },
+    ports: [...Array.from({ length: 24 }, (_, i) => ({ name: `X${i}`, type: 'SFP+', speed: '10G', label: `X${i}` })), ...Array.from({ length: 8 }, (_, i) => ({ name: `X${24 + i}`, type: 'QSFP28', speed: '100G', label: `X${24 + i}` }))],
+  },
+  'NSsp-15700': {
+    name: 'NSsp 15700', tier: 'datacenter',
+    description: 'Carrier-grade firewall',
+    throughput: { l4: '105 Gbps', l7: '70 Gbps', threat: '37 Gbps' },
+    ports: [...Array.from({ length: 24 }, (_, i) => ({ name: `X${i}`, type: 'SFP28', speed: '25G', label: `X${i}` })), ...Array.from({ length: 8 }, (_, i) => ({ name: `X${24 + i}`, type: 'QSFP28', speed: '100G', label: `X${24 + i}` }))],
+  },
+  'NSv-270': {
+    name: 'NSv 270 (Virtual)', tier: 'virtual',
+    description: 'Virtual firewall — ESXi/KVM/Azure/AWS',
+    throughput: { l4: '2 Gbps', l7: '800 Mbps', threat: '600 Mbps' },
+    ports: genSwPorts(0, 7),
+  },
+  'NSv-470': {
+    name: 'NSv 470 (Virtual)', tier: 'virtual',
+    description: 'Virtual firewall — ESXi/KVM/Azure/AWS',
+    throughput: { l4: '4 Gbps', l7: '2 Gbps', threat: '1.5 Gbps' },
+    ports: genSwPorts(0, 7),
+  },
+  'NSv-870': {
+    name: 'NSv 870 (Virtual)', tier: 'virtual',
+    description: 'Virtual firewall — ESXi/KVM/Azure/AWS',
+    throughput: { l4: '6 Gbps', l7: '3.5 Gbps', threat: '2.5 Gbps' },
+    ports: genSwPorts(0, 7),
+  },
+};
+
+export const SONICWALL_SOURCE_MODELS = { ...SONICWALL_MODELS };
+
+export function detectSonicwallModel(intermediateConfig) {
+  if (!intermediateConfig?.interfaces) return null;
+  const ifCount = intermediateConfig.interfaces.length;
+  if (ifCount > 20) return { model: 'NSa-4700', confidence: 0.4 };
+  if (ifCount > 10) return { model: 'NSa-2700', confidence: 0.4 };
+  if (ifCount > 6) return { model: 'TZ-570', confidence: 0.4 };
+  return { model: 'TZ-370', confidence: 0.3 };
+}
+
+
+// ---------------------------------------------------------------------------
+// Huawei USG Models
+// ---------------------------------------------------------------------------
+
+function genHwPorts(prefix, slot, subslot, start, end, type, speed) {
+  const ports = [];
+  for (let i = start; i <= end; i++) {
+    const name = `${prefix}${slot}/${subslot}/${i}`;
+    ports.push({ name, type, speed, label: name });
+  }
+  return ports;
+}
+
+export const HUAWEI_MODELS = {
+  'USG6510E': {
+    name: 'USG6510E', tier: 'branch',
+    description: 'Entry-level branch NGFW',
+    throughput: { l4: '2 Gbps', l7: '600 Mbps', threat: '400 Mbps' },
+    ports: genHwPorts('GigabitEthernet', 1, 0, 0, 7, 'copper', '1G'),
+  },
+  'USG6530E': {
+    name: 'USG6530E', tier: 'branch',
+    description: 'Branch NGFW',
+    throughput: { l4: '4 Gbps', l7: '1 Gbps', threat: '700 Mbps' },
+    ports: [...genHwPorts('GigabitEthernet', 1, 0, 0, 7, 'copper', '1G'), ...genHwPorts('GigabitEthernet', 1, 0, 8, 9, 'SFP', '1G')],
+  },
+  'USG6550E': {
+    name: 'USG6550E', tier: 'branch',
+    description: 'Advanced branch NGFW',
+    throughput: { l4: '6 Gbps', l7: '1.5 Gbps', threat: '1.1 Gbps' },
+    ports: [...genHwPorts('GigabitEthernet', 1, 0, 0, 7, 'copper', '1G'), ...genHwPorts('XGigabitEthernet', 1, 0, 0, 3, 'SFP+', '10G')],
+  },
+  'USG6555E': {
+    name: 'USG6555E', tier: 'branch',
+    description: 'Mid-range branch NGFW',
+    throughput: { l4: '8 Gbps', l7: '2 Gbps', threat: '1.5 Gbps' },
+    ports: [...genHwPorts('GigabitEthernet', 1, 0, 0, 7, 'copper', '1G'), ...genHwPorts('XGigabitEthernet', 1, 0, 0, 3, 'SFP+', '10G')],
+  },
+  'USG6565E': {
+    name: 'USG6565E', tier: 'midrange',
+    description: 'Enterprise branch NGFW',
+    throughput: { l4: '12 Gbps', l7: '3 Gbps', threat: '2.5 Gbps' },
+    ports: [...genHwPorts('GigabitEthernet', 1, 0, 0, 7, 'copper', '1G'), ...genHwPorts('XGigabitEthernet', 1, 0, 0, 3, 'SFP+', '10G')],
+  },
+  'USG6585E': {
+    name: 'USG6585E', tier: 'midrange',
+    description: 'Mid-range enterprise NGFW',
+    throughput: { l4: '20 Gbps', l7: '5.5 Gbps', threat: '4 Gbps' },
+    ports: [...genHwPorts('GigabitEthernet', 1, 0, 0, 7, 'copper', '1G'), ...genHwPorts('XGigabitEthernet', 1, 0, 0, 7, 'SFP+', '10G')],
+  },
+  'USG6615E': {
+    name: 'USG6615E', tier: 'enterprise',
+    description: 'Enterprise NGFW',
+    throughput: { l4: '30 Gbps', l7: '8 Gbps', threat: '5.5 Gbps' },
+    ports: [...genHwPorts('GigabitEthernet', 1, 0, 0, 7, 'copper', '1G'), ...genHwPorts('XGigabitEthernet', 1, 0, 0, 7, 'SFP+', '10G'), ...genHwPorts('XGigabitEthernet', 1, 0, 8, 9, 'SFP28', '25G')],
+  },
+  'USG6625E': {
+    name: 'USG6625E', tier: 'enterprise',
+    description: 'Large enterprise NGFW',
+    throughput: { l4: '40 Gbps', l7: '12 Gbps', threat: '8 Gbps' },
+    ports: [...genHwPorts('GigabitEthernet', 1, 0, 0, 7, 'copper', '1G'), ...genHwPorts('XGigabitEthernet', 1, 0, 0, 11, 'SFP+', '10G'), ...genHwPorts('XGigabitEthernet', 1, 0, 12, 15, 'SFP28', '25G')],
+  },
+  'USG6650E': {
+    name: 'USG6650E', tier: 'enterprise',
+    description: 'Premium enterprise NGFW',
+    throughput: { l4: '60 Gbps', l7: '20 Gbps', threat: '12 Gbps' },
+    ports: [...genHwPorts('GigabitEthernet', 1, 0, 0, 7, 'copper', '1G'), ...genHwPorts('XGigabitEthernet', 1, 0, 0, 11, 'SFP+', '10G'), ...genHwPorts('XGigabitEthernet', 1, 0, 12, 17, 'SFP28', '25G'), ...genHwPorts('XGigabitEthernet', 1, 0, 18, 19, 'QSFP28', '100G')],
+  },
+  'USG6680E': {
+    name: 'USG6680E', tier: 'datacenter',
+    description: 'Data center NGFW',
+    throughput: { l4: '80 Gbps', l7: '30 Gbps', threat: '20 Gbps' },
+    ports: [...genHwPorts('GigabitEthernet', 1, 0, 0, 3, 'copper', '10G'), ...genHwPorts('XGigabitEthernet', 1, 0, 0, 15, 'SFP+', '10G'), ...genHwPorts('XGigabitEthernet', 1, 0, 16, 23, 'SFP28', '25G'), ...genHwPorts('XGigabitEthernet', 1, 0, 24, 27, 'QSFP28', '100G')],
+  },
+};
+
+export const HUAWEI_SOURCE_MODELS = { ...HUAWEI_MODELS };
+
+export function detectHuaweiModel(intermediateConfig) {
+  if (!intermediateConfig?.zones) return null;
+  const ifCount = intermediateConfig.interfaces?.length || 0;
+  const hasXGig = intermediateConfig.interfaces?.some(i => /XGigabitEthernet/i.test(i.name));
+  if (hasXGig && ifCount > 10) return { model: 'USG6625E', confidence: 0.4 };
+  if (hasXGig) return { model: 'USG6550E', confidence: 0.4 };
+  if (ifCount > 6) return { model: 'USG6530E', confidence: 0.4 };
+  return { model: 'USG6510E', confidence: 0.3 };
 }

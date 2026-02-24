@@ -107,7 +107,14 @@ export default function App() {
   const allRulesAccepted = reviewProgress.total > 0 && reviewProgress.accepted === reviewProgress.total;
 
   // Compute effective viewMode: 'from' tab uses vendor-specific style
-  const effectiveViewMode = platformView === 'srx' ? 'srx' : (sourceVendor === 'srx' ? 'srx' : sourceVendor === 'fortigate' ? 'fortigate' : sourceVendor === 'cisco_asa' ? 'cisco' : 'panos');
+  const effectiveViewMode = platformView === 'srx' ? 'srx'
+    : sourceVendor === 'srx' ? 'srx'
+    : sourceVendor === 'fortigate' ? 'fortigate'
+    : sourceVendor === 'cisco_asa' ? 'cisco'
+    : sourceVendor === 'checkpoint' ? 'checkpoint'
+    : sourceVendor === 'sonicwall' ? 'sonicwall'
+    : sourceVendor === 'huawei_usg' ? 'huawei'
+    : 'panos';
 
   // Display stats: use live metadata in greenfield mode, parseStats otherwise
   const displayStats = useMemo(() => {
@@ -194,8 +201,8 @@ export default function App() {
       const detectedVendor = data.detectedVendor || data.intermediateConfig?.metadata?.source_vendor || 'panos';
       setSourceVendor(detectedVendor);
 
-      // If source is SRX, FortiGate, or Cisco, default to 'panos' platform view (shows the "from" tab)
-      if (detectedVendor === 'srx' || detectedVendor === 'fortigate' || detectedVendor === 'cisco_asa') {
+      // If source is not PAN-OS, default to 'panos' platform view (shows the "from" tab)
+      if (['srx', 'fortigate', 'cisco_asa', 'checkpoint', 'sonicwall', 'huawei_usg'].includes(detectedVendor)) {
         setPlatformView('panos');
       }
 
@@ -776,7 +783,7 @@ export default function App() {
                   >
                     {greenfieldMode
                       ? 'from LLM Interview'
-                      : `from ${sourceModel || (sourceVendor === 'srx' ? 'SRX' : sourceVendor === 'fortigate' ? 'FortiGate' : sourceVendor === 'cisco_asa' ? 'Cisco ASA' : 'PAN-OS')}`
+                      : `from ${sourceModel || ({ srx: 'SRX', fortigate: 'FortiGate', cisco_asa: 'Cisco ASA', checkpoint: 'Check Point', sonicwall: 'SonicWall', huawei_usg: 'Huawei USG' }[sourceVendor] || 'PAN-OS')}`
                     }
                   </button>
                   <button
@@ -858,7 +865,7 @@ export default function App() {
                     className={`center-tab-btn ${editTab === 'rules' ? 'active' : ''}`}
                     onClick={() => setEditTab('rules')}
                   >
-                    {effectiveViewMode === 'srx' ? 'Security Policies' : effectiveViewMode === 'fortigate' ? 'Firewall Policies' : effectiveViewMode === 'cisco' ? 'Access Control' : 'Security Rules'} ({intermediateConfig.security_policies?.length || 0})
+                    {effectiveViewMode === 'srx' ? 'Security Policies' : effectiveViewMode === 'fortigate' ? 'Firewall Policies' : effectiveViewMode === 'cisco' ? 'Access Control' : effectiveViewMode === 'checkpoint' ? 'Access Rules' : effectiveViewMode === 'sonicwall' ? 'Access Rules' : effectiveViewMode === 'huawei' ? 'Security Policies' : 'Security Rules'} ({intermediateConfig.security_policies?.length || 0})
                   </button>
                   <button
                     className={`center-tab-btn ${editTab === 'objects' ? 'active' : ''}`}

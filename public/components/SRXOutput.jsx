@@ -80,7 +80,7 @@ export default function SRXOutput({ output, format, summary, isParsed, sanitizat
   if (!isParsed) {
     return (
       <div className="empty-state">
-        <p>Parse a PAN-OS config and click "Convert to SRX" to see the generated output here.</p>
+        <p>Load a config (PAN-OS, Junos SRX, FortiGate, or Cisco ASA/FTD) or start a Greenfield interview, then click "Convert to SRX" to see the generated output here.</p>
       </div>
     );
   }

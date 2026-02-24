@@ -1249,12 +1249,51 @@ function deriveZones(configJson, uidMap, warnings) {
     }
   }
 
-  // Scan UID map for objects with topology or zone info
+  // Scan UID map for gateway objects and topology data
   for (const [_uid, obj] of uidMap) {
     if (!obj) continue;
 
-    // Simple gateway/interface objects may have topology
-    if (obj['topology'] && obj.name) {
+    // Simple gateway objects have interfaces with topology info
+    if ((obj.type === 'simple-gateway' || obj.type === 'CpmiGatewayPlain' || obj.type === 'checkpoint-host') && obj.interfaces) {
+      const gwIfaces = Array.isArray(obj.interfaces) ? obj.interfaces : [];
+      for (const iface of gwIfaces) {
+        if (!iface) continue;
+        const ifaceName = iface.name || '';
+        let zoneName = '';
+
+        if (iface['topology']) {
+          const topo = iface['topology'];
+          // Handle nested leads-to structure: { "leads-to": { "name": "ZoneName" } }
+          if (topo['leads-to']) {
+            const leadsTo = topo['leads-to'];
+            zoneName = typeof leadsTo === 'string' ? leadsTo : (leadsTo.name || '');
+          } else {
+            zoneName = typeof topo === 'string' ? topo : (topo.name || '');
+          }
+
+          // Normalize common zone names
+          if (zoneName.toLowerCase().includes('external') || zoneName.toLowerCase().includes('outside')) {
+            zoneName = 'untrust';
+          } else if (zoneName.toLowerCase().includes('internal') || zoneName.toLowerCase().includes('inside')) {
+            zoneName = 'trust';
+          } else {
+            zoneName = sanitizeJunosName(zoneName || 'checkpoint');
+          }
+        }
+
+        if (zoneName) {
+          if (!zoneMap[zoneName]) {
+            zoneMap[zoneName] = { interfaces: [], description: '' };
+          }
+          if (ifaceName && !zoneMap[zoneName].interfaces.includes(ifaceName)) {
+            zoneMap[zoneName].interfaces.push(ifaceName);
+          }
+        }
+      }
+    }
+
+    // Non-gateway objects with direct topology property
+    if (obj['topology'] && obj.name && !obj.interfaces) {
       const topo = typeof obj['topology'] === 'string' ? obj['topology'] : (obj['topology'].name || '');
       let zoneName = '';
       if (topo.toLowerCase() === 'external') zoneName = 'untrust';

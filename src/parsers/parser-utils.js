@@ -643,13 +643,16 @@ export function detectVendor(configText) {
   }
 
   // Check Point R80+: JSON with objects-dictionary + rulebase
+  // SonicWall REST API: JSON with access_rules + address_objects
+  // Use a larger probe for Check Point since objects-dictionary can be very long
   try {
     if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
       const probe = trimmed.slice(0, 2000);
-      if (probe.includes('"objects-dictionary"') && probe.includes('"rulebase"')) {
+      const probeLarge = trimmed.slice(0, 8000);
+      if (probe.includes('"objects-dictionary"') && probeLarge.includes('"rulebase"')) {
         return { vendor: 'checkpoint', format: 'json', confidence: 0.95 };
       }
-      if (probe.includes('"access-section"') || probe.includes('"access-rule"')) {
+      if (probe.includes('"objects-dictionary"') && (probeLarge.includes('"access-section"') || probeLarge.includes('"access-rule"'))) {
         return { vendor: 'checkpoint', format: 'json', confidence: 0.90 };
       }
       if (probe.includes('"access_rules"') && probe.includes('"address_objects"')) {

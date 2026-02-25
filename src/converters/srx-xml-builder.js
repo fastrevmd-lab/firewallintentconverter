@@ -40,6 +40,18 @@ export function buildSrxXml(config, interfaceMappings = {}, targetContext = null
   const indent = useContext ? '    ' : '  ';
 
   lines.push('<?xml version="1.0" encoding="UTF-8"?>');
+
+  // Site identification header (for SDC/Mist integration)
+  const siteN = config.metadata?.siteName;
+  const siteG = config.metadata?.siteGroup;
+  if (siteN || siteG) {
+    let siteComment = '<!-- Site Identification:';
+    if (siteN) siteComment += ` Site: ${escapeXml(siteN)}`;
+    if (siteG) siteComment += ` | Site Group: ${escapeXml(siteG)}`;
+    siteComment += ' -->';
+    lines.push(siteComment);
+  }
+
   lines.push('<configuration>');
 
   // Open logical-system or tenant wrapper

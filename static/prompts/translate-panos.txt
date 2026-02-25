@@ -98,6 +98,19 @@ If the source configuration originates from Panorama, or if rules reference Palo
 
 **If a rule mixes PAN-OS management apps with legitimate apps:** remove the PAN-OS management apps from the applications list, keep the rule enabled, and note the removed apps in `_translation_notes`.
 
+## PAN-OS SSL Decryption Rules → SRX SSL Proxy
+
+PAN-OS has a separate Decryption rulebase that determines which traffic gets decrypted. On SRX, SSL Proxy is enabled per security policy — there is no separate decryption rulebase.
+
+**When decryption rules are provided as context:**
+1. For each security rule whose traffic scope (zones, addresses, services) overlaps with a decryption rule that has `action: "decrypt"`:
+   - Set `_srx_decrypt: true` on the translated security rule
+   - Add to `_translation_notes`: "SSL Proxy enabled — matched PAN-OS decryption rule '{rule-name}' ({decryption-type}). SRX SSL Proxy is at Base tier but requires A1+ for IDP on decrypted traffic."
+2. For `action: "no-decrypt"` rules, note in `_translation_notes` on overlapping security rules: "Traffic explicitly excluded from decryption per PAN-OS decryption rule '{rule-name}'."
+3. SSH Proxy decryption (`decryption_type: "ssh-proxy"`) has NO SRX equivalent — note the gap in `_translation_notes`.
+4. SSL Inbound Inspection (`decryption_type: "ssl-inbound-inspection"`) maps to SRX SSL Proxy reverse-proxy mode — note certificate requirements in `_translation_notes`.
+5. Only set `_srx_decrypt: true` on allow rules — deny/reject rules don't need decryption.
+
 ## PAN-OS-Specific Translation Pitfalls
 - PAN-OS App-ID rules with "application-default" service: translate to the correct SRX application + "any" service, since SRX AppFW handles port matching
 - PAN-OS "any" application with specific ports: keep as service-based rule on SRX, note opportunity for AppID in _translation_notes

@@ -1123,6 +1123,17 @@ Flag features requiring a higher subscription than ${srxLicense} in _translation
   });
   const policyJson = JSON.stringify(cleanPolicies);
 
+  // Include decryption rules for SSL Proxy mapping (PAN-OS only)
+  const decryptionRules = intermediateConfig?.decryption_rules || [];
+  const decryptionContext = decryptionRules.length > 0
+    ? `\n\nPAN-OS SSL Decryption Rules (${decryptionRules.length}):\n${JSON.stringify(decryptionRules.filter(r => !r.disabled).map(r => ({
+        name: r.name, src_zones: r.src_zones, dst_zones: r.dst_zones,
+        src_addresses: r.src_addresses, dst_addresses: r.dst_addresses,
+        services: r.services, url_categories: r.url_categories,
+        action: r.action, decryption_type: r.decryption_type
+      })))}\n\nFor each security rule whose traffic would match a decryption rule with action="decrypt", set _srx_decrypt: true and note the matching decryption rule in _translation_notes. For "no-decrypt" rules, note that traffic is explicitly excluded from decryption.`
+    : '';
+
   const licenseUserNote = srxLicense
     ? `\nTarget SRX subscription: ${srxLicense} — translate security profiles within this tier, flag features requiring a higher tier in _translation_notes.`
     : `\nTarget SRX subscription: Base (none) — flag ALL advanced security features (IDP, UTM, EWF, ATP Cloud) as requiring a subscription upgrade in _translation_notes.`;
@@ -1133,7 +1144,7 @@ Flag features requiring a higher subscription than ${srxLicense} in _translation
 
 Source vendor: ${vendor}
 Target platform: Juniper SRX ${targetModel || ''}${licenseUserNote}
-Available zones: ${zones.join(', ')}${addressSummary}${groupSummary}
+Available zones: ${zones.join(', ')}${addressSummary}${groupSummary}${decryptionContext}
 
 Source policies (JSON):
 ${policyJson}
@@ -1250,6 +1261,54 @@ export function parseTranslationResponse(response) {
 }
 
 /**
+ * Safety net: apply _srx_decrypt to allow rules in zone-pairs covered by
+ * PAN-OS decryption rules, if the LLM didn't already set the flag.
+ */
+function applyDecryptionSafetyNet(translatedRules, intermediateConfig) {
+  const decryptionRules = intermediateConfig?.decryption_rules || [];
+  if (decryptionRules.length === 0) return;
+
+  // Build a set of zone-pairs that have decrypt action
+  const decryptZonePairs = new Set();
+  for (const dr of decryptionRules) {
+    if (dr.action === 'decrypt' && !dr.disabled) {
+      const srcZones = dr.src_zones?.length ? dr.src_zones : ['any'];
+      const dstZones = dr.dst_zones?.length ? dr.dst_zones : ['any'];
+      for (const sz of srcZones) {
+        for (const dz of dstZones) {
+          decryptZonePairs.add(`${sz}\u2192${dz}`);
+        }
+      }
+    }
+  }
+  if (decryptZonePairs.size === 0) return;
+
+  for (const rule of translatedRules) {
+    if (rule._srx_decrypt || rule.disabled || rule.action === 'deny' || rule.action === 'reject') continue;
+    const srcZones = rule.src_zones?.length ? rule.src_zones : ['any'];
+    const dstZones = rule.dst_zones?.length ? rule.dst_zones : ['any'];
+    let matched = false;
+    for (const sz of srcZones) {
+      for (const dz of dstZones) {
+        if (decryptZonePairs.has(`${sz}\u2192${dz}`) || decryptZonePairs.has(`any\u2192${dz}`)
+            || decryptZonePairs.has(`${sz}\u2192any`) || decryptZonePairs.has('any\u2192any')) {
+          matched = true;
+          break;
+        }
+      }
+      if (matched) break;
+    }
+    if (matched) {
+      rule._srx_decrypt = true;
+      if (!rule._translation_notes?.includes('SSL')) {
+        rule._translation_notes = (rule._translation_notes || '') +
+          ' SSL Proxy enabled \u2014 matched PAN-OS decryption rule covering this zone pair.';
+      }
+    }
+  }
+}
+
+/**
  * Translates source security policies to SRX format via LLM.
  * Automatically chunks large rulesets (>30 rules) into smaller batches.
  *
@@ -1288,6 +1347,7 @@ export async function translatePolicies(intermediateConfig, targetModel, srxLice
     console.log('[translate] Response preview:', response.slice(0, 500));
     report({ phase: 'parsing_response', detail: `Parsing LLM response (~${responseEstimate.toLocaleString()} tokens)`, chunk: 1, totalChunks: 1, promptTokens: promptEstimate, responseTokens: responseEstimate });
     const result = parseTranslationResponse(response);
+    applyDecryptionSafetyNet(result, intermediateConfig);
     report({ phase: 'complete', detail: `Translated ${result.length} rules`, chunk: 1, totalChunks: 1, promptTokens: totalPromptTokens, responseTokens: totalResponseTokens });
     return result;
   }
@@ -1340,6 +1400,7 @@ export async function translatePolicies(intermediateConfig, targetModel, srxLice
 
   // Re-index all rules sequentially
   const result = allTranslated.map((p, i) => ({ ...p, _rule_index: i }));
+  applyDecryptionSafetyNet(result, intermediateConfig);
   report({ phase: 'complete', detail: `Translated ${result.length} rules from ${policies.length} source rules`, chunk: chunks.length, totalChunks: chunks.length, promptTokens: totalPromptTokens, responseTokens: totalResponseTokens });
   return result;
 }

@@ -159,6 +159,7 @@ Click **Convert to SRX** to generate the output. Switch between **Set Commands**
 - **Status filtering** — Filter the policy table by review status (All / Unreviewed / LLM Reviewed / Accepted / Disabled) — available on the "to SRX" tab
 - **Accept rules** — Click any rule to review its details and translation notes, then click Accept. A progress counter in the navbar tracks accepted vs LLM-reviewed rules
 - **Subscription-aware translation** — SRX subscription tier (Base/A1/A2/P1/P2) is passed to the LLM, which maps security profiles to the correct tier and flags features requiring upgrades in `_translation_notes`
+- **SSL Decryption → SSL Proxy mapping** — PAN-OS decryption rules (separate rulebase) are sent as context to the LLM during translation. The LLM sets `_srx_decrypt: true` on security rules whose traffic matches decrypt-action decryption rules. A zone-pair safety net auto-applies the flag on any allow rules the LLM missed
 
 ### LLM Integration
 - **Multiple providers** — Claude (Anthropic), OpenAI, Ollama, LM Studio, or any OpenAI-compatible endpoint
@@ -199,7 +200,7 @@ The following features are **not converted** by this tool and must be configured
 - **AAA / Authentication** — RADIUS, TACACS+, LDAP server configuration and authentication policies
 - **Dynamic Routing Protocols** — BGP, OSPF, EVPN, VxLAN (only static routes are converted; planned for Rev8)
 - **User-ID / Identity Policies** — PAN-OS User-ID, FortiGate FSSO, Cisco IDFW user/group-based policies (planned for Rev8)
-- **SSL/TLS Decryption** — SSL proxy, certificate management, PKI configuration (PAN-OS decryption rules are parsed and displayed in the SSL B&I tab but not converted to SRX config)
+- **SSL/TLS Decryption** — PAN-OS decryption rules are parsed, displayed in the SSL B&I tab, and used during LLM translation to set `_srx_decrypt` on matching security rules. However, full SRX SSL Proxy config generation (certificate management, PKI, proxy profiles) is not yet automated
 - **Policy-Based Forwarding** — PAN-OS PBF rules are parsed and displayed in the PBF tab but not converted to SRX filter-based forwarding
 - **NetFlow / Telemetry** — sFlow, traffic monitoring, streaming telemetry
 - **Management Access** — Admin users, SNMP communities, SSH/API access restrictions

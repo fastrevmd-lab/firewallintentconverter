@@ -88,6 +88,7 @@
 - [x] **PAN-OS Policy-Based Forwarding parser** — Parses `<rulebase><pbf>` rules from PAN-OS configs including from-zone/interface, forwarding action (forward/discard/no-pbf), egress interface, next-hop, monitor settings, and symmetric return. Displayed in a new "PBF" tab in the from-PA view
 - [x] **SSL B&I and PBF tabs** — Two new tabs in the center panel between Security Rules and Objects (from-PA view only). Read-only display tables showing decryption and PBF rules parsed from the source PAN-OS config
 - [x] **PAN-OS → SRX security profile mapping fix** — Corrected the PAN-OS security profile to SRX subscription mapping: Antivirus→Flow-based AV, Anti-Spyware→Anti-malware, Vulnerability→IPS, URL Filtering→Content Security (destination object), File Blocking→Content Security (Content Filtering), WildFire→no direct mapping (note ATP). Updated translate-panos.txt prompt to instruct LLM to set `_srx_*` boolean flags. Added safety-net mapping in `parseTranslationResponse()` so UI toggles display correctly regardless of LLM output format
+- [x] **PAN-OS SSL Decryption → SRX SSL Proxy mapping** — Hybrid LLM + deterministic approach. Decryption rules are now sent as context alongside security policies in the LLM translation prompt, instructing the LLM to set `_srx_decrypt: true` on security rules whose traffic scope matches a decrypt-action decryption rule. A zone-pair safety net (`applyDecryptionSafetyNet()`) runs after LLM translation as fallback, auto-setting `_srx_decrypt` on allow rules in zone-pairs covered by decryption rules that the LLM may have missed. Handles ssh-proxy gaps, ssl-inbound-inspection cert notes, and no-decrypt exclusions
 
 ---
 
@@ -136,7 +137,7 @@
 ## Known Limitations
 
 - **AAA / Authentication** — RADIUS, TACACS+, LDAP server config not converted (noted in output comments)
-- **SSL/TLS Decryption** — PAN-OS SSL B&I rules now parsed and displayed in dedicated tab; SRX SSL Proxy config generation not yet automated (certificate management, PKI require manual setup)
+- **SSL/TLS Decryption** — PAN-OS SSL B&I rules parsed, displayed in dedicated tab, and used during LLM translation to set `_srx_decrypt` on matching security rules. Full SRX SSL Proxy config generation not yet automated (certificate management, PKI, proxy profiles require manual setup)
 - **Policy-Based Forwarding** — PAN-OS PBF rules now parsed and displayed in dedicated tab; SRX filter-based forwarding generation not yet automated
 - **NetFlow / Telemetry** — sFlow, streaming telemetry not converted
 - **Management Access** — Admin users, SNMP communities, SSH/API access not converted

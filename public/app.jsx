@@ -977,6 +977,22 @@ export default function App() {
                   >
                     {effectiveViewMode === 'srx' ? 'Security Policies' : effectiveViewMode === 'fortigate' ? 'Firewall Policies' : effectiveViewMode === 'cisco' ? 'Access Control' : effectiveViewMode === 'checkpoint' ? 'Access Rules' : effectiveViewMode === 'sonicwall' ? 'Access Rules' : effectiveViewMode === 'huawei' ? 'Security Policies' : 'Security Rules'} ({intermediateConfig.security_policies?.length || 0})
                   </button>
+                  {platformView !== 'srx' && (
+                  <button
+                    className={`center-tab-btn ${editTab === 'decryption' ? 'active' : ''}`}
+                    onClick={() => setEditTab('decryption')}
+                  >
+                    SSL B&amp;I ({intermediateConfig.decryption_rules?.length || 0})
+                  </button>
+                  )}
+                  {platformView !== 'srx' && (
+                  <button
+                    className={`center-tab-btn ${editTab === 'pbf' ? 'active' : ''}`}
+                    onClick={() => setEditTab('pbf')}
+                  >
+                    PBF ({intermediateConfig.pbf_rules?.length || 0})
+                  </button>
+                  )}
                   <button
                     className={`center-tab-btn ${editTab === 'objects' ? 'active' : ''}`}
                     onClick={() => setEditTab('objects')}
@@ -1098,6 +1114,86 @@ export default function App() {
                       platformView={platformView}
                     />
                   )
+                )}
+                {editTab === 'decryption' && (
+                  <div className="panel-body" style={{ overflow: 'auto', flex: 1 }}>
+                    <table className="policy-table">
+                      <thead>
+                        <tr>
+                          <th>#</th>
+                          <th>Name</th>
+                          <th>Src Zone</th>
+                          <th>Dst Zone</th>
+                          <th>Source</th>
+                          <th>Destination</th>
+                          <th>Service</th>
+                          <th>URL Category</th>
+                          <th>Type</th>
+                          <th>Action</th>
+                          <th>Profile</th>
+                          <th>Description</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(intermediateConfig.decryption_rules || []).map((rule, i) => (
+                          <tr key={i} className={rule.disabled ? 'disabled-row' : ''}>
+                            <td>{rule._rule_index}</td>
+                            <td className="rule-name">{rule.name}</td>
+                            <td>{rule.src_zones?.join(', ') || 'any'}</td>
+                            <td>{rule.dst_zones?.join(', ') || 'any'}</td>
+                            <td>{rule.src_addresses?.join(', ') || 'any'}</td>
+                            <td>{rule.dst_addresses?.join(', ') || 'any'}</td>
+                            <td>{rule.services?.join(', ') || 'any'}</td>
+                            <td>{rule.url_categories?.join(', ') || 'any'}</td>
+                            <td><span className="badge">{rule.decryption_type || '—'}</span></td>
+                            <td><span className={`action-badge ${rule.action === 'decrypt' ? 'allow' : 'deny'}`}>{rule.action}</span></td>
+                            <td>{rule.decryption_profile || '—'}</td>
+                            <td className="desc-cell">{rule.description}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+                {editTab === 'pbf' && (
+                  <div className="panel-body" style={{ overflow: 'auto', flex: 1 }}>
+                    <table className="policy-table">
+                      <thead>
+                        <tr>
+                          <th>#</th>
+                          <th>Name</th>
+                          <th>From ({'{type}'})</th>
+                          <th>Source</th>
+                          <th>Destination</th>
+                          <th>Application</th>
+                          <th>Service</th>
+                          <th>Action</th>
+                          <th>Egress Intf</th>
+                          <th>Next Hop</th>
+                          <th>Monitor</th>
+                          <th>Description</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(intermediateConfig.pbf_rules || []).map((rule, i) => (
+                          <tr key={i} className={rule.disabled ? 'disabled-row' : ''}>
+                            <td>{rule._rule_index}</td>
+                            <td className="rule-name">{rule.name}</td>
+                            <td>{rule.from_value?.join(', ') || '—'} <span className="badge">{rule.from_type}</span></td>
+                            <td>{rule.src_addresses?.join(', ') || 'any'}</td>
+                            <td>{rule.dst_addresses?.join(', ') || 'any'}</td>
+                            <td>{rule.applications?.join(', ') || 'any'}</td>
+                            <td>{rule.services?.join(', ') || 'any'}</td>
+                            <td><span className={`action-badge ${rule.action === 'forward' ? 'allow' : rule.action === 'discard' ? 'deny' : ''}`}>{rule.action}</span></td>
+                            <td>{rule.egress_interface || '—'}</td>
+                            <td>{rule.next_hop_value ? `${rule.next_hop_type}: ${rule.next_hop_value}` : '—'}</td>
+                            <td>{rule.monitor_ip ? `${rule.monitor_ip}${rule.monitor_disable_if_unreachable ? ' (failover)' : ''}` : '—'}</td>
+                            <td className="desc-cell">{rule.description}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 )}
                 {editTab === 'zones' && (
                   <ZoneEditor

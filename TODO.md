@@ -82,6 +82,11 @@
 - [x] **Greenfield "Import LLM Config"** — "Translate with LLM" button renamed to "Import LLM Config" in greenfield mode. Greenfield "Start Interview" auto-opens model selection
 - [x] **Per-vendor translate prompts** — 7 vendor-specific translate prompt files (PAN-OS, FortiGate, Cisco ASA, Check Point, SonicWall, Huawei USG, SRX-to-SRX) each containing that vendor's full feature equivalency matrix, specific migration pitfalls, action mapping, and security profile mapping. Auto-selected at translation time based on detected source vendor. SRX-to-SRX prompt focuses on optimization, modernization, and best-practice cleanup
 - [x] **Vendor prompt Settings UI** — Dropdown selector in Settings > "Translate Ruleset LLM Instructions" to view/edit per-vendor prompts independently. Each vendor prompt is stored separately in localStorage and loaded from `static/prompts/translate-{vendor}.txt` on disk
+- [x] **PAN-OS EDL block list handling** — LLM prompt instructs disabling rules referencing PAN-OS proprietary EDLs (panw-bulletproof-ip-list, panw-highrisk-ip-list, etc.) and enabling SecIntel on all allow rules as replacement
+- [x] **PAN-OS Panorama/management app detection** — LLM prompt instructs disabling rules whose only purpose is PAN-OS infrastructure (panorama, paloalto-updates, paloalto-wildfire-cloud, etc.) with "No longer needed rule, by LLM" description
+- [x] **PAN-OS SSL Decryption parser** — Parses `<rulebase><decryption>` rules from PAN-OS configs including action (decrypt/no-decrypt), type (ssl-forward-proxy/ssh-proxy/ssl-inbound-inspection), certificate references, URL categories, and decryption profiles. Displayed in a new "SSL B&I" tab in the from-PA view
+- [x] **PAN-OS Policy-Based Forwarding parser** — Parses `<rulebase><pbf>` rules from PAN-OS configs including from-zone/interface, forwarding action (forward/discard/no-pbf), egress interface, next-hop, monitor settings, and symmetric return. Displayed in a new "PBF" tab in the from-PA view
+- [x] **SSL B&I and PBF tabs** — Two new tabs in the center panel between Security Rules and Objects (from-PA view only). Read-only display tables showing decryption and PBF rules parsed from the source PAN-OS config
 
 ---
 
@@ -90,6 +95,8 @@
 ### Rev7 — Multi-Firewall Logical Systems & Minor Features
 - [x] **Feedback/suggestion box** — Chat-bubble icon in the navbar opens a modal where users pick a category (Bug Report, Feature Request, Improvement), write a description, and submit as a pre-filled GitHub Issue in a new tab
 - [x] **Site Name / Site Group** — Optional text fields in Model Selection for site identification. Values are emitted as header comments at the top of SRX set-command and XML output (e.g. `# Site: branch-office-seattle`). Prep for future SDC/Mist integration with site/group concepts
+- [x] **Per-vendor conversion system prompts** — 7 vendor-specific translate prompt files with full feature equivalency matrices, migration pitfalls, action mapping, and security profile mapping. Auto-selected at translation time based on detected source vendor
+- [x] **PAN-OS parser: SSL B&I and PBF rules** — PAN-OS parser now extracts SSL Decryption (`<rulebase><decryption>`) and Policy-Based Forwarding (`<rulebase><pbf>`) rules. Displayed in dedicated from-PA tabs
 - [ ] Multi-firewall collapse into logical-systems/tenants
 - [ ] Import multiple configs and merge into a single SRX with logical-system separation
 - [ ] Logical-system-aware address books, policies, and NAT
@@ -128,7 +135,8 @@
 ## Known Limitations
 
 - **AAA / Authentication** — RADIUS, TACACS+, LDAP server config not converted (noted in output comments)
-- **SSL/TLS Decryption** — SSL proxy, certificate management, PKI not converted
+- **SSL/TLS Decryption** — PAN-OS SSL B&I rules now parsed and displayed in dedicated tab; SRX SSL Proxy config generation not yet automated (certificate management, PKI require manual setup)
+- **Policy-Based Forwarding** — PAN-OS PBF rules now parsed and displayed in dedicated tab; SRX filter-based forwarding generation not yet automated
 - **NetFlow / Telemetry** — sFlow, streaming telemetry not converted
 - **Management Access** — Admin users, SNMP communities, SSH/API access not converted
 - **Dynamic Routing** — Only static routes currently (Rev9 planned)

@@ -199,7 +199,8 @@ The following features are **not converted** by this tool and must be configured
 - **AAA / Authentication** — RADIUS, TACACS+, LDAP server configuration and authentication policies
 - **Dynamic Routing Protocols** — BGP, OSPF, EVPN, VxLAN (only static routes are converted; planned for Rev8)
 - **User-ID / Identity Policies** — PAN-OS User-ID, FortiGate FSSO, Cisco IDFW user/group-based policies (planned for Rev8)
-- **SSL/TLS Decryption** — SSL proxy, certificate management, PKI configuration
+- **SSL/TLS Decryption** — SSL proxy, certificate management, PKI configuration (PAN-OS decryption rules are parsed and displayed in the SSL B&I tab but not converted to SRX config)
+- **Policy-Based Forwarding** — PAN-OS PBF rules are parsed and displayed in the PBF tab but not converted to SRX filter-based forwarding
 - **NetFlow / Telemetry** — sFlow, traffic monitoring, streaming telemetry
 - **Management Access** — Admin users, SNMP communities, SSH/API access restrictions
 

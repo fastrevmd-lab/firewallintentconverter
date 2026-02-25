@@ -285,6 +285,85 @@ export const SAMPLE_CONFIGS = {
                 </entry>
               </rules>
             </nat>
+            <decryption>
+              <rules>
+                <entry name="decrypt-outbound-web">
+                  <from><member>trust</member></from>
+                  <to><member>untrust</member></to>
+                  <source><member>internal-net</member></source>
+                  <destination><member>any</member></destination>
+                  <source-user><member>any</member></source-user>
+                  <service><member>any</member></service>
+                  <category><member>any</member></category>
+                  <action>decrypt</action>
+                  <type><ssl-forward-proxy/></type>
+                  <profile>best-practice-decrypt</profile>
+                  <log-success>yes</log-success>
+                  <log-fail>yes</log-fail>
+                  <description>Decrypt outbound SSL/TLS for inspection</description>
+                </entry>
+                <entry name="no-decrypt-finance">
+                  <from><member>trust</member></from>
+                  <to><member>untrust</member></to>
+                  <source><member>any</member></source>
+                  <destination><member>any</member></destination>
+                  <source-user><member>any</member></source-user>
+                  <service><member>any</member></service>
+                  <category><member>financial-services</member><member>health-and-medicine</member></category>
+                  <action>no-decrypt</action>
+                  <description>Exempt financial and health sites from decryption</description>
+                </entry>
+                <entry name="decrypt-inbound-webserver">
+                  <from><member>untrust</member></from>
+                  <to><member>trust</member></to>
+                  <source><member>any</member></source>
+                  <destination><member>web-server-1</member></destination>
+                  <source-user><member>any</member></source-user>
+                  <service><member>application-default</member></service>
+                  <category><member>any</member></category>
+                  <action>decrypt</action>
+                  <type><ssl-inbound-inspection><ssl-certificate>webserver-cert</ssl-certificate></ssl-inbound-inspection></type>
+                  <profile>inbound-decrypt-profile</profile>
+                  <description>Decrypt inbound HTTPS to web server for IPS inspection</description>
+                </entry>
+              </rules>
+            </decryption>
+            <pbf>
+              <rules>
+                <entry name="route-guest-via-isp2">
+                  <from><zone><member>trust</member></zone></from>
+                  <source><member>internal-net</member></source>
+                  <destination><member>any</member></destination>
+                  <source-user><member>any</member></source-user>
+                  <application><member>any</member></application>
+                  <service><member>any</member></service>
+                  <action>
+                    <forward>
+                      <egress-interface>ethernet1/3</egress-interface>
+                      <nexthop><ip-address>203.0.113.1</ip-address></nexthop>
+                      <monitor><ip-address>203.0.113.1</ip-address><disable-if-unreachable>yes</disable-if-unreachable></monitor>
+                    </forward>
+                  </action>
+                  <enforce-symmetric-return><enabled>yes</enabled></enforce-symmetric-return>
+                  <description>Route guest WiFi traffic through ISP2 link</description>
+                </entry>
+                <entry name="voip-direct-route">
+                  <from><zone><member>trust</member></zone></from>
+                  <source><member>any</member></source>
+                  <destination><member>any</member></destination>
+                  <source-user><member>any</member></source-user>
+                  <application><member>sip</member><member>rtp</member></application>
+                  <service><member>any</member></service>
+                  <action>
+                    <forward>
+                      <egress-interface>ethernet1/4</egress-interface>
+                      <nexthop><ip-address>10.0.100.1</ip-address></nexthop>
+                    </forward>
+                  </action>
+                  <description>Route VoIP traffic through dedicated MPLS link</description>
+                </entry>
+              </rules>
+            </pbf>
           </rulebase>
           <schedule>
             <entry name="business-hours">
@@ -732,6 +811,54 @@ export const SAMPLE_CONFIGS = {
                 </entry>
               </rules>
             </nat>
+            <decryption>
+              <rules>
+                <entry name="decrypt-outbound-ssl">
+                  <from><member>trust</member></from>
+                  <to><member>untrust</member></to>
+                  <source><member>any</member></source>
+                  <destination><member>any</member></destination>
+                  <source-user><member>any</member></source-user>
+                  <service><member>any</member></service>
+                  <category><member>any</member></category>
+                  <action>decrypt</action>
+                  <type><ssl-forward-proxy/></type>
+                  <profile>branch-decrypt-profile</profile>
+                  <description>Decrypt outbound SSL for branch office users</description>
+                </entry>
+                <entry name="no-decrypt-banking">
+                  <from><member>trust</member></from>
+                  <to><member>untrust</member></to>
+                  <source><member>any</member></source>
+                  <destination><member>any</member></destination>
+                  <source-user><member>any</member></source-user>
+                  <service><member>any</member></service>
+                  <category><member>financial-services</member></category>
+                  <action>no-decrypt</action>
+                  <description>Exempt banking sites from SSL decryption</description>
+                </entry>
+              </rules>
+            </decryption>
+            <pbf>
+              <rules>
+                <entry name="dmz-traffic-isp1">
+                  <from><zone><member>dmz</member></zone></from>
+                  <source><member>any</member></source>
+                  <destination><member>any</member></destination>
+                  <source-user><member>any</member></source-user>
+                  <application><member>any</member></application>
+                  <service><member>any</member></service>
+                  <action>
+                    <forward>
+                      <egress-interface>ethernet1/2</egress-interface>
+                      <nexthop><ip-address>198.51.100.1</ip-address></nexthop>
+                      <monitor><ip-address>198.51.100.1</ip-address><disable-if-unreachable>yes</disable-if-unreachable></monitor>
+                    </forward>
+                  </action>
+                  <description>Force DMZ outbound traffic through ISP1</description>
+                </entry>
+              </rules>
+            </pbf>
           </rulebase>
           <schedule>
             <entry name="business-hours">
@@ -1165,6 +1292,83 @@ export const SAMPLE_CONFIGS = {
                 </entry>
               </rules>
             </nat>
+            <decryption>
+              <rules>
+                <entry name="decrypt-all-outbound">
+                  <from><member>trust</member></from>
+                  <to><member>untrust</member></to>
+                  <source><member>any</member></source>
+                  <destination><member>any</member></destination>
+                  <source-user><member>any</member></source-user>
+                  <service><member>any</member></service>
+                  <category><member>any</member></category>
+                  <action>decrypt</action>
+                  <type><ssl-forward-proxy/></type>
+                  <profile>enterprise-decrypt-profile</profile>
+                  <description>Decrypt all outbound SSL traffic from corporate users</description>
+                </entry>
+                <entry name="no-decrypt-executive">
+                  <from><member>trust</member></from>
+                  <to><member>untrust</member></to>
+                  <source><member>any</member></source>
+                  <destination><member>any</member></destination>
+                  <source-user><member>any</member></source-user>
+                  <service><member>any</member></service>
+                  <category>
+                    <member>financial-services</member>
+                    <member>health-and-medicine</member>
+                  </category>
+                  <action>no-decrypt</action>
+                  <description>Exempt financial and healthcare sites from decryption for compliance</description>
+                </entry>
+                <entry name="decrypt-inbound-dc">
+                  <from><member>untrust</member></from>
+                  <to><member>dmz</member></to>
+                  <source><member>any</member></source>
+                  <destination><member>dc-web-01</member></destination>
+                  <source-user><member>any</member></source-user>
+                  <service><member>any</member></service>
+                  <category><member>any</member></category>
+                  <action>decrypt</action>
+                  <type><ssl-inbound-inspection><ssl-certificate>dc-web-cert</ssl-certificate></ssl-inbound-inspection></type>
+                  <description>Decrypt inbound TLS to datacenter web servers for IPS inspection</description>
+                </entry>
+              </rules>
+            </decryption>
+            <pbf>
+              <rules>
+                <entry name="mgmt-traffic-oob">
+                  <from><zone><member>mgmt</member></zone></from>
+                  <source><member>any</member></source>
+                  <destination><member>any</member></destination>
+                  <source-user><member>any</member></source-user>
+                  <application><member>any</member></application>
+                  <service><member>any</member></service>
+                  <action>
+                    <forward>
+                      <egress-interface>ethernet1/5</egress-interface>
+                      <nexthop><ip-address>172.16.0.1</ip-address></nexthop>
+                    </forward>
+                  </action>
+                  <description>Route management traffic through out-of-band network</description>
+                </entry>
+                <entry name="backup-via-mpls">
+                  <from><zone><member>trust</member></zone></from>
+                  <source><member>any</member></source>
+                  <destination><member>any</member></destination>
+                  <source-user><member>any</member></source-user>
+                  <application><member>any</member></application>
+                  <service><member>any</member></service>
+                  <action>
+                    <forward>
+                      <egress-interface>ethernet1/6</egress-interface>
+                      <nexthop><ip-address>10.255.0.1</ip-address></nexthop>
+                    </forward>
+                  </action>
+                  <description>Force backup replication traffic over MPLS link</description>
+                </entry>
+              </rules>
+            </pbf>
           </rulebase>
         </entry>
       </vsys>
@@ -1417,6 +1621,49 @@ export const SAMPLE_CONFIGS = {
                 </entry>
               </rules>
             </nat>
+            <decryption>
+              <rules>
+                <entry name="decrypt-disabled-test">
+                  <from><member>inside</member></from>
+                  <to><member>outside</member></to>
+                  <source><member>any</member></source>
+                  <destination><member>any</member></destination>
+                  <source-user><member>any</member></source-user>
+                  <service><member>any</member></service>
+                  <category><member>any</member></category>
+                  <action>decrypt</action>
+                  <type><ssl-forward-proxy/></type>
+                  <profile>test-decrypt-profile</profile>
+                  <disabled>yes</disabled>
+                  <description>Disabled decrypt rule for testing edge case</description>
+                </entry>
+                <entry name="no-decrypt-pinned-certs">
+                  <from><member>inside</member></from>
+                  <to><member>outside</member></to>
+                  <source><member>any</member></source>
+                  <destination><member>any</member></destination>
+                  <source-user><member>any</member></source-user>
+                  <service><member>any</member></service>
+                  <category><member>any</member></category>
+                  <action>no-decrypt</action>
+                  <description>Exempt cert-pinned applications from decryption</description>
+                </entry>
+              </rules>
+            </decryption>
+            <pbf>
+              <rules>
+                <entry name="pbf-discard-blackhole">
+                  <from><zone><member>inside</member></zone></from>
+                  <source><member>any</member></source>
+                  <destination><member>bogon-ranges</member></destination>
+                  <source-user><member>any</member></source-user>
+                  <application><member>any</member></application>
+                  <service><member>any</member></service>
+                  <action><discard/></action>
+                  <description>Blackhole traffic to bogon ranges</description>
+                </entry>
+              </rules>
+            </pbf>
           </rulebase>
         </entry>
       </vsys>
@@ -2115,6 +2362,85 @@ export const SAMPLE_CONFIGS = {
                 </entry>
               </rules>
             </nat>
+            <decryption>
+              <rules>
+                <entry name="decrypt-user-traffic">
+                  <from><member>Default-LAN-Side</member></from>
+                  <to><member>Internet-Side</member></to>
+                  <source><member>any</member></source>
+                  <destination><member>any</member></destination>
+                  <source-user><member>any</member></source-user>
+                  <service><member>any</member></service>
+                  <category><member>any</member></category>
+                  <action>decrypt</action>
+                  <type><ssl-forward-proxy/></type>
+                  <profile>Acme-Decrypt-Profile</profile>
+                  <log-success>yes</log-success>
+                  <log-fail>yes</log-fail>
+                  <description>Decrypt all outbound user SSL/TLS traffic for inspection</description>
+                </entry>
+                <entry name="no-decrypt-medical">
+                  <from><member>Default-LAN-Side</member></from>
+                  <to><member>Internet-Side</member></to>
+                  <source><member>any</member></source>
+                  <destination><member>any</member></destination>
+                  <source-user><member>any</member></source-user>
+                  <service><member>any</member></service>
+                  <category><member>health-and-medicine</member></category>
+                  <action>no-decrypt</action>
+                  <description>Exempt healthcare and medical sites from SSL decryption</description>
+                </entry>
+                <entry name="decrypt-inbound-web">
+                  <from><member>Internet-Side</member></from>
+                  <to><member>Server-Network</member></to>
+                  <source><member>any</member></source>
+                  <destination><member>AC-Servers</member></destination>
+                  <source-user><member>any</member></source-user>
+                  <service><member>application-default</member></service>
+                  <category><member>any</member></category>
+                  <action>decrypt</action>
+                  <type><ssl-inbound-inspection><ssl-certificate>web-frontend-cert</ssl-certificate></ssl-inbound-inspection></type>
+                  <profile>Acme-Inbound-Decrypt</profile>
+                  <description>Decrypt inbound HTTPS to web servers for IPS inspection</description>
+                </entry>
+              </rules>
+            </decryption>
+            <pbf>
+              <rules>
+                <entry name="guest-wifi-isp2">
+                  <from><zone><member>Default-LAN-Side</member></zone></from>
+                  <source><member>AC-Network</member></source>
+                  <destination><member>any</member></destination>
+                  <source-user><member>any</member></source-user>
+                  <application><member>any</member></application>
+                  <service><member>any</member></service>
+                  <action>
+                    <forward>
+                      <egress-interface>ethernet1/8</egress-interface>
+                      <nexthop><ip-address>203.0.113.1</ip-address></nexthop>
+                      <monitor><ip-address>203.0.113.1</ip-address><disable-if-unreachable>yes</disable-if-unreachable></monitor>
+                    </forward>
+                  </action>
+                  <enforce-symmetric-return><enabled>yes</enabled></enforce-symmetric-return>
+                  <description>Route guest WiFi traffic through secondary ISP link</description>
+                </entry>
+                <entry name="voip-mpls-route">
+                  <from><zone><member>Default-LAN-Side</member></zone></from>
+                  <source><member>any</member></source>
+                  <destination><member>any</member></destination>
+                  <source-user><member>any</member></source-user>
+                  <application><member>sip</member><member>rtp</member></application>
+                  <service><member>any</member></service>
+                  <action>
+                    <forward>
+                      <egress-interface>ethernet1/9</egress-interface>
+                      <nexthop><ip-address>10.200.0.1</ip-address></nexthop>
+                    </forward>
+                  </action>
+                  <description>Route VoIP traffic through dedicated MPLS circuit</description>
+                </entry>
+              </rules>
+            </pbf>
             <default-security-rules>
               <rules>
                 <entry name="interzone-default">

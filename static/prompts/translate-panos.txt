@@ -63,6 +63,35 @@ These PAN-OS features have NO SRX equivalent. If source rules use them, you MUST
 - **Rule Tags with Color Coding** — SRX has no rule tagging system. Tags are lost in translation.
 - **Auto-Tag Remediation** — Immediate DAG/DUG policy change from log events. SRX needs ATP Cloud intermediary.
 
+## PAN-OS External Dynamic Lists (EDLs) — Block List Handling
+PAN-OS EDLs like `panw-bulletproof-ip-list`, `panw-highrisk-ip-list`, `panw-known-ip-list`, and `panw-torexit-ip-list` are Palo Alto proprietary threat intelligence feeds with NO direct SRX equivalent.
+
+**When ANY of these EDLs appear in src_addresses or dst_addresses of a rule:**
+1. Set `disabled: true` on that rule
+2. Add to `_translation_notes`: "Rule disabled — references PAN-OS EDL '{list-name}' which is not supported on SRX. SecIntel (C&C feeds, infected-host feeds) has been enabled on all allow rules as a replacement for proprietary PAN-OS block lists."
+3. Preserve the original rule otherwise (do not delete it)
+
+**Additionally, when ANY PAN-OS EDL is detected anywhere in the ruleset:**
+- Add `"security_profiles": {"secintel": "recommended"}` to ALL rules with `action: "allow"`
+- Add to `_translation_notes` on each affected allow rule: "SecIntel enabled — replaces PAN-OS EDL-based threat blocking (panw-bulletproof-ip-list, panw-highrisk-ip-list, etc.) with SRX SecIntel feeds (C&C, infected hosts, threat intelligence). Requires A1+ subscription."
+
+## Panorama & PAN-OS Management Applications — Disable on Migration
+If the source configuration originates from Panorama, or if rules reference Palo Alto-specific management/infrastructure applications, these rules serve NO purpose on an SRX and must be disabled.
+
+**PAN-OS management applications to look for** (not exhaustive — disable any rule whose ONLY purpose is PAN-OS infrastructure):
+- `panorama`, `paloalto-updates`, `paloalto-wildfire-cloud`, `pan-db-cloud`
+- `paloalto-logging-service`, `paloalto-shared-services`, `paloalto-device-telemetry`
+- `cortex-data-lake`, `autofocus`, `paloalto-userid-agent`
+- Any application starting with `paloalto-` or `pan-` that is a PAN-OS management function
+
+**When a rule's applications consist ENTIRELY of PAN-OS management apps:**
+1. Set `disabled: true`
+2. Set `description: "No longer needed rule, by LLM"`
+3. Add to `_translation_notes`: "Rule disabled — references PAN-OS management application(s) ({app-names}) that are specific to Palo Alto infrastructure and have no purpose on SRX."
+4. Preserve the original rule (do not delete it)
+
+**If a rule mixes PAN-OS management apps with legitimate apps:** remove the PAN-OS management apps from the applications list, keep the rule enabled, and note the removed apps in `_translation_notes`.
+
 ## PAN-OS-Specific Translation Pitfalls
 - PAN-OS App-ID rules with "application-default" service: translate to the correct SRX application + "any" service, since SRX AppFW handles port matching
 - PAN-OS "any" application with specific ports: keep as service-based rule on SRX, note opportunity for AppID in _translation_notes
@@ -71,6 +100,7 @@ These PAN-OS features have NO SRX equivalent. If source rules use them, you MUST
 - PAN-OS "rule type" (universal/intrazone/interzone): SRX uses explicit from-zone/to-zone pairs. Universal rules may need to be expanded to multiple zone-pair policies
 - PAN-OS disabled rules: set disabled=true, preserve for documentation
 - PAN-OS WildFire profiles: translate to ATP Cloud (requires P1/P2). Note: ATP Cloud is async (submit-and-alert), not inline hold like WildFire
+- PAN-OS EDLs (panw-bulletproof-ip-list, panw-highrisk-ip-list, panw-known-ip-list, panw-torexit-ip-list): see EDL handling section above
 
 ## Translation Rules
 

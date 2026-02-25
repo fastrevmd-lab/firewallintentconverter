@@ -111,6 +111,8 @@ export function parsePanosConfig(configText) {
   const allSchedules = [];
   const allSecurityProfileObjects = [];
   const allSecurityProfileDefinitions = {};
+  const allDecryptionRules = [];
+  const allPbfRules = [];
   const routingContexts = [];
 
   // Parse HA configuration (device-level, not per-vsys)
@@ -231,6 +233,12 @@ export function parsePanosConfig(configText) {
     allNatRules.push(...natRules);
     allExternalLists.push(...externalLists);
     allSchedules.push(...schedules);
+
+    // Parse decryption and PBF rulebases
+    const decryptionRules = parseDecryptionRules(vsys, warnings);
+    const pbfRules = parsePbfRules(vsys, warnings);
+    allDecryptionRules.push(...decryptionRules);
+    allPbfRules.push(...pbfRules);
   }
 
   // Flatten static routes from all virtual routers
@@ -276,6 +284,8 @@ export function parsePanosConfig(configText) {
     service_groups: allServiceGroups,
     security_policies: allSecurityPolicies,
     nat_rules: allNatRules,
+    decryption_rules: allDecryptionRules,
+    pbf_rules: allPbfRules,
     applications: allApplications,
     application_groups: allApplicationGroups,
     schedules: allSchedules,
@@ -302,6 +312,8 @@ export function parsePanosConfig(configText) {
       export_date: new Date().toISOString(),
       rule_count: allSecurityPolicies.length,
       nat_rule_count: allNatRules.length,
+      decryption_rule_count: allDecryptionRules.length,
+      pbf_rule_count: allPbfRules.length,
       object_count: allAddressObjects.length + allAddressGroups.length + allServiceObjects.length + allServiceGroups.length,
       zone_count: allZones.length,
       interface_count: interfaces.length,
@@ -1801,6 +1813,227 @@ function parseNatRules(vsys, warnings) {
   });
 }
 
+
+// ---------------------------------------------------------------------------
+// Decryption Rules Parser
+// ---------------------------------------------------------------------------
+
+/**
+ * Parses PAN-OS SSL/TLS decryption rules.
+ * Located at: vsys > rulebase > decryption > rules > entry
+ */
+function parseDecryptionRules(vsys, warnings) {
+  const rulebase = vsys.rulebase;
+  if (!rulebase) return [];
+
+  const decryptNode = rulebase.decryption;
+  if (!decryptNode) return [];
+
+  const rulesNode = decryptNode.rules;
+  if (!rulesNode) return [];
+
+  const rulesContainer = Array.isArray(rulesNode) ? rulesNode[0] : rulesNode;
+  const ruleEntries = extractEntries(rulesContainer);
+
+  return ruleEntries.map((entry, index) => {
+    const name = entry['@_name'] || `decrypt-rule-${index + 1}`;
+    const srcZones = extractMembers(entry.from);
+    const dstZones = extractMembers(entry.to);
+    const srcAddresses = extractMembers(entry.source);
+    const dstAddresses = extractMembers(entry.destination);
+    const srcUsers = extractMembers(entry['source-user']);
+    const services = extractMembers(entry.service);
+    const urlCategories = extractMembers(entry.category);
+    const description = entry.description || '';
+    const disabled = entry.disabled === 'yes' || entry.disabled === true;
+    const tags = extractMembers(entry.tag);
+    const negateSource = entry['negate-source'] === 'yes' || entry['negate-source'] === true;
+    const negateDest = entry['negate-destination'] === 'yes' || entry['negate-destination'] === true;
+
+    // Action: decrypt, no-decrypt, decrypt-and-forward (PAN-OS 8.1+)
+    const action = typeof entry.action === 'string' ? entry.action : 'no-decrypt';
+
+    // Decryption type: ssl-forward-proxy, ssh-proxy, ssl-inbound-inspection
+    let decryptionType = '';
+    let sslCertificate = '';
+    if (entry.type) {
+      for (const dtype of ['ssl-forward-proxy', 'ssh-proxy', 'ssl-inbound-inspection']) {
+        if (entry.type[dtype] !== undefined) {
+          decryptionType = dtype;
+          // ssl-inbound-inspection has a certificate reference
+          if (dtype === 'ssl-inbound-inspection' && typeof entry.type[dtype] === 'object') {
+            sslCertificate = entry.type[dtype]['ssl-certificate'] || '';
+          }
+          break;
+        }
+      }
+    }
+
+    // Decryption profile reference
+    const decryptionProfile = entry.profile || '';
+
+    // Log settings (PAN-OS 10.0+)
+    const logSuccess = entry['log-success'] === 'yes' || entry['log-success'] === true;
+    const logFail = entry['log-fail'] === 'yes' || entry['log-fail'] === true;
+    const logSetting = entry['log-setting'] || '';
+
+    return {
+      name,
+      src_zones: srcZones,
+      dst_zones: dstZones,
+      src_addresses: srcAddresses,
+      dst_addresses: dstAddresses,
+      src_users: srcUsers,
+      negate_source: negateSource,
+      negate_destination: negateDest,
+      services,
+      url_categories: urlCategories,
+      action,
+      decryption_type: decryptionType,
+      ssl_certificate: sslCertificate,
+      decryption_profile: decryptionProfile,
+      log_success: logSuccess,
+      log_fail: logFail,
+      log_setting: logSetting,
+      description,
+      tags,
+      disabled,
+      _rule_index: index + 1,
+    };
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Policy-Based Forwarding (PBF) Rules Parser
+// ---------------------------------------------------------------------------
+
+/**
+ * Parses PAN-OS policy-based forwarding rules.
+ * Located at: vsys > rulebase > pbf > rules > entry
+ */
+function parsePbfRules(vsys, warnings) {
+  const rulebase = vsys.rulebase;
+  if (!rulebase) return [];
+
+  const pbfNode = rulebase.pbf;
+  if (!pbfNode) return [];
+
+  const rulesNode = pbfNode.rules;
+  if (!rulesNode) return [];
+
+  const rulesContainer = Array.isArray(rulesNode) ? rulesNode[0] : rulesNode;
+  const ruleEntries = extractEntries(rulesContainer);
+
+  return ruleEntries.map((entry, index) => {
+    const name = entry['@_name'] || `pbf-rule-${index + 1}`;
+    const description = entry.description || '';
+    const disabled = entry.disabled === 'yes' || entry.disabled === true;
+    const tags = extractMembers(entry.tag);
+    const schedule = entry.schedule ? String(entry.schedule) : '';
+
+    // Source: from zone or interface
+    let fromType = 'zone';
+    let fromValue = [];
+    if (entry.from) {
+      if (entry.from.zone) {
+        fromType = 'zone';
+        fromValue = extractMembers(entry.from.zone);
+      } else if (entry.from.interface) {
+        fromType = 'interface';
+        fromValue = extractMembers(entry.from.interface);
+      } else {
+        // Fallback: treat child members as zones
+        fromValue = extractMembers(entry.from);
+      }
+    }
+
+    const srcAddresses = extractMembers(entry.source);
+    const dstAddresses = extractMembers(entry.destination);
+    const srcUsers = extractMembers(entry['source-user']);
+    const applications = extractMembers(entry.application);
+    const services = extractMembers(entry.service);
+    const negateSource = entry['negate-source'] === 'yes' || entry['negate-source'] === true;
+    const negateDest = entry['negate-destination'] === 'yes' || entry['negate-destination'] === true;
+
+    // Action: forward, forward-to-vsys, discard, no-pbf
+    let action = 'forward';
+    let egressInterface = '';
+    let nextHopType = '';
+    let nextHopValue = '';
+    let forwardVsys = '';
+    let monitorProfile = '';
+    let monitorIp = '';
+    let monitorDisable = false;
+
+    if (entry.action) {
+      if (entry.action.forward) {
+        action = 'forward';
+        const fwd = entry.action.forward;
+        egressInterface = fwd['egress-interface'] || '';
+        if (fwd.nexthop) {
+          if (fwd.nexthop['ip-address']) {
+            nextHopType = 'ip-address';
+            nextHopValue = String(fwd.nexthop['ip-address']);
+          } else if (fwd.nexthop.fqdn) {
+            nextHopType = 'fqdn';
+            nextHopValue = String(fwd.nexthop.fqdn);
+          }
+        }
+        if (fwd.monitor) {
+          monitorProfile = fwd.monitor.profile || '';
+          monitorIp = fwd.monitor['ip-address'] || '';
+          monitorDisable = fwd.monitor['disable-if-unreachable'] === 'yes' || fwd.monitor['disable-if-unreachable'] === true;
+        }
+      } else if (entry.action['forward-to-vsys']) {
+        action = 'forward-to-vsys';
+        const fvs = entry.action['forward-to-vsys'];
+        forwardVsys = typeof fvs === 'string' ? fvs : (fvs.vsys || '');
+      } else if (entry.action.discard !== undefined) {
+        action = 'discard';
+      } else if (entry.action['no-pbf'] !== undefined) {
+        action = 'no-pbf';
+      }
+    }
+
+    // Symmetric return
+    let symmetricReturn = false;
+    let symmetricReturnAddresses = [];
+    if (entry['enforce-symmetric-return']) {
+      symmetricReturn = entry['enforce-symmetric-return'].enabled === 'yes' || entry['enforce-symmetric-return'].enabled === true;
+      if (entry['enforce-symmetric-return']['nexthop-address-list']) {
+        symmetricReturnAddresses = extractEntries(entry['enforce-symmetric-return']['nexthop-address-list']).map(e => e['@_name'] || '').filter(Boolean);
+      }
+    }
+
+    return {
+      name,
+      from_type: fromType,
+      from_value: fromValue,
+      src_addresses: srcAddresses,
+      dst_addresses: dstAddresses,
+      src_users: srcUsers,
+      negate_source: negateSource,
+      negate_destination: negateDest,
+      applications,
+      services,
+      action,
+      egress_interface: egressInterface,
+      next_hop_type: nextHopType,
+      next_hop_value: nextHopValue,
+      forward_vsys: forwardVsys,
+      monitor_profile: monitorProfile,
+      monitor_ip: monitorIp,
+      monitor_disable_if_unreachable: monitorDisable,
+      symmetric_return: symmetricReturn,
+      symmetric_return_addresses: symmetricReturnAddresses,
+      description,
+      tags,
+      disabled,
+      schedule,
+      _rule_index: index + 1,
+    };
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Syslog Configuration Parser

@@ -10,7 +10,20 @@ import React, { useState, useEffect } from 'react';
 import {
   DEFAULT_FULL_REVIEW_SYSTEM_PROMPT,
   DEFAULT_GREENFIELD_SYSTEM_PROMPT,
+  VENDOR_PROMPT_KEYS,
+  loadVendorTranslatePrompt,
 } from '../utils/llm-client.js';
+
+const VENDOR_LABELS = {
+  '': 'Default (Generic)',
+  panos: 'PAN-OS → SRX',
+  fortigate: 'FortiGate → SRX',
+  cisco_asa: 'Cisco ASA → SRX',
+  checkpoint: 'Check Point → SRX',
+  sonicwall: 'SonicWall → SRX',
+  huawei_usg: 'Huawei USG → SRX',
+  srx: 'SRX → SRX (Optimize)',
+};
 
 const PROVIDERS = [
   { id: 'claude', name: 'Claude (Anthropic)', defaultModel: 'claude-sonnet-4-6', models: [
@@ -42,6 +55,8 @@ export default function LLMSettings({ onClose, initialTab }) {
   const [fullReviewSystemPrompt, setFullReviewSystemPrompt] = useState(DEFAULT_FULL_REVIEW_SYSTEM_PROMPT);
   const [greenfieldSystemPrompt, setGreenfieldSystemPrompt] = useState(DEFAULT_GREENFIELD_SYSTEM_PROMPT);
   const [promptSubTab, setPromptSubTab] = useState('fullReview');
+  const [vendorPromptSelection, setVendorPromptSelection] = useState('');
+  const [vendorPrompts, setVendorPrompts] = useState({});
 
   // MCP state
   const [mcpUrl, setMcpUrl] = useState('');
@@ -63,6 +78,13 @@ export default function LLMSettings({ onClose, initialTab }) {
         setTemperature(settings.temperature ?? 0.2);
         setFullReviewSystemPrompt(settings.fullReviewSystemPrompt || DEFAULT_FULL_REVIEW_SYSTEM_PROMPT);
         setGreenfieldSystemPrompt(settings.greenfieldSystemPrompt || DEFAULT_GREENFIELD_SYSTEM_PROMPT);
+        // Load vendor-specific translate prompts from localStorage
+        const vp = {};
+        for (const v of VENDOR_PROMPT_KEYS) {
+          const k = `translateSystemPrompt_${v}`;
+          if (settings[k]) vp[v] = settings[k];
+        }
+        if (Object.keys(vp).length > 0) setVendorPrompts(vp);
       }
     } catch {
       // Ignore parse errors
@@ -82,6 +104,10 @@ export default function LLMSettings({ onClose, initialTab }) {
       provider, apiKey, model, baseUrl, temperature,
       fullReviewSystemPrompt, greenfieldSystemPrompt,
     };
+    // Save vendor-specific translate prompts
+    for (const [v, prompt] of Object.entries(vendorPrompts)) {
+      if (prompt && prompt.trim()) settings[`translateSystemPrompt_${v}`] = prompt;
+    }
     localStorage.setItem('llm-settings', JSON.stringify(settings));
     const mcpSettings = { url: mcpUrl };
     localStorage.setItem('mcp-settings', JSON.stringify(mcpSettings));
@@ -366,15 +392,51 @@ export default function LLMSettings({ onClose, initialTab }) {
 
           {promptSubTab === 'fullReview' && (
             <>
-              <textarea
-                value={fullReviewSystemPrompt}
-                onChange={(e) => setFullReviewSystemPrompt(e.target.value)}
-                style={promptTextareaStyle}
-              />
-              <PromptFooter
-                length={fullReviewSystemPrompt.length}
-                onReset={() => setFullReviewSystemPrompt(DEFAULT_FULL_REVIEW_SYSTEM_PROMPT)}
-              />
+              <div style={{ marginBottom: 8 }}>
+                <select
+                  value={vendorPromptSelection}
+                  onChange={(e) => setVendorPromptSelection(e.target.value)}
+                  style={{ ...selectStyle, fontSize: 11 }}
+                >
+                  {['', ...VENDOR_PROMPT_KEYS].map(v => (
+                    <option key={v} value={v}>{VENDOR_LABELS[v] || v}</option>
+                  ))}
+                </select>
+                <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4 }}>
+                  {vendorPromptSelection
+                    ? `Editing vendor-specific prompt for ${VENDOR_LABELS[vendorPromptSelection]}. Auto-selected at translation time.`
+                    : 'Default prompt used when no vendor-specific prompt exists. Select a vendor to edit its prompt.'}
+                </div>
+              </div>
+              {vendorPromptSelection === '' ? (
+                <>
+                  <textarea
+                    value={fullReviewSystemPrompt}
+                    onChange={(e) => setFullReviewSystemPrompt(e.target.value)}
+                    style={promptTextareaStyle}
+                  />
+                  <PromptFooter
+                    length={fullReviewSystemPrompt.length}
+                    onReset={() => setFullReviewSystemPrompt(DEFAULT_FULL_REVIEW_SYSTEM_PROMPT)}
+                  />
+                </>
+              ) : (
+                <>
+                  <textarea
+                    value={vendorPrompts[vendorPromptSelection] || loadVendorTranslatePrompt(vendorPromptSelection) || '(No prompt file found for this vendor)'}
+                    onChange={(e) => setVendorPrompts(prev => ({ ...prev, [vendorPromptSelection]: e.target.value }))}
+                    style={promptTextareaStyle}
+                  />
+                  <PromptFooter
+                    length={(vendorPrompts[vendorPromptSelection] || loadVendorTranslatePrompt(vendorPromptSelection) || '').length}
+                    onReset={() => setVendorPrompts(prev => {
+                      const next = { ...prev };
+                      delete next[vendorPromptSelection];
+                      return next;
+                    })}
+                  />
+                </>
+              )}
             </>
           )}
 

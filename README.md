@@ -163,8 +163,8 @@ Click **Convert to SRX** to generate the output. Switch between **Set Commands**
 ### LLM Integration
 - **Multiple providers** — Claude (Anthropic), OpenAI, Ollama, LM Studio, or any OpenAI-compatible endpoint
 - **Browser-only API keys** — All credentials stay in `localStorage` and never touch the server
-- **Editable system prompts** — Separate prompts for ruleset translation and greenfield interview. Prompts are stored as plain-text files in `static/prompts/` (editable on disk) with Settings UI overrides and hardcoded fallback defaults. Each has its own sub-tab in Settings with independent Reset to Default
-- **Vendor-aware translation** — Translation prompts include vendor-specific migration pitfalls for all 6 source vendors (PAN-OS, FortiGate, Cisco ASA, Check Point, SonicWall, Huawei USG) plus a cross-vendor gap summary
+- **Editable system prompts** — Separate prompts for ruleset translation (per-vendor) and greenfield interview. Prompts are stored as plain-text files in `static/prompts/` (editable on disk) with Settings UI overrides and hardcoded fallback defaults. Each has its own sub-tab in Settings with independent Reset to Default
+- **Per-vendor translation prompts** — 7 vendor-specific translate prompts (PAN-OS, FortiGate, Cisco ASA, Check Point, SonicWall, Huawei USG, SRX-to-SRX) each containing that vendor's full feature equivalency matrix, specific migration pitfalls, action mapping, and security profile translation rules. Auto-selected at translation time based on detected source vendor. Editable per-vendor in Settings via dropdown selector
 - **Subscription-aware translation** — SRX subscription tier is included in both the system prompt and user prompt, ensuring security profiles are correctly mapped to available features
 - **Real-time progress** — Translation progress panel shows live elapsed time, chunk progress, and token estimates during LLM calls
 
@@ -217,7 +217,14 @@ firewall-intent-converter/
 ├── static/                       # Static assets served as-is (Vite publicDir)
 │   ├── logo.png                  # Application logo
 │   └── prompts/                  # Editable LLM system prompts (plain text)
-│       ├── translate.txt         # Translation prompt — SRX rules, vendor mapping, subscription tiers
+│       ├── translate.txt         # Default translation prompt — generic SRX rules, subscription tiers
+│       ├── translate-panos.txt   # PAN-OS → SRX — 19-feature equivalency matrix + pitfalls
+│       ├── translate-fortigate.txt # FortiGate → SRX — 21-feature equivalency matrix + pitfalls
+│       ├── translate-cisco_asa.txt # Cisco ASA → SRX — 27-feature equivalency matrix + pitfalls
+│       ├── translate-checkpoint.txt # Check Point → SRX — 20-feature equivalency matrix + pitfalls
+│       ├── translate-sonicwall.txt # SonicWall → SRX — 27-feature equivalency matrix + pitfalls
+│       ├── translate-huawei_usg.txt # Huawei USG → SRX — 26-feature equivalency matrix + pitfalls
+│       ├── translate-srx.txt     # SRX → SRX — optimization, modernization, best practices
 │       ├── full-review.txt       # Translation instructions — vendor pitfalls, cross-vendor gaps
 │       └── greenfield.txt        # Greenfield interview prompt — guided SRX config builder
 ├── src/                          # Server-side modules
@@ -298,11 +305,12 @@ Editable plain-text prompt files control how the LLM behaves during translation 
 
 | File | Purpose |
 |------|---------|
-| `static/prompts/translate.txt` | **Translate ruleset** — SRX translation rules, vendor action mapping, subscription tiers, security profile mapping, logging best practices, rule optimization |
-| `static/prompts/full-review.txt` | **Translate LLM instructions** — Vendor-specific migration pitfalls (all 6 vendors), cross-vendor gap summary, SRX best practices, translation priorities |
+| `static/prompts/translate.txt` | **Default translate** — Generic SRX translation rules, subscription tiers, security profile mapping (fallback when no vendor-specific prompt exists) |
+| `static/prompts/translate-{vendor}.txt` | **Per-vendor translate** — Full feature equivalency matrix, vendor-specific pitfalls, action mapping, profile translation for each source vendor (panos, fortigate, cisco_asa, checkpoint, sonicwall, huawei_usg, srx) |
+| `static/prompts/full-review.txt` | **Translate LLM instructions** — Cross-vendor migration pitfalls summary, SRX best practices, translation priorities |
 | `static/prompts/greenfield.txt` | **Greenfield interview** — guided SRX config builder with use-case discovery, progressive config building via JSON action blocks, best-practice recommendations |
 
-**Priority order:** User edits in the Settings UI (localStorage) take precedence over the on-disk files, which take precedence over the hardcoded defaults in `llm-client.js`. To revert to the on-disk version, click "Reset to Default" in the Settings prompt editor.
+**Priority order:** For translation, vendor-specific prompts take precedence: user edits in Settings UI (per-vendor localStorage) > vendor-specific file (`translate-{vendor}.txt`) > generic user edits > generic file (`translate.txt`) > hardcoded defaults. Select a vendor in the Settings prompt dropdown to view or edit its prompt. Click "Reset to Default" to revert to the on-disk version.
 
 ### MCP Settings
 

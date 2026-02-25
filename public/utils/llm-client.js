@@ -412,6 +412,12 @@ Source firewalls often include security profiles (AV, IPS, URL filtering, sandbo
 /** Cache for prompt files loaded from static/prompts/ */
 const _promptFileCache = { fullReview: null, greenfield: null, translate: null };
 
+/** Cache for vendor-specific translate prompt files */
+const _vendorPromptCache = {};
+
+/** Supported vendor keys for vendor-specific translate prompts */
+export const VENDOR_PROMPT_KEYS = ['panos', 'fortigate', 'cisco_asa', 'checkpoint', 'sonicwall', 'huawei_usg', 'srx'];
+
 const PROMPT_FILE_PATHS = {
   fullReview: '/prompts/full-review.txt',
   greenfield: '/prompts/greenfield.txt',
@@ -420,6 +426,7 @@ const PROMPT_FILE_PATHS = {
 
 /** Pre-load prompt files from disk into cache (fire-and-forget on module init) */
 async function _loadPromptFiles() {
+  // Load base prompts
   for (const [type, path] of Object.entries(PROMPT_FILE_PATHS)) {
     try {
       const res = await fetch(path);
@@ -428,6 +435,16 @@ async function _loadPromptFiles() {
         if (text && text.trim()) _promptFileCache[type] = text.trim();
       }
     } catch { /* ignore — will fall back to hardcoded defaults */ }
+  }
+  // Load vendor-specific translate prompts
+  for (const vendor of VENDOR_PROMPT_KEYS) {
+    try {
+      const res = await fetch(`/prompts/translate-${vendor}.txt`);
+      if (res.ok) {
+        const text = await res.text();
+        if (text && text.trim()) _vendorPromptCache[vendor] = text.trim();
+      }
+    } catch { /* ignore */ }
   }
 }
 // Start loading immediately when the module is imported
@@ -439,9 +456,13 @@ _loadPromptFiles();
  * 2. Prompt file from static/prompts/*.txt (editable on disk)
  * 3. Hardcoded default constant
  *
+ * For translate prompts, an optional sourceVendor can be passed to load
+ * a vendor-specific prompt (e.g., translate-panos.txt).
+ *
  * @param {'fullReview'|'greenfield'|'translate'} [type='fullReview'] - Which prompt to load
+ * @param {string} [sourceVendor] - Source vendor key for vendor-specific translate prompts
  */
-export function loadSystemPrompt(type = 'fullReview') {
+export function loadSystemPrompt(type = 'fullReview', sourceVendor = null) {
   const defaults = {
     fullReview: DEFAULT_FULL_REVIEW_SYSTEM_PROMPT,
     greenfield: DEFAULT_GREENFIELD_SYSTEM_PROMPT,
@@ -453,7 +474,24 @@ export function loadSystemPrompt(type = 'fullReview') {
     translate: 'translateSystemPrompt',
   };
 
-  // 1. Check localStorage (user edits in Settings UI)
+  // For translate type with a vendor, check vendor-specific sources first
+  if (type === 'translate' && sourceVendor && VENDOR_PROMPT_KEYS.includes(sourceVendor)) {
+    // 1a. Check localStorage for vendor-specific override
+    try {
+      const saved = localStorage.getItem('llm-settings');
+      if (saved) {
+        const settings = JSON.parse(saved);
+        const vendorKey = `translateSystemPrompt_${sourceVendor}`;
+        const prompt = settings[vendorKey];
+        if (prompt && prompt.trim()) return prompt;
+      }
+    } catch { /* ignore */ }
+
+    // 2a. Check vendor-specific file cache
+    if (_vendorPromptCache[sourceVendor]) return _vendorPromptCache[sourceVendor];
+  }
+
+  // 1. Check localStorage (user edits in Settings UI — generic translate prompt)
   try {
     const saved = localStorage.getItem('llm-settings');
     if (saved) {
@@ -469,6 +507,30 @@ export function loadSystemPrompt(type = 'fullReview') {
 
   // 3. Hardcoded defaults
   return defaults[type] || DEFAULT_FULL_REVIEW_SYSTEM_PROMPT;
+}
+
+/**
+ * Loads a vendor-specific translate prompt for the Settings UI editor.
+ * Returns the prompt text or null if not found.
+ */
+export function loadVendorTranslatePrompt(vendor) {
+  if (!vendor || !VENDOR_PROMPT_KEYS.includes(vendor)) return null;
+
+  // 1. Check localStorage for vendor-specific override
+  try {
+    const saved = localStorage.getItem('llm-settings');
+    if (saved) {
+      const settings = JSON.parse(saved);
+      const vendorKey = `translateSystemPrompt_${vendor}`;
+      const prompt = settings[vendorKey];
+      if (prompt && prompt.trim()) return prompt;
+    }
+  } catch { /* ignore */ }
+
+  // 2. Check vendor-specific file cache
+  if (_vendorPromptCache[vendor]) return _vendorPromptCache[vendor];
+
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -1041,7 +1103,8 @@ export function buildTranslationPrompt(intermediateConfig, targetModel, srxLicen
 Flag features requiring a higher subscription than ${srxLicense} in _translation_notes.`
     : '';
 
-  const systemPrompt = loadSystemPrompt('translate') + licenseNote;
+  const sourceVendor = intermediateConfig?.metadata?.source_vendor || null;
+  const systemPrompt = loadSystemPrompt('translate', sourceVendor) + licenseNote;
 
   // Strip internal metadata fields to reduce token usage
   const cleanPolicies = policies.map(p => {

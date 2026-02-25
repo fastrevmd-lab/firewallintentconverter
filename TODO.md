@@ -80,6 +80,8 @@
 - [x] **Translation progress panel** — Real-time progress indicator in the right pane during LLM translation showing live elapsed timer (min:sec), phase indicator with pulse animation, chunk progress bar, and estimated prompt/response token counts
 - [x] **Subscription-aware translation** — SRX license tier passed in both system prompt (detailed tier breakdown) and user prompt (explicit instruction). LLM maps security profiles to correct tier and flags features requiring upgrades in `_translation_notes`
 - [x] **Greenfield "Import LLM Config"** — "Translate with LLM" button renamed to "Import LLM Config" in greenfield mode. Greenfield "Start Interview" auto-opens model selection
+- [x] **Per-vendor translate prompts** — 7 vendor-specific translate prompt files (PAN-OS, FortiGate, Cisco ASA, Check Point, SonicWall, Huawei USG, SRX-to-SRX) each containing that vendor's full feature equivalency matrix, specific migration pitfalls, action mapping, and security profile mapping. Auto-selected at translation time based on detected source vendor. SRX-to-SRX prompt focuses on optimization, modernization, and best-practice cleanup
+- [x] **Vendor prompt Settings UI** — Dropdown selector in Settings > "Translate Ruleset LLM Instructions" to view/edit per-vendor prompts independently. Each vendor prompt is stored separately in localStorage and loaded from `static/prompts/translate-{vendor}.txt` on disk
 
 ---
 

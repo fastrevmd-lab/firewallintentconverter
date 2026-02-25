@@ -157,7 +157,8 @@ Click **Convert to SRX** to generate the output. Switch between **Set Commands**
 - **Translation progress** — Real-time progress panel in the right pane showing elapsed time (live ticking timer), chunk progress, and estimated prompt/response token counts
 - **Review status tracking** — Every translated rule starts as *LLM Reviewed* and must be manually accepted. Status labels are color-coded: blue for LLM Reviewed, green for Accepted, grey for Disabled
 - **Status filtering** — Filter the policy table by review status (All / Unreviewed / LLM Reviewed / Accepted / Disabled) — available on the "to SRX" tab
-- **Accept rules** — Click any rule to review its details and translation notes, then click Accept. A progress counter in the navbar tracks accepted vs LLM-reviewed rules
+- **Accept rules** — Click any rule to review its details and translation notes, then click Accept. A progress counter in the navbar tracks accepted vs LLM-reviewed policies (`Policies: X/Y accepted`)
+- **Warning review workflow** — Clickable warnings badge in the navbar shows unresolved/total count and switches to the Warnings tab on click. Each warning has Ack/Fixed/Ignore action buttons to track resolution. Resolved warnings are dimmed and filterable (All/Unresolved/Resolved). Badge turns green when all warnings are addressed
 - **Subscription-aware translation** — SRX subscription tier (Base/A1/A2/P1/P2) is passed to the LLM, which maps security profiles to the correct tier and flags features requiring upgrades in `_translation_notes`
 - **SSL Decryption → SSL Proxy mapping** — PAN-OS decryption rules (separate rulebase) are sent as context to the LLM during translation. The LLM sets `_srx_decrypt: true` on security rules whose traffic matches decrypt-action decryption rules. A zone-pair safety net auto-applies the flag on any allow rules the LLM missed
 

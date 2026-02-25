@@ -46,6 +46,18 @@ export function convertToSrxSetCommands(config, interfaceMappings = {}, targetCo
     unsupported_items: 0,
   };
 
+  // Site identification header (for SDC/Mist integration)
+  const siteN = config.metadata?.siteName;
+  const siteG = config.metadata?.siteGroup;
+  if (siteN || siteG) {
+    commands.push('# =============================================');
+    commands.push('# Site Identification');
+    commands.push('# =============================================');
+    if (siteN) commands.push(`# Site: ${siteN}`);
+    if (siteG) commands.push(`# Site Group: ${siteG}`);
+    commands.push('');
+  }
+
   // Clear trackers from any previous conversion (module-level state)
   customfwicApps.clear();
   predefServiceMap.clear();

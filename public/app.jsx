@@ -36,6 +36,7 @@ import SyslogEditor from './components/SyslogEditor.jsx';
 import DHCPEditor from './components/DHCPEditor.jsx';
 import QoSEditor from './components/QoSEditor.jsx';
 import GreenfieldChat from './components/GreenfieldChat.jsx';
+import FeedbackModal from './components/FeedbackModal.jsx';
 import { translatePolicies, getLLMStatus } from './utils/llm-client.js';
 
 export default function App() {
@@ -52,6 +53,8 @@ export default function App() {
   const [targetModel, setTargetModel] = useState('');
   const [srxLicense, setSrxLicense] = useState('');
   const [portProfile, setPortProfile] = useState(null);
+  const [siteName, setSiteName] = useState('');
+  const [siteGroup, setSiteGroup] = useState('');
   const [interfaceMappings, setInterfaceMappings] = useState({});
   const [sourceVendor, setSourceVendor] = useState('panos'); // 'panos' | 'srx' | 'fortigate' | 'cisco_asa' | 'greenfield'
   const [greenfieldMode, setGreenfieldMode] = useState(false);
@@ -84,6 +87,7 @@ export default function App() {
   const [loadingMessage, setLoadingMessage] = useState('');
   const [selectedRule, setSelectedRule] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [showFeedback, setShowFeedback] = useState(false);
   const [showConvertConfirm, setShowConvertConfirm] = useState(false);
   const [showPushToast, setShowPushToast] = useState('');
   const [bottomTab, setBottomTab] = useState('output');
@@ -255,6 +259,15 @@ export default function App() {
         ? { ...intermediateConfig, security_policies: srxTranslatedPolicies }
         : intermediateConfig;
 
+      // Inject site identification metadata for output headers
+      if (siteName || siteGroup) {
+        configForConversion.metadata = {
+          ...configForConversion.metadata,
+          siteName: siteName || undefined,
+          siteGroup: siteGroup || undefined,
+        };
+      }
+
       const response = await fetch('/api/convert', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -277,7 +290,7 @@ export default function App() {
       setIsLoading(false);
       setLoadingMessage('');
     }
-  }, [intermediateConfig, interfaceMappings]);
+  }, [intermediateConfig, interfaceMappings, srxTranslatedPolicies, siteName, siteGroup]);
 
   // ------------------------------------------------------------------
   // Config update handlers (mutable editing)
@@ -699,7 +712,7 @@ export default function App() {
   // Model / mapping handlers
   // ------------------------------------------------------------------
 
-  const handleModelSelection = useCallback(({ sourceModel: src, targetModel: tgt, srxLicense: lic, portProfile: pp }) => {
+  const handleModelSelection = useCallback(({ sourceModel: src, targetModel: tgt, srxLicense: lic, portProfile: pp, siteName: sn, siteGroup: sg }) => {
     setSourceModel(src || '');
     // Clear interface mappings if target model or port profile changed
     if (tgt !== targetModel || pp !== portProfile) {
@@ -708,6 +721,8 @@ export default function App() {
     setTargetModel(tgt || '');
     setSrxLicense(lic || '');
     setPortProfile(pp || null);
+    setSiteName(sn || '');
+    setSiteGroup(sg || '');
   }, [targetModel, portProfile]);
 
   const handleModelContinue = useCallback(() => {
@@ -750,6 +765,11 @@ export default function App() {
                 License <span className="stat-value">{srxLicense}</span>
               </span>
             )}
+            {siteName && (
+              <span className="stat-badge" onClick={() => setShowModelSelector(true)} style={{ cursor: 'pointer' }}>
+                Site <span className="stat-value">{siteName}</span>
+              </span>
+            )}
             {allWarnings.length > 0 && (
               <span className="stat-badge">
                 Warnings <span className="stat-value" style={{ color: 'var(--warning)' }}>
@@ -789,6 +809,15 @@ export default function App() {
               Interfaces
             </button>
           )}
+          <button
+            className="settings-btn"
+            onClick={() => setShowFeedback(true)}
+            title="Send feedback or suggest a feature"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+            </svg>
+          </button>
           <button
             className="settings-btn"
             onClick={() => setShowSettings('llm')}
@@ -1280,6 +1309,10 @@ export default function App() {
       </div>
 
       {/* --- Modals --- */}
+      {showFeedback && (
+        <FeedbackModal onClose={() => setShowFeedback(false)} />
+      )}
+
       {showSettings && (
         <LLMSettings
           initialTab={showSettings === 'mcp' ? 'mcp' : 'llm'}
@@ -1350,6 +1383,8 @@ export default function App() {
           sourceModel={sourceModel}
           targetModel={targetModel}
           srxLicense={srxLicense}
+          siteName={siteName}
+          siteGroup={siteGroup}
           sourceVendor={sourceVendor}
           greenfieldMode={greenfieldMode}
           onModelSelection={handleModelSelection}

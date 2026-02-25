@@ -85,7 +85,9 @@
 
 ## Planned Revisions
 
-### Rev7 — Multi-Firewall Logical Systems
+### Rev7 — Multi-Firewall Logical Systems & Minor Features
+- [x] **Feedback/suggestion box** — Chat-bubble icon in the navbar opens a modal where users pick a category (Bug Report, Feature Request, Improvement), write a description, and submit as a pre-filled GitHub Issue in a new tab
+- [x] **Site Name / Site Group** — Optional text fields in Model Selection for site identification. Values are emitted as header comments at the top of SRX set-command and XML output (e.g. `# Site: branch-office-seattle`). Prep for future SDC/Mist integration with site/group concepts
 - [ ] Multi-firewall collapse into logical-systems/tenants
 - [ ] Import multiple configs and merge into a single SRX with logical-system separation
 - [ ] Logical-system-aware address books, policies, and NAT

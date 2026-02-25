@@ -42,6 +42,8 @@ export default function ModelSelector({
   sourceModel,
   targetModel,
   srxLicense,
+  siteName,
+  siteGroup,
   sourceVendor,
   greenfieldMode,
   onModelSelection,
@@ -52,6 +54,8 @@ export default function ModelSelector({
   const [selectedTarget, setSelectedTarget] = useState(targetModel || '');
   const [selectedLicense, setSelectedLicense] = useState(srxLicense || '');
   const [selectedPortProfile, setSelectedPortProfile] = useState(SRX4700_DEFAULT_PROFILE);
+  const [localSiteName, setLocalSiteName] = useState(siteName || '');
+  const [localSiteGroup, setLocalSiteGroup] = useState(siteGroup || '');
   const [detection, setDetection] = useState(null);
   const [throughputMetric, setThroughputMetric] = useState('l7');
   const [recommendedSrx, setRecommendedSrx] = useState(null); // { model, recommended }
@@ -128,6 +132,8 @@ export default function ModelSelector({
       targetModel: selectedTarget || null,
       srxLicense: selectedLicense || null,
       portProfile: targetRaw?.hasPortProfiles ? selectedPortProfile : null,
+      siteName: localSiteName || null,
+      siteGroup: localSiteGroup || null,
     });
     onContinue();
   };
@@ -327,6 +333,38 @@ export default function ModelSelector({
               </div>
             </div>
           )}
+        </div>
+
+        {/* Site Identification (optional — for SDC/Mist integration) */}
+        <div className="model-section" style={{ padding: '12px 20px', borderTop: '1px solid var(--border-color)' }}>
+          <h3 className="model-section-title" style={{ marginBottom: 4 }}>Site Identification (Optional)</h3>
+          <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: '0 0 8px 0' }}>
+            Added as header comments in the SRX output. Useful for SDC / Mist integration.
+          </p>
+          <div style={{ display: 'flex', gap: 12 }}>
+            <label style={{ flex: 1 }}>
+              <span style={{ fontSize: 12, color: 'var(--text-secondary)', display: 'block', marginBottom: 4 }}>Site Name</span>
+              <input
+                type="text"
+                className="input-field"
+                value={localSiteName}
+                onChange={e => setLocalSiteName(e.target.value)}
+                placeholder="e.g. branch-office-seattle"
+                style={{ width: '100%', boxSizing: 'border-box' }}
+              />
+            </label>
+            <label style={{ flex: 1 }}>
+              <span style={{ fontSize: 12, color: 'var(--text-secondary)', display: 'block', marginBottom: 4 }}>Site Group</span>
+              <input
+                type="text"
+                className="input-field"
+                value={localSiteGroup}
+                onChange={e => setLocalSiteGroup(e.target.value)}
+                placeholder="e.g. west-coast-branches"
+                style={{ width: '100%', boxSizing: 'border-box' }}
+              />
+            </label>
+          </div>
         </div>
 
         {subscriptionError && (

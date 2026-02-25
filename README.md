@@ -150,6 +150,7 @@ Click **Convert to SRX** to generate the output. Switch between **Set Commands**
 - **Interface mapper** — Per-zone mapping of source interfaces to SRX interfaces with auto-mapping, tunnel, and loopback support
 - **SRX subscriptions** — Select the target SRX subscription level (Base, A1 Advanced Data Protection, A2 Advanced Edge Protection, P1 Premium Data Protection, P2 Premium Edge Protection) to gate feature availability and inform LLM reviews. Includes footnote explaining SDC (Security Director Cloud) and ATP (Advanced Threat Protection) capabilities
 - **SRX datasheet links** — Quick-access popup with links to official HPE Juniper SRX spec sheets for all current models, grouped by tier (Branch, Enterprise, Data Center, Chassis-Based, Virtual)
+- **Site identification** — Optional Site Name and Site Group fields in the model selector. Values are emitted as header comments at the top of SRX set-command and XML output, preparing for future SDC/Mist integration
 
 ### LLM Translation & Review Workflow
 - **Translate with LLM** — One-click translation of all source policies to optimized SRX format using vendor-aware, subscription-aware LLM prompts. The translation prompt includes vendor-specific migration pitfalls and cross-vendor gap analysis for all 6 supported source vendors
@@ -189,6 +190,7 @@ Click **Convert to SRX** to generate the output. Switch between **Set Commands**
 - **Push to SDC** — Security Director Cloud integration (coming soon)
 - **Push to Mist** — Juniper Mist Cloud integration (coming soon)
 - **Convert confirmation** — Warning dialog when converting with unaccepted policies
+- **Feedback / suggestions** — Chat-bubble icon in the navbar opens a feedback modal where users can submit bug reports, feature requests, or improvement ideas as pre-filled GitHub Issues
 
 ### Not Supported (Manual Migration Required)
 
@@ -253,12 +255,12 @@ firewall-intent-converter/
 │   │   ├── VPNEditor.jsx         # Center panel tab — VPN/IPsec tunnel editing
 │   │   ├── GreenfieldChat.jsx    # Center panel — LLM-guided greenfield config builder
 │   │   ├── InterviewPanel.jsx    # Right panel — rule details, LLM review, accept
-│   │   ├── ReviewChatPanel.jsx   # Right panel — full-ruleset LLM chat review
 │   │   ├── SRXOutput.jsx         # Bottom panel — SRX output display
 │   │   ├── WarningsPanel.jsx     # Bottom panel — conversion warnings + optimization suggestions
-│   │   ├── ModelSelector.jsx     # Modal — source/target hardware model picker
+│   │   ├── ModelSelector.jsx     # Modal — source/target hardware model picker + site identification
 │   │   ├── InterfaceMapper.jsx   # Modal — per-zone interface mapping
-│   │   ├── LLMSettings.jsx       # Modal — LLM provider config, MCP connection, 3 system prompts
+│   │   ├── FeedbackModal.jsx     # Modal — feedback/suggestion submission via GitHub Issues
+│   │   ├── LLMSettings.jsx       # Modal — LLM provider config, MCP connection, system prompts
 │   │   └── sample-configs.jsx    # Built-in sample configs (PAN-OS, SRX, FortiGate, Cisco, Check Point, SonicWall, Huawei)
 │   ├── utils/
 │   │   ├── llm-client.js         # Browser-side LLM API client (multi-provider)

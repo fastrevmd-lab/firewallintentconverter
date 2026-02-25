@@ -784,6 +784,11 @@ html, body, #root {
   to { transform: rotate(360deg); }
 }
 
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
 /* --- Progress Bar --- */
 .progress-bar {
   height: 3px;
@@ -1773,6 +1778,11 @@ html, body, #root {
   color: var(--text-muted);
 }
 
+.status-label.status-llm_reviewed {
+  background: rgba(96, 165, 250, 0.15);
+  color: var(--accent);
+}
+
 .status-label.status-accepted {
   background: rgba(52, 211, 153, 0.15);
   color: var(--success);
@@ -1998,6 +2008,10 @@ html, body, #root {
   border-right: none;
 }
 
+.platform-view-btn + .btn-translate + .platform-view-btn {
+  border-radius: 0 var(--radius) var(--radius) 0;
+}
+
 .platform-view-btn:last-child {
   border-radius: 0 var(--radius) var(--radius) 0;
 }
@@ -2011,6 +2025,57 @@ html, body, #root {
 .platform-view-btn:hover:not(.active) {
   background: var(--bg-hover);
   color: var(--text-primary);
+}
+
+/* Translate with LLM button — between the two platform-view buttons */
+.btn-translate {
+  margin: 0 8px;
+  padding: 6px 16px;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  background: var(--accent);
+  color: var(--bg-primary);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  transition: all 0.15s;
+}
+
+.btn-translate:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-translate:hover:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+.btn-translate .spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(0, 0, 0, 0.2);
+  border-top-color: var(--bg-primary);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+/* Translation notes in InterviewPanel */
+.translation-notes {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius);
+  padding: 8px 12px;
+  white-space: pre-wrap;
 }
 
 /* =============================================

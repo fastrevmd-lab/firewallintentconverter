@@ -8,7 +8,6 @@
  */
 import React, { useState, useEffect } from 'react';
 import {
-  DEFAULT_RULE_SYSTEM_PROMPT,
   DEFAULT_FULL_REVIEW_SYSTEM_PROMPT,
   DEFAULT_GREENFIELD_SYSTEM_PROMPT,
 } from '../utils/llm-client.js';
@@ -40,10 +39,9 @@ export default function LLMSettings({ onClose, initialTab }) {
   const [model, setModel] = useState('claude-sonnet-4-6');
   const [baseUrl, setBaseUrl] = useState('');
   const [temperature, setTemperature] = useState(0.2);
-  const [ruleSystemPrompt, setRuleSystemPrompt] = useState(DEFAULT_RULE_SYSTEM_PROMPT);
   const [fullReviewSystemPrompt, setFullReviewSystemPrompt] = useState(DEFAULT_FULL_REVIEW_SYSTEM_PROMPT);
   const [greenfieldSystemPrompt, setGreenfieldSystemPrompt] = useState(DEFAULT_GREENFIELD_SYSTEM_PROMPT);
-  const [promptSubTab, setPromptSubTab] = useState('rule');
+  const [promptSubTab, setPromptSubTab] = useState('fullReview');
 
   // MCP state
   const [mcpUrl, setMcpUrl] = useState('');
@@ -63,8 +61,6 @@ export default function LLMSettings({ onClose, initialTab }) {
         setModel(settings.model || 'claude-sonnet-4-6');
         setBaseUrl(settings.baseUrl || '');
         setTemperature(settings.temperature ?? 0.2);
-        // Load 3 separate prompts (with backwards compat for old single systemPrompt)
-        setRuleSystemPrompt(settings.ruleSystemPrompt || settings.systemPrompt || DEFAULT_RULE_SYSTEM_PROMPT);
         setFullReviewSystemPrompt(settings.fullReviewSystemPrompt || DEFAULT_FULL_REVIEW_SYSTEM_PROMPT);
         setGreenfieldSystemPrompt(settings.greenfieldSystemPrompt || DEFAULT_GREENFIELD_SYSTEM_PROMPT);
       }
@@ -84,7 +80,7 @@ export default function LLMSettings({ onClose, initialTab }) {
   const handleSave = () => {
     const settings = {
       provider, apiKey, model, baseUrl, temperature,
-      ruleSystemPrompt, fullReviewSystemPrompt, greenfieldSystemPrompt,
+      fullReviewSystemPrompt, greenfieldSystemPrompt,
     };
     localStorage.setItem('llm-settings', JSON.stringify(settings));
     const mcpSettings = { url: mcpUrl };
@@ -350,8 +346,7 @@ export default function LLMSettings({ onClose, initialTab }) {
         <SettingsField label="System Prompts">
           <div style={{ display: 'flex', gap: 0, marginBottom: 8, borderBottom: '1px solid var(--border-color)' }}>
             {[
-              { id: 'rule', label: 'Per-Rule Review' },
-              { id: 'fullReview', label: 'Full Ruleset Review' },
+              { id: 'fullReview', label: 'Translate Ruleset LLM Instructions' },
               { id: 'greenfield', label: 'Greenfield Interview' },
             ].map(tab => (
               <button
@@ -368,20 +363,6 @@ export default function LLMSettings({ onClose, initialTab }) {
               </button>
             ))}
           </div>
-
-          {promptSubTab === 'rule' && (
-            <>
-              <textarea
-                value={ruleSystemPrompt}
-                onChange={(e) => setRuleSystemPrompt(e.target.value)}
-                style={promptTextareaStyle}
-              />
-              <PromptFooter
-                length={ruleSystemPrompt.length}
-                onReset={() => setRuleSystemPrompt(DEFAULT_RULE_SYSTEM_PROMPT)}
-              />
-            </>
-          )}
 
           {promptSubTab === 'fullReview' && (
             <>

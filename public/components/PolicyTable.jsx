@@ -53,6 +53,7 @@ export default function PolicyTable({
   const getRuleStatus = (rule) => {
     if (rule.disabled) return 'disabled';
     if (rule._review_status === 'accepted') return 'accepted';
+    if (rule._review_status === 'llm_reviewed') return 'llm_reviewed';
     return 'unreviewed';
   };
 
@@ -68,6 +69,7 @@ export default function PolicyTable({
   const statusLabels = {
     disabled: 'Disabled',
     unreviewed: 'Unreviewed',
+    llm_reviewed: 'LLM Reviewed',
     accepted: 'Accepted',
   };
 

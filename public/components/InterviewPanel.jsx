@@ -5,7 +5,7 @@
  * When a rule is selected, all fields are editable inline.
  * "Accept Rule" marks the rule as accepted in the review workflow.
  */
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   mapActionToSrx,
   mapActionToPanos,
@@ -25,6 +25,8 @@ export default function InterviewPanel({
   viewMode,
   platformView,
   srxLicense,
+  isTranslating,
+  translationProgress,
 }) {
   const isSrx = viewMode === 'srx';
   const isToSrxTab = platformView === 'srx'; // true only on the "to SRX" tab
@@ -57,6 +59,126 @@ export default function InterviewPanel({
 
   const isAccepted = selectedRule?._review_status === 'accepted';
   const zoneNames = (intermediateConfig?.zones || []).map(z => z.name);
+
+  // --- Live elapsed timer for translation ---
+  const [elapsedSecs, setElapsedSecs] = useState(0);
+  const timerRef = useRef(null);
+
+  useEffect(() => {
+    if (isTranslating) {
+      setElapsedSecs(0);
+      const start = Date.now();
+      timerRef.current = setInterval(() => {
+        setElapsedSecs(Math.floor((Date.now() - start) / 1000));
+      }, 1000);
+    } else {
+      if (timerRef.current) clearInterval(timerRef.current);
+    }
+    return () => { if (timerRef.current) clearInterval(timerRef.current); };
+  }, [isTranslating]);
+
+  // --- Translation in progress ---
+  if (isTranslating) {
+    const p = translationProgress || {};
+    const mins = Math.floor(elapsedSecs / 60);
+    const secs = elapsedSecs % 60;
+    const timeStr = mins > 0 ? `${mins}m ${String(secs).padStart(2, '0')}s` : `${secs}s`;
+
+    const phaseLabels = {
+      building_prompt: 'Preparing prompt',
+      calling_llm: 'Waiting for LLM',
+      parsing_response: 'Parsing response',
+      complete: 'Complete',
+    };
+    const phaseLabel = phaseLabels[p.phase] || 'Starting';
+
+    // Progress bar for chunked translations
+    const progressPct = p.totalChunks > 1 && p.chunk > 0
+      ? Math.round((p.chunk / p.totalChunks) * 100)
+      : p.phase === 'calling_llm' ? null : (p.phase === 'parsing_response' ? 80 : (p.phase === 'complete' ? 100 : 10));
+
+    return (
+      <div className="panel interview-panel">
+        <div className="panel-header">
+          <h2>LLM Translation</h2>
+          <span className="spinner" style={{ width: 14, height: 14 }} />
+        </div>
+        <div className="panel-body" style={{ padding: 16 }}>
+          <div style={{
+            background: 'var(--bg-tertiary)', borderRadius: 'var(--radius-lg)',
+            padding: 20, marginBottom: 16,
+          }}>
+            {/* Phase indicator */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+              <div style={{
+                width: 10, height: 10, borderRadius: '50%',
+                background: p.phase === 'calling_llm' ? 'var(--accent)' : (p.phase === 'complete' ? 'var(--success)' : 'var(--warning)'),
+                animation: p.phase === 'calling_llm' ? 'pulse 1.5s infinite' : 'none',
+              }} />
+              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>
+                {phaseLabel}
+              </span>
+            </div>
+
+            {/* Detail message */}
+            {p.detail && (
+              <div style={{
+                fontSize: 12, color: 'var(--text-secondary)', marginBottom: 16,
+                fontFamily: 'var(--font-mono)', lineHeight: 1.6,
+              }}>
+                {p.detail}
+              </div>
+            )}
+
+            {/* Progress bar */}
+            {progressPct !== null && (
+              <div style={{
+                height: 4, background: 'var(--bg-primary)', borderRadius: 2,
+                marginBottom: 16, overflow: 'hidden',
+              }}>
+                <div style={{
+                  height: '100%', borderRadius: 2,
+                  background: 'var(--accent)',
+                  width: `${progressPct}%`,
+                  transition: 'width 0.5s ease',
+                }} />
+              </div>
+            )}
+
+            {/* Stats grid */}
+            <div style={{
+              display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px 20px',
+              fontSize: 11, fontFamily: 'var(--font-mono)',
+            }}>
+              <div>
+                <div style={{ color: 'var(--text-muted)', marginBottom: 2 }}>Elapsed</div>
+                <div style={{ color: 'var(--text-primary)', fontSize: 14, fontWeight: 600 }}>{timeStr}</div>
+              </div>
+              {p.totalChunks > 1 && (
+                <div>
+                  <div style={{ color: 'var(--text-muted)', marginBottom: 2 }}>Chunk</div>
+                  <div style={{ color: 'var(--text-primary)', fontSize: 14, fontWeight: 600 }}>{p.chunk || 0} / {p.totalChunks}</div>
+                </div>
+              )}
+              <div>
+                <div style={{ color: 'var(--text-muted)', marginBottom: 2 }}>Prompt tokens</div>
+                <div style={{ color: 'var(--accent)', fontSize: 14, fontWeight: 600 }}>{(p.promptTokens || 0).toLocaleString()}</div>
+              </div>
+              <div>
+                <div style={{ color: 'var(--text-muted)', marginBottom: 2 }}>Response tokens</div>
+                <div style={{ color: 'var(--accent)', fontSize: 14, fontWeight: 600 }}>{(p.responseTokens || 0).toLocaleString()}</div>
+              </div>
+            </div>
+          </div>
+
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', textAlign: 'center' }}>
+            Rules will appear in the table when translation completes.
+            <br />Each rule will be marked "LLM Reviewed" for your acceptance.
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   // --- No rule selected ---
   if (!selectedRule) {
@@ -393,6 +515,16 @@ export default function InterviewPanel({
             onChange={(v) => handleFieldChange('tags', v)}
           />
         </div>
+
+        {/* Translation Notes — shown on LLM-translated rules */}
+        {selectedRule._translation_notes && (
+          <div className="detail-section">
+            <h3>Translation Notes</h3>
+            <div className="translation-notes">
+              {selectedRule._translation_notes}
+            </div>
+          </div>
+        )}
 
         {/* Warnings for this rule */}
         {ruleWarnings.length > 0 && (

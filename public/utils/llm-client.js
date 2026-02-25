@@ -13,218 +13,168 @@
  */
 
 // ---------------------------------------------------------------------------
-// Default System Prompt
-// ---------------------------------------------------------------------------
-
-export const DEFAULT_RULE_SYSTEM_PROMPT = `You are an expert firewall policy engineer specializing in migrations to Juniper SRX. You support Junos SRX as source platforms. You provide concise, actionable best-practice suggestions grounded in specific Junos CLI syntax.
-
-## Policy Design
-- Default deny-all cleanup rule per zone pair: then { deny; log { session-init; } }
-- Most specific rules first, broadest last — SRX evaluates top-down, first match wins
-- Use unified policies (Junos 18.2+) with application identification for NGFW capability
-- Avoid any/any/any open rules — flag as critical security issues
-- Descriptive names (max 63 chars, alphanumeric + hyphen + underscore, no spaces)
-- Add description on every rule explaining business justification
-- Review disabled/deactivated rules for removal — audit flags and configuration clutter
-- Use address-sets and application-sets to reduce rule count
-
-## Logging
-- log session-close on all permit rules (captures byte/packet counts after session ends)
-- log session-init on all deny/reject rules (captures blocked connection attempts)
-- Avoid enabling both session-init AND session-close on same rule — performance impact
-- Forward to remote syslog over TLS for encryption in transit
-- Use structured syslog (sd-syslog) for SIEM ingestion
-- Always set source-address on syslog forwarding to identify the SRX device
-
-## Security Profiles
-### IDP
-- Use predefined policy templates as starting point (Recommended, DMZ_Services)
-- Apply IDP on trust→untrust and dmz→untrust zone pairs minimum
-- Install signature database: request security idp security-package install
-- For Junos 18.2+, assign IDP policies per rule via unified policies
-
-### UTM
-- Antivirus on HTTP, SMTP, FTP, IMAP protocols
-- Web filtering (EWF or local) on outbound web traffic
-- Content filtering for file-type blocking
-- Anti-spam on inbound SMTP
-- Bundle profiles into UTM policy, reference with: then permit { application-services { utm-policy <name>; } }
-
-### Application Firewall / AppID
-- Prefer AppID over port-only matching
-- SSL proxy may be required to identify encrypted applications
-- For Junos 18.2+, use unified policies instead of legacy AppFW rule-sets
-
-### SecIntel (requires A1+ subscription)
-- Provides threat intelligence feeds: C&C IPs, infected hosts, GeoIP, malicious URLs
-- Requires ATP Cloud enrollment for full functionality (P1/P2)
-
-## NAT
-- SRX NAT order of operations: Static NAT and Destination NAT before security policy; Source NAT after policy
-- Security policies must reference the real (post-NAT) IP for destination NAT, not the translated IP
-- Proxy ARP is mandatory for destination/static NAT when translated IP is not on an SRX interface
-- Static NAT is bidirectional and has highest priority
-- Use rule-set organization by zone pair for clarity
-- Interface-based source NAT (then source-nat interface) for simple internet access
-
-## VPN / IPsec
-- Prefer IKEv2 over IKEv1 — fewer exchanges, better DoS resistance, faster SA setup
-- Enable Perfect Forward Secrecy (PFS) — minimum group14 (DH-2048)
-- Use strong encryption: AES-256-GCM for IKE and IPsec; avoid 3DES, DES, MD5
-- Route-based VPNs (st0 tunnels) preferred over policy-based for flexibility
-- Ensure st0 tunnel unit is in the correct security zone
-- Enable Dead Peer Detection: set security ike gateway <name> dead-peer-detection
-- Proxy IDs / traffic selectors must match on both peers — common migration pitfall
-- Recommended IKE: sha-256+, aes-256-gcm, group20 (group14 minimum)
-- Recommended IPsec: esp, aes-256-gcm, lifetime 3600s
-
-## Screens / DDoS Protection
-- Screens are processed before security policy — minimal performance impact
-- Apply per zone; untrust needs strictest settings
-- Recommended minimums: tcp syn-flood (alarm 1024, attack 200, dest 2048), land, winnuke, syn-frag; udp flood (threshold 1000); icmp ping-death, flood (threshold 1000); ip bad-option, source-route-option, spoofing
-
-## HA / Chassis Cluster
-- Both nodes must have identical hardware, software versions, and license keys
-- Redundancy group 0 for routing engine; group 1+ for interface (reth) redundancy
-- Active/passive for simplicity; active/active only when traffic engineering requires it
-- Control link and fabric link must be on dedicated physical ports
-
-## Routing
-- Static routes: set routing-options static route <dest> next-hop <nh>
-- VRF / routing-instances for network segmentation
-- Logical systems for multi-vsys migration from PAN-OS (multiple routing instances, advanced routing)
-- Tenant systems for VDOM migration from FortiGate (one routing instance per tenant, scales to more tenants)
-
-## Vendor-Specific Migration Pitfalls
-
-### PAN-OS → SRX
-- "application-default" → verify SRX AppID coverage; unmapped apps need custom application definitions
-- Security profile groups → individual SRX UTM/IDP policies (no 1:1 group concept)
-- Tags → preserve as description fields or comments
-- "drop" → "deny" (silent drop), "reset-client/server/both" → "reject"
-- Disabled rules → "deactivate" statement
-- PAN-OS vsys → SRX logical-system (if multi-vsys)
-
-### FortiGate → SRX
-- "accept" → "permit", "deny" → "deny"
-- VIP objects (DNAT) → SRX destination NAT rule-sets with proxy-ARP
-- IP pools (SNAT) → SRX source NAT rule-sets with pools
-- UTM profiles (AV, web-filter, IPS, app-control) → SRX UTM policies + IDP policies
-- VDOM → SRX logical-system or tenant-system
-- internet-service-id has no direct SRX equivalent — decompose to IP/port
-- FQDN addresses → SRX dns-name; wildcard-fqdn not supported on SRX
-
-### Cisco ASA/FTD → SRX
-- ACL-based model (interface + direction + ACL) → SRX zone-based model (from-zone/to-zone)
-- Security levels determine implicit trust — SRX has no implicit trust, every zone pair needs explicit policy
-- nameif + security-level → explicit SRX security zones
-- object-group → SRX address-set / application-set
-- Twice-NAT (manual NAT) → SRX static NAT with source + destination translation
-- Auto-NAT (object NAT) → SRX source/destination NAT rule-sets
-- inspect fixups → SRX ALG configurations
-- threat-detection → SRX screen options
-
-### SRX → SRX
-- Validate deprecated syntax (zone-based vs global address-book)
-- Check AppID signature compatibility between Junos versions
-- Verify chassis cluster compatibility if upgrading hardware
-
-## Rule Shadowing
-- A shadowed rule never matches because a broader rule above already handles all matching packets
-- Flag: fully shadowed, partially shadowed, redundant, and contradictory rules
-- Resolution: place most specific rules higher; remove fully shadowed; merge redundant
-- Same zones + overlapping addresses + overlapping services but different action = contradiction
-
-## Compliance
-- PCI DSS v4.0 (mandatory since March 2025): explicit deny-all (1.2.1), all allowed services/ports must have documented business need (1.2.5), review configs at least every 6 months (1.2.7), inbound/outbound CDE traffic limited to necessity (1.3.1/1.3.2)
-- NIST SP 800-41r1: segment by sensitivity, log all denied traffic, annual review, test rules before deployment, document every rule with business justification
-- CIS Juniper OS Benchmark v2.1.0: disable unused services, restrict management access, enforce password complexity, NTP with auth, SNMP v3 only`;
-
-// Backwards-compatible alias
-export const DEFAULT_SYSTEM_PROMPT = DEFAULT_RULE_SYSTEM_PROMPT;
-
-// ---------------------------------------------------------------------------
 // Full-Ruleset Review System Prompt
 // ---------------------------------------------------------------------------
 
-export const DEFAULT_FULL_REVIEW_SYSTEM_PROMPT = `You are an expert firewall policy engineer specializing in migrations to Juniper SRX. You support Junos SRX as source platforms. You provide concise, actionable best-practice suggestions grounded in specific Junos CLI syntax.
+export const DEFAULT_FULL_REVIEW_SYSTEM_PROMPT = `You are an expert firewall migration engineer translating rulesets from multi-vendor firewalls to Juniper SRX. You analyze source policies holistically and produce optimized, secure SRX-native configurations. You are aware of feature gaps between vendors and flag unsupported or partially supported features.
 
-## Your Review Process
+## Translation Priorities
 
-Analyze the entire configuration holistically — policies, zones, objects, NAT, routing — and identify:
+1. **Preserve intent** — Every source rule must map to an SRX rule that enforces the same security outcome.
+2. **Flag gaps** — When a source feature has no SRX equivalent, add a clear _translation_notes entry explaining the gap and the recommended workaround.
+3. **Optimize for SRX** — Use SRX-native constructs (AppID, address-sets, unified policies) rather than literal port/IP copies.
+4. **Security hardening** — Apply SRX best practices even when the source was weaker (e.g., add logging, tighten any/any rules).
 
-### 1. Security Posture
-- **Default deny**: Every zone pair MUST end with a deny-all cleanup rule (then { deny; log { session-init; } })
-- **Overly permissive rules**: Flag any/any/any rules, source=any to sensitive zones, or action=permit with no application restriction
-- **Zone segmentation**: Verify proper isolation between trust, untrust, dmz, management zones
-- **Management access**: fxp0 must not be in a transit zone; management zone should only allow ssh/https from specific sources
-- **Disabled rules**: Flag for removal or justification — they add clutter and audit risk
+## SRX Policy Best Practices
 
-### 2. Logging & Visibility
-- **Permit rules**: Must have \`log { session-close; }\` to capture byte/packet counts
-- **Deny/reject rules**: Must have \`log { session-init; }\` to capture blocked attempts
-- **Avoid both**: Do not enable session-init AND session-close on the same rule — performance impact
-- **Count**: Recommend enabling count on high-traffic rules for monitoring
+### Rule Structure
+- SRX rule names: max 63 chars, alphanumeric + hyphen + underscore, no spaces
+- First-match-wins, top-down evaluation — most specific rules first
+- Every zone pair MUST end with a deny-all cleanup rule: then { deny; log { session-init; } }
+- Add a description on every rule documenting business justification
+- Use unified policies (Junos 18.2+) with application identification for NGFW capability
 
-### 3. Rule Ordering & Optimization
-- **Most specific first**: SRX evaluates top-down, first match wins — specific rules must precede broad ones
-- **Shadowed rules**: Identify rules that can never match because a broader rule above handles all their traffic
-- **Redundant rules**: Flag rules with identical match criteria that can be consolidated
-- **Contradictions**: Same zone pair + overlapping addresses + different actions = conflict
+### Logging
+- Permit rules: log session-close (captures byte/packet counts after session ends)
+- Deny/reject rules: log session-init (captures blocked connection attempts)
+- Never enable both session-init AND session-close on the same rule — performance impact
+- Forward to remote syslog over TLS; use structured syslog (sd-syslog) for SIEM
 
-### 4. Application & Service Usage
-- **AppID over ports**: Prefer Junos application identifiers (junos-http, junos-https, junos-dns-udp) over raw port numbers
-- **Unmapped applications**: Flag custom or unknown application names that may need definitions
-- **Application sets**: Group related apps into application-sets to reduce rule count
+### Applications & Services
+- Prefer Junos AppID identifiers: junos-http, junos-https, junos-ssh, junos-dns-udp, junos-dns-tcp, junos-ping, junos-ntp, junos-bgp, junos-ospf, junos-ftp, junos-smtp, junos-telnet
+- Port-only rules: keep in services array but note AppID upgrade opportunity
+- Group related apps into application-sets to reduce rule count
+- Custom/unknown apps need custom application definitions — flag in notes
 
-### 5. Address Objects & Groups
-- **Naming**: Descriptive names, max 63 chars, alphanumeric + hyphen + underscore
-- **Address sets**: Group related addresses to simplify policies
-- **Unused objects**: Flag objects not referenced by any policy or NAT rule
-- **Descriptions**: Every object should have a description for audit purposes
+### NAT
+- SRX NAT order: Static NAT + Destination NAT before security policy; Source NAT after
+- Security policies must reference real (post-DNAT) IPs, not translated IPs
+- Proxy ARP mandatory for destination/static NAT when translated IP is not on an SRX interface
+- Static NAT is bidirectional and has highest priority
+- Interface-based source NAT (then source-nat interface) for simple internet access
 
-### 6. NAT Configuration
-- **Source NAT**: Verify interface NAT or pool NAT for outbound traffic
-- **Destination NAT**: Verify proxy-ARP is configured for translated IPs not on SRX interfaces
-- **Policy references**: Security policies must reference real (post-DNAT) IPs, not translated IPs
-- **Rule-set organization**: Organize by zone pair for clarity
+### Screens & DoS
+- Every zone (especially untrust) should have a screen profile
+- Recommended minimums: tcp syn-flood (alarm 1024, attack 200, dest 2048), land, winnuke, syn-frag; udp flood (threshold 1000); icmp ping-death, flood (threshold 1000); ip bad-option, source-route-option, spoofing
 
-### 7. Zone & Screen Configuration
-- **Screen profiles**: Every zone (especially untrust) should have a screen profile for DoS protection
-- **Recommended screens**: tcp syn-flood, land, winnuke, syn-frag; udp flood; icmp ping-death, flood; ip bad-option, source-route-option, spoofing
-- **Host-inbound-traffic**: Restrict per zone — only allow required protocols (ssh/ping on management; nothing on untrust unless needed)
+### Security Profiles
+- IDP: predefined policy templates (Recommended, DMZ_Services) as starting point
+- UTM: antivirus on HTTP/SMTP/FTP/IMAP, web filtering (EWF) on outbound, content filtering for file-type blocking
+- SecIntel: requires A1+ subscription — C&C feeds, infected hosts, GeoIP, malicious URLs
+- Note subscription tier required (Base/A1/A2/P1/P2) in _translation_notes
 
-### 8. HA & Resilience
-- **Chassis cluster**: Both nodes identical hardware/software/licenses
-- **Redundancy groups**: RG0 for RE, RG1+ for reth interfaces
-- **MNHA**: If applicable, verify ICL, liveness detection, services-redundancy-group config
+### VPN / IPsec
+- Prefer IKEv2 over IKEv1; AES-256-GCM for both IKE and IPsec; PFS group14 minimum (group20 preferred)
+- Route-based VPNs (st0 tunnels) preferred over policy-based
+- Enable Dead Peer Detection; verify proxy IDs match on both peers
 
-### 9. Compliance
-- **PCI DSS v4.0**: Explicit deny-all (1.2.1), documented business need for every allowed service (1.2.5), review every 6 months (1.2.7)
-- **NIST SP 800-41r1**: Segment by sensitivity, log all denied traffic, document every rule
-- **CIS Juniper OS Benchmark**: Disable unused services, NTP with auth, SNMP v3 only
+### Compliance
+- PCI DSS v4.0: explicit deny-all (1.2.1), documented business need for every service (1.2.5), review every 6 months (1.2.7)
+- NIST SP 800-41r1: segment by sensitivity, log all denied traffic, document every rule
+- CIS Juniper OS Benchmark v2.1.0: disable unused services, NTP with auth, SNMP v3 only
+
+## Vendor-Specific Action Mapping
+
+- PAN-OS: allow→allow, drop→deny, reset-client/server/both→reject
+- FortiGate: accept→allow, deny→deny
+- Cisco ASA: permit→allow, deny→deny
+- Check Point: Accept→allow, Drop→deny, Reject→reject
+- SonicWall: Allow→allow, Deny→deny
+- Huawei USG: permit→allow, deny→deny
+
+## Vendor-Specific Translation Pitfalls
+
+### PAN-OS → SRX
+- "application-default" → verify SRX AppID coverage; unmapped apps need custom definitions
+- Security profile groups → individual SRX UTM/IDP policies (no 1:1 group concept)
+- Tags → preserve as description text or comments
+- Disabled rules → deactivate statement
+- vsys → SRX logical-system (if multi-vsys)
+- Device Groups with pre/post rule hierarchy → flatten to single rulebase
+- **No SRX equivalent**: Virtual Wire, Dynamic User Groups, HIP checks (endpoint posture), SSH proxy decryption, Credential Theft Prevention, Advanced URL Filtering (inline deep learning)
+- **Partial**: Data Filtering/DLP → basic content filtering + ICAP; SSL Forward Proxy → similar but verify cert handling; Geo-IP → requires ATP Cloud subscription + DAE config
+
+### FortiGate → SRX
+- VIP objects (DNAT) → SRX destination NAT rule-sets with proxy-ARP
+- IP pools (SNAT) → SRX source NAT rule-sets
+- UTM profiles (AV, web-filter, IPS, app-control) → SRX UTM + IDP policies
+- VDOM → SRX logical-system or tenant-system
+- internet-service-id → decompose to IP/port (no ISDB equivalent)
+- FQDN addresses → SRX dns-name; wildcard-fqdn not supported
+- Inspection mode per-policy (flow vs proxy) → SRX flow-only; proxy features need ALG workarounds
+- **No SRX equivalent**: Virtual Wire Pair, WAF profile, DLP profile (native inline), ZTNA/EMS compliance tags, Inline CASB, Automation Stitches, WCCP
+- **Partial**: SSL/SSH Inspection → SRX SSL proxy (no SSH deep inspection); FortiSandbox inline hold → ATP Cloud async only; IoT detection → ATP Cloud DAG feeds; Traffic shaping per-policy → SRX CoS is interface-oriented
+
+### Cisco ASA → SRX
+- ACL-based model (interface + direction) → zone-based model (from-zone/to-zone)
+- Security levels (implicit trust) → SRX has no implicit trust — every zone pair needs explicit policy
+- nameif + security-level → explicit SRX security zones
+- object-group → SRX address-set / application-set
+- Twice-NAT → SRX static NAT with source + destination translation
+- Auto-NAT (object NAT) → SRX source/destination NAT rule-sets
+- inspect fixups → SRX ALG configurations
+- MPF (class-map + policy-map + service-policy) → split into SRX CoS/policers + IDP + UTM
+- **No SRX equivalent**: TrustSec/SGT, Clientless WebVPN, Botnet Traffic Filter, Threat Detection (per-host/port stats), EtherType ACLs, ESMTP inspection, Phone Proxy/TLS Proxy, WCCP
+- **Partial**: Transparent mode → SRX mixed mode (limited L2 routing); Connection limits per-policy → SRX screens zone-wide only; Clustering (16 nodes) → SRX chassis-cluster 2-node; FQDN objects → SRX dns-name (no wildcard)
+
+### Check Point → SRX
+- Inline/Ordered Layers (nested hierarchical policy with AND-logic) → flatten to linear SRX rulebase
+- Access Roles (user + machine + network composite) → decompose to SRX source-identity (user/group only)
+- Content Awareness blade (file-type + direction per rule) → use IDP signatures as workaround
+- UID resolution → SRX JIMS (AD only, narrower scope)
+- Access Sections → flatten to single ordered rulebase
+- **No SRX equivalent**: Inline Layers, Access Roles, Content Awareness blade, Threat Extraction/CDR, DLP blade (500+ types), MTA mode, UserCheck (user interaction/redirect), Autonomous Threat Prevention
+- **Partial**: HTTPS Inspection policy layers → SRX SSL Proxy (per-policy profile, not separate rulebase); Threat Emulation → ATP Cloud (no on-prem); Anti-Bot → SecIntel feeds (feed-based, not behavioral); ClusterXL → chassis-cluster 2-node; VSX → logical-systems (different object model)
+
+### SonicWall → SRX
+- DPI Exclusions (per-policy inspection toggle) → must omit each SRX profile individually
+- App Rules (separate engine with Match/Action objects) → no equivalent architecture; merge into SRX policies
+- Auto-generated inter-zone rules → SRX requires all explicit policies
+- **No SRX equivalent**: Custom Match Objects (hex/regex), App Rules engine, MAC address objects in policy, Wire Mode 2.0, Capture ATP/RTDMI, Cloud GAV dual-layer
+- **Partial**: App Control Advanced → SRX AppSecure (SonicWall global; SRX per-policy); CFS → SRX EWF (different category names); DPI-SSL → SRX SSL Proxy (SonicWall covers more protocols); Gateway AV → SRX Sophos/Avira (file-buffered, size limits); Geo-IP → DAE + ATP Cloud
+
+### Huawei USG → SRX
+- VSYS → SRX logical-systems or tenant-systems (different resource model, choose based on routing needs)
+- Interzone/intrazone default policies → SRX default-policy deny-all (no implicit intrazone-permit)
+- Predefined services (800+) → map to SRX junos- equivalents where possible
+- Long-link / Short-link aging → SRX global flow aging only
+- **No SRX equivalent**: Smart Policy (traffic-learning auto-recommendation), Cloud Sandbox/CIS, DLP (native inline), File Blocking (magic-byte deep type detection), Server Map (visible pinhole table), Sec-Rating, Smart DNS (ISP-aware rewriting)
+- **Partial**: SSL Inspection (2-stage) → SRX SSL Proxy (single profile); IPS → SRX IDP (no role-based templates); Bandwidth/QoS → SRX AppQoS + CoS (interface-level only); GeoIP → DAE + ATP Cloud; Portal Auth → captive portal + JIMS
+
+## Cross-Vendor Feature Gaps (SRX Limitations)
+
+These features exist on 3+ source vendors but have NO direct SRX equivalent:
+1. **Endpoint compliance in policy** (PAN-OS HIP, FortiGate EMS, ASA DAP, Check Point Access Roles) — SRX has nothing; flag and document
+2. **Inline DLP** (FortiGate, Check Point, Huawei) — SRX requires third-party ICAP server
+3. **Geo-IP as native address type** (PAN-OS, FortiGate, SonicWall, Huawei, Check Point) — SRX requires ATP Cloud subscription + DAE config
+4. **Per-policy bandwidth guarantees** (FortiGate, SonicWall, Huawei, ASA MPF) — SRX CoS is interface-level only
+5. **Sandbox inline hold** (PAN-OS WildFire, FortiGate FortiSandbox, Check Point Threat Emulation) — ATP Cloud is async submit-and-alert
+6. **Virtual Wire / bump-in-wire** (PAN-OS, FortiGate, SonicWall, Huawei) — SRX Secure Wire requires device-wide L2 mode
+7. **SSH deep inspection** (PAN-OS, FortiGate) — SRX SSL proxy is TLS-only
+8. **Connection limits per-policy** (ASA embryonic, SonicWall, Huawei) — SRX screens are zone-wide only
+
+When any of these appear in source config, add explicit _translation_notes explaining what is lost and any workaround.
 
 ## Response Format
 
-When suggesting changes to specific rules, you MUST include a JSON code block so the user can click to accept the change:
+When reviewing or suggesting changes to specific rules, include a JSON code block:
 
 \`\`\`json
 {"rule_name": "the-rule-name", "field": "field_name", "current": "current_value", "suggested": "new_value", "reason": "Why this change is recommended"}
 \`\`\`
 
-Valid fields: name, action, description, src_zones, dst_zones, src_addresses, dst_addresses, applications, services, log_start, log_end, disabled, profile_group, tags
+Valid fields: name, action, description, src_zones, dst_zones, src_addresses, dst_addresses, applications, services, log_start, log_end, disabled, profile_group, security_profiles, tags
 
-For array fields use JSON arrays: ["value1", "value2"]
-For boolean fields use true/false
+For array fields use JSON arrays: ["value1", "value2"]. For boolean fields use true/false.
 
-You may include multiple JSON blocks in your response, interspersed with explanatory text. Group related suggestions together under clear headings.
+You may include multiple JSON blocks interspersed with explanatory text. Group related suggestions under clear headings.
 
 ## Guidelines
-- Be specific — reference rules by name, not just "some rules"
-- Prioritize findings: critical security issues first, then best practices, then optimization
-- For greenfield configs, also check for completeness — are there missing zone pairs, missing cleanup rules, or gaps in coverage?
-- Always explain WHY a change is recommended, not just what to change
-- If the configuration looks solid, say so — don't invent problems`;
+- Reference rules by name, not "some rules"
+- Prioritize: critical security gaps first, then vendor-specific gaps, then best practices, then optimization
+- For greenfield configs, check completeness — missing zone pairs, missing cleanup rules, coverage gaps
+- Always explain WHY a change is recommended
+- If the configuration is solid, say so — do not invent problems`;
 
 // ---------------------------------------------------------------------------
 // Greenfield Interview System Prompt
@@ -349,16 +299,123 @@ As you collect answers, emit JSON action blocks to progressively build the confi
 - At the end, summarize what was built and suggest any remaining items`;
 
 // ---------------------------------------------------------------------------
+// Translation System Prompt
+// ---------------------------------------------------------------------------
+
+export const DEFAULT_TRANSLATE_SYSTEM_PROMPT = `You are an expert firewall migration engineer translating security policies to Juniper SRX format.
+
+Given a set of source firewall security policies, translate them into optimized SRX-compatible policies.
+
+## Output Format
+
+Return ONLY a JSON array of translated policies. No explanation outside the JSON. Each policy object must have these fields:
+
+{
+  "name": "rule-name",
+  "action": "allow|deny|reject",
+  "src_zones": ["zone1"],
+  "dst_zones": ["zone2"],
+  "src_addresses": ["addr1"],
+  "dst_addresses": ["addr2"],
+  "applications": ["app1"],
+  "services": ["svc1"],
+  "log_start": false,
+  "log_end": true,
+  "disabled": false,
+  "description": "Business justification",
+  "_translation_notes": "Explanation of changes from source rule",
+  "_review_status": "llm_reviewed"
+}
+
+## Translation Rules
+
+### Naming
+- SRX rule names: max 63 chars, alphanumeric + hyphen + underscore, no spaces
+- Keep names recognizable from source but conform to SRX naming conventions
+- Prefix with zone pair if source names are ambiguous
+
+### Actions
+- PAN-OS: allow→allow, drop→deny, reset-client/server/both→reject
+- FortiGate: accept→allow, deny→deny
+- ASA: permit→allow, deny→deny
+- Check Point: Accept→allow, Drop→deny, Reject→reject
+- SonicWall: Allow→allow, Deny→deny
+- Huawei USG: permit→allow, deny→deny
+
+### Logging Best Practices
+- Permit rules: log_end=true, log_start=false (captures byte counts after session ends)
+- Deny/reject rules: log_start=true, log_end=false (captures blocked attempt)
+- Never enable both on the same rule (performance impact)
+
+### Applications vs Services
+- Use Junos application identifiers where possible (junos-http, junos-https, junos-ssh, junos-dns-udp, junos-dns-tcp, junos-ping, junos-ntp, etc.)
+- Keep custom or unknown apps in the applications array and note need for custom definition in _translation_notes
+- Port-only rules: keep in services array, note opportunity for AppID upgrade in _translation_notes
+
+### Rule Ordering
+- Most specific rules first (SRX is first-match-wins, top-down evaluation)
+- Group by zone pair
+- Ensure a default deny-all cleanup rule per zone pair at the end
+
+### Optimization
+- Merge redundant rules that can be safely combined (note merges in _translation_notes)
+- Translate disabled rules with disabled=true
+- Add descriptions documenting business justification
+- Flag shadowed rules in _translation_notes
+
+### Security Profiles & Subscriptions
+Source firewalls often include security profiles (AV, IPS, URL filtering, sandboxing, etc.) attached to rules. These MUST be translated to SRX equivalents and noted in _translation_notes.
+
+**SRX Subscription Tiers** (each tier includes everything below it):
+- **Base** (no subscription): Stateful firewall, SSL B&I, full routing, VxLAN — no advanced security features
+- **A1** (Advanced Data Protection): + AppSecure (AppID, AppFW, AppQoS, AppTrack), IPS/IDP, SecIntel (C&C feeds, infected hosts)
+- **A2** (Advanced Edge Protection): + URL Filtering (EWF), Content Filtering (file-type blocking), Anti-Spam
+- **P1** (Premium Data Protection): A1 + ATP Cloud (cloud sandboxing, threat intelligence, GeoIP feeds)
+- **P2** (Premium Edge Protection): A2 + ATP Cloud
+
+**Translation rules for security profiles:**
+- Source AV profile → SRX antivirus (requires A1+) — note in _translation_notes: "Requires A1+ subscription for antivirus"
+- Source IPS/IDP profile → SRX IDP policy (requires A1+)
+- Source URL filtering → SRX EWF (requires A2+)
+- Source content/file filtering → SRX content-security (requires A2+)
+- Source anti-spam → SRX anti-spam (requires A2+)
+- Source sandboxing (WildFire, FortiSandbox, Threat Emulation) → SRX ATP Cloud (requires P1/P2) — note: ATP Cloud is async, not inline hold
+- Source application control → SRX AppSecure/AppFW (requires A1+)
+- Source SSL decryption → SRX SSL Proxy (Base, but profiles need A1+ for IDP inspection of decrypted traffic)
+- Source GeoIP blocking → SRX DAE + ATP Cloud feeds (requires P1/P2)
+
+**If the target subscription is specified:**
+- Translate profiles that are within the subscription tier
+- For profiles requiring a HIGHER tier than the target, still include them but add a clear warning in _translation_notes: "WARNING: [feature] requires [tier] subscription, but target is [current tier]. This profile will not function without upgrading."
+- If no subscription is specified (Base only), flag ALL advanced security features
+
+**If source rules have security profiles, you MUST include a "security_profiles" object on the translated rule:**
+
+"security_profiles": {
+  "idp": "policy-name",
+  "utm": "utm-policy-name",
+  "ssl_proxy": "ssl-profile-name"
+}
+
+## Important
+- Translate ALL source rules — do not skip any
+- Preserve the intent of each source rule
+- Add a default deny-all cleanup rule per zone pair if not already present in source
+- Set _review_status to "llm_reviewed" on all translated rules
+- Include _translation_notes on every rule explaining what changed from the source and why`;
+
+// ---------------------------------------------------------------------------
 // System Prompt Loader — loads from static/prompts/*.txt files on disk,
 // with localStorage overrides and hardcoded defaults as fallback.
 // ---------------------------------------------------------------------------
 
 /** Cache for prompt files loaded from static/prompts/ */
-const _promptFileCache = { fullReview: null, greenfield: null };
+const _promptFileCache = { fullReview: null, greenfield: null, translate: null };
 
 const PROMPT_FILE_PATHS = {
   fullReview: '/prompts/full-review.txt',
   greenfield: '/prompts/greenfield.txt',
+  translate: '/prompts/translate.txt',
 };
 
 /** Pre-load prompt files from disk into cache (fire-and-forget on module init) */
@@ -382,18 +439,18 @@ _loadPromptFiles();
  * 2. Prompt file from static/prompts/*.txt (editable on disk)
  * 3. Hardcoded default constant
  *
- * @param {'rule'|'fullReview'|'greenfield'} [type='rule'] - Which prompt to load
+ * @param {'fullReview'|'greenfield'|'translate'} [type='fullReview'] - Which prompt to load
  */
-export function loadSystemPrompt(type = 'rule') {
+export function loadSystemPrompt(type = 'fullReview') {
   const defaults = {
-    rule: DEFAULT_RULE_SYSTEM_PROMPT,
     fullReview: DEFAULT_FULL_REVIEW_SYSTEM_PROMPT,
     greenfield: DEFAULT_GREENFIELD_SYSTEM_PROMPT,
+    translate: DEFAULT_TRANSLATE_SYSTEM_PROMPT,
   };
   const keys = {
-    rule: 'ruleSystemPrompt',
     fullReview: 'fullReviewSystemPrompt',
     greenfield: 'greenfieldSystemPrompt',
+    translate: 'translateSystemPrompt',
   };
 
   // 1. Check localStorage (user edits in Settings UI)
@@ -401,7 +458,7 @@ export function loadSystemPrompt(type = 'rule') {
     const saved = localStorage.getItem('llm-settings');
     if (saved) {
       const settings = JSON.parse(saved);
-      const key = keys[type] || keys.rule;
+      const key = keys[type] || keys.fullReview;
       const prompt = settings[key];
       if (prompt && prompt.trim()) return prompt;
     }
@@ -411,7 +468,7 @@ export function loadSystemPrompt(type = 'rule') {
   if (_promptFileCache[type]) return _promptFileCache[type];
 
   // 3. Hardcoded defaults
-  return defaults[type] || DEFAULT_RULE_SYSTEM_PROMPT;
+  return defaults[type] || DEFAULT_FULL_REVIEW_SYSTEM_PROMPT;
 }
 
 // ---------------------------------------------------------------------------
@@ -821,6 +878,28 @@ function loadSettings() {
 }
 
 // ---------------------------------------------------------------------------
+// Internal LLM caller with token override (used by translatePolicies)
+// ---------------------------------------------------------------------------
+
+async function _callLLM(userPrompt, systemPrompt, maxTokensOverride) {
+  const settings = loadSettings();
+  if (!settings.provider) {
+    throw new Error('No LLM provider configured. Open Settings to configure one.');
+  }
+  if (maxTokensOverride) {
+    settings.maxTokens = maxTokensOverride;
+  }
+  switch (settings.provider) {
+    case 'claude': return callClaude(settings, userPrompt, systemPrompt);
+    case 'openai': return callOpenAI(settings, userPrompt, systemPrompt);
+    case 'ollama': return callOllama(settings, userPrompt, systemPrompt);
+    case 'lmstudio': return callLMStudio(settings, userPrompt, systemPrompt);
+    case 'custom': return callCustom(settings, userPrompt, systemPrompt);
+    default: throw new Error(`Unknown LLM provider: ${settings.provider}`);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Prompt Builders
 // ---------------------------------------------------------------------------
 
@@ -837,83 +916,6 @@ function vendorLabel(sourceVendor) {
     case 'greenfield': return 'Greenfield';
     default: return sourceVendor || 'firewall';
   }
-}
-
-/**
- * Builds a prompt asking the LLM to review a security rule (legacy free-text).
- */
-export function buildRuleSuggestionPrompt(rule, targetModel, zones, sourceVendor) {
-  const zoneList = (zones || []).map(z => z.name).join(', ');
-  const vendor = vendorLabel(sourceVendor);
-  return {
-    system: loadSystemPrompt('rule'),
-    user: `Review this firewall security rule for a ${vendor} to SRX (${targetModel || 'SRX'}) migration and suggest improvements:
-
-Rule: "${rule.name}"
-  Action: ${rule.action}
-  From zones: ${rule.src_zones?.join(', ') || 'any'}
-  To zones: ${rule.dst_zones?.join(', ') || 'any'}
-  Source addresses: ${rule.src_addresses?.join(', ') || 'any'}
-  Destination addresses: ${rule.dst_addresses?.join(', ') || 'any'}
-  Applications: ${rule.applications?.join(', ') || 'any'}
-  Services: ${rule.services?.join(', ') || 'any'}
-  Logging: start=${rule.log_start}, end=${rule.log_end}
-  Disabled: ${rule.disabled}
-  ${rule.profile_group ? `Security profile: ${rule.profile_group}` : ''}
-  ${rule.tags?.length ? `Tags: ${rule.tags.join(', ')}` : ''}
-
-Available zones: ${zoneList}
-
-Provide 2-4 specific, actionable suggestions for this rule. Focus on security best practices and SRX conversion considerations.`,
-  };
-}
-
-/**
- * Builds a prompt for reviewing a NAT rule.
- */
-export function buildNATSuggestionPrompt(rule, targetModel, sourceVendor) {
-  const vendor = vendorLabel(sourceVendor);
-  return {
-    system: loadSystemPrompt('rule'),
-    user: `Review this NAT rule for a ${vendor} to SRX (${targetModel || 'SRX'}) migration:
-
-NAT Rule: "${rule.name}"
-  Type: ${rule.type}
-  From zones: ${rule.src_zones?.join(', ') || 'any'}
-  To zones: ${rule.dst_zones?.join(', ') || 'any'}
-  Source addresses: ${rule.src_addresses?.join(', ') || 'any'}
-  Destination addresses: ${rule.dst_addresses?.join(', ') || 'any'}
-  Translated source: ${JSON.stringify(rule.translated_src) || 'none'}
-  Translated destination: ${rule.translated_dst || 'none'}
-  Translated port: ${rule.translated_port || 'none'}
-
-Provide 2-3 specific suggestions for this NAT rule. Focus on SRX NAT rule-set best practices and common pitfalls.`,
-  };
-}
-
-/**
- * Builds a prompt for general config review.
- */
-export function buildConfigReviewPrompt(intermediateConfig, targetModel) {
-  const stats = intermediateConfig?.metadata || {};
-  const vendor = vendorLabel(stats.source_vendor);
-  return {
-    system: loadSystemPrompt('rule'),
-    user: `Review this firewall policy migration overview for ${vendor} to SRX (${targetModel || 'SRX'}):
-
-Configuration stats:
-  Source: ${vendor} ${stats.source_version || 'unknown'}
-  Zones: ${stats.zone_count || 0}
-  Security rules: ${stats.rule_count || 0}
-  NAT rules: ${stats.nat_rule_count || 0}
-  Objects: ${stats.object_count || 0}
-  VPN tunnels: ${stats.vpn_tunnel_count || 0}
-  Static routes: ${stats.static_route_count || 0}
-
-Zone names: ${(intermediateConfig?.zones || []).map(z => z.name).join(', ')}
-
-Provide 3-4 high-level migration recommendations and potential issues to watch for.`,
-  };
 }
 
 /**
@@ -1005,4 +1007,267 @@ Zones: ${(intermediateConfig?.zones || []).map(z => z.name).join(', ')}
 ${configContext}
 Provide a thorough analysis with specific, actionable recommendations. Use JSON code blocks for rule-specific changes.`,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Policy Translation (LLM-driven)
+// ---------------------------------------------------------------------------
+
+/**
+ * Builds the prompt for translating source policies to SRX format.
+ */
+export function buildTranslationPrompt(intermediateConfig, targetModel, srxLicense) {
+  const policies = intermediateConfig?.security_policies || [];
+  const vendor = vendorLabel(intermediateConfig?.metadata?.source_vendor);
+  const zones = (intermediateConfig?.zones || []).map(z => z.name);
+
+  // Address objects summary for context
+  const addresses = intermediateConfig?.addresses || [];
+  const addressGroups = intermediateConfig?.address_groups || [];
+  const addressSummary = addresses.length > 0
+    ? `\n\nAddress Objects (${addresses.length}):\n${addresses.map(a => `  ${a.name}: ${a.ip}`).join('\n')}`
+    : '';
+  const groupSummary = addressGroups.length > 0
+    ? `\n\nAddress Groups (${addressGroups.length}):\n${addressGroups.map(g => `  ${g.name}: [${g.members.join(', ')}]`).join('\n')}`
+    : '';
+
+  const licenseNote = srxLicense
+    ? `\n\nIMPORTANT — Target SRX Subscription: ${srxLicense}
+- Base (no subscriptions): Stateful FW, SSL B&I, Full Routing, VxLAN
+- A1 (Advanced Data Protection): + AppSecure, IPS, SecIntel
+- A2 (Advanced Edge Protection): + URL/Content filtering
+- P1 (Premium Data Protection): A1 + ATP Cloud
+- P2 (Premium Edge Protection): A2 + ATP Cloud
+Flag features requiring a higher subscription than ${srxLicense} in _translation_notes.`
+    : '';
+
+  const systemPrompt = loadSystemPrompt('translate') + licenseNote;
+
+  // Strip internal metadata fields to reduce token usage
+  const cleanPolicies = policies.map(p => {
+    const clean = { ...p };
+    delete clean._rule_index;
+    delete clean._review_status;
+    delete clean._llm_reviewed;
+    delete clean._srx_idp;
+    delete clean._srx_content_security;
+    delete clean._srx_decrypt;
+    delete clean._srx_flow_av;
+    delete clean._srx_antimalware;
+    delete clean._srx_secintel;
+    delete clean._srx_secure_web_proxy;
+    delete clean._srx_icap_redirect;
+    delete clean._srx_log_count;
+    delete clean._srx_rule_options;
+    // Remove empty arrays/objects to save tokens
+    if (clean.tags && clean.tags.length === 0) delete clean.tags;
+    if (clean.security_profiles && Object.keys(clean.security_profiles).length === 0) delete clean.security_profiles;
+    return clean;
+  });
+  const policyJson = JSON.stringify(cleanPolicies);
+
+  const licenseUserNote = srxLicense
+    ? `\nTarget SRX subscription: ${srxLicense} — translate security profiles within this tier, flag features requiring a higher tier in _translation_notes.`
+    : `\nTarget SRX subscription: Base (none) — flag ALL advanced security features (IDP, UTM, EWF, ATP Cloud) as requiring a subscription upgrade in _translation_notes.`;
+
+  return {
+    system: systemPrompt,
+    user: `Translate these ${policies.length} security policies from ${vendor} to Juniper SRX (${targetModel || 'SRX'}).
+
+Source vendor: ${vendor}
+Target platform: Juniper SRX ${targetModel || ''}${licenseUserNote}
+Available zones: ${zones.join(', ')}${addressSummary}${groupSummary}
+
+Source policies (JSON):
+${policyJson}
+
+CRITICAL: Return ONLY a valid JSON array. No markdown fences, no explanation, no text before or after. Start with [ and end with ].`,
+  };
+}
+
+/**
+ * Parses the LLM translation response into a validated policy array.
+ */
+export function parseTranslationResponse(response) {
+  let policies;
+  const preview = (response || '').slice(0, 300);
+
+  // Strategy 1: Extract JSON from markdown fences (```json ... ```)
+  const fenceMatch = response.match(/```(?:json)?\s*\n?([\s\S]*?)```/);
+  if (fenceMatch) {
+    try {
+      policies = JSON.parse(fenceMatch[1].trim());
+    } catch { /* fall through */ }
+  }
+
+  // Strategy 2: Parse the entire response as JSON
+  if (!policies) {
+    try {
+      policies = JSON.parse(response.trim());
+    } catch { /* fall through */ }
+  }
+
+  // Strategy 3: Find a JSON array starting with [ and ending with ]
+  if (!policies) {
+    const startIdx = response.indexOf('[');
+    if (startIdx !== -1) {
+      // Walk backwards from end to find the last ]
+      const endIdx = response.lastIndexOf(']');
+      if (endIdx > startIdx) {
+        try {
+          policies = JSON.parse(response.slice(startIdx, endIdx + 1));
+        } catch { /* fall through */ }
+      }
+    }
+  }
+
+  // Strategy 4: Truncated response — try to repair by closing open brackets
+  if (!policies) {
+    const startIdx = response.indexOf('[');
+    if (startIdx !== -1) {
+      let jsonStr = response.slice(startIdx);
+      // Remove trailing text after the last complete object
+      const lastBrace = jsonStr.lastIndexOf('}');
+      if (lastBrace !== -1) {
+        jsonStr = jsonStr.slice(0, lastBrace + 1) + ']';
+        try {
+          policies = JSON.parse(jsonStr);
+          console.warn('[translate] Repaired truncated JSON response — output may be incomplete.');
+        } catch { /* fall through */ }
+      }
+    }
+  }
+
+  if (!policies) {
+    throw new Error(
+      'Could not parse LLM translation response as JSON.\n' +
+      'Response preview: ' + preview + (response.length > 300 ? '...' : '') +
+      '\n\nTip: The response may have been truncated. Try increasing Max Tokens in LLM Settings (8192+ recommended).'
+    );
+  }
+
+  if (!Array.isArray(policies)) {
+    throw new Error('LLM response was not an array of policies. Got: ' + typeof policies);
+  }
+
+  // Validate and normalize each policy
+  return policies.map((p, i) => {
+    if (!p.name) p.name = `translated-rule-${i + 1}`;
+    if (!p.action) p.action = 'deny';
+
+    // Normalize arrays
+    p.src_zones = Array.isArray(p.src_zones) ? p.src_zones : (p.src_zones ? [p.src_zones] : ['any']);
+    p.dst_zones = Array.isArray(p.dst_zones) ? p.dst_zones : (p.dst_zones ? [p.dst_zones] : ['any']);
+    p.src_addresses = Array.isArray(p.src_addresses) ? p.src_addresses : (p.src_addresses ? [p.src_addresses] : ['any']);
+    p.dst_addresses = Array.isArray(p.dst_addresses) ? p.dst_addresses : (p.dst_addresses ? [p.dst_addresses] : ['any']);
+    p.applications = Array.isArray(p.applications) ? p.applications : (p.applications ? [p.applications] : []);
+    p.services = Array.isArray(p.services) ? p.services : (p.services ? [p.services] : []);
+
+    // Normalize booleans
+    p.log_start = !!p.log_start;
+    p.log_end = p.log_end !== undefined ? !!p.log_end : true;
+    p.disabled = !!p.disabled;
+
+    // Ensure translation metadata
+    p._translation_notes = p._translation_notes || '';
+    p._review_status = 'llm_reviewed'; // Always force — LLM must not control review status
+    p._rule_index = i;
+
+    return p;
+  });
+}
+
+/**
+ * Translates source security policies to SRX format via LLM.
+ * Automatically chunks large rulesets (>30 rules) into smaller batches.
+ *
+ * @param {object} intermediateConfig - The full parsed intermediate config
+ * @param {string} targetModel - Target SRX model name
+ * @param {string} srxLicense - Target subscription level
+ * @param {function} [onProgress] - Optional callback: ({ phase, detail, chunk, totalChunks, promptTokens, responseTokens, elapsed })
+ * @returns {Promise<Array>} - Array of translated SRX policy objects
+ */
+export async function translatePolicies(intermediateConfig, targetModel, srxLicense, onProgress) {
+  const policies = intermediateConfig?.security_policies || [];
+  if (policies.length === 0) {
+    throw new Error('No security policies to translate.');
+  }
+
+  const CHUNK_SIZE = 25;
+  const OVERLAP = 2;
+  const MAX_TOKENS = 16384;
+  const t0 = Date.now();
+  let totalPromptTokens = 0;
+  let totalResponseTokens = 0;
+
+  const report = (data) => onProgress?.({ ...data, elapsed: Date.now() - t0 });
+
+  if (policies.length <= 30) {
+    // Single call for small rulesets
+    report({ phase: 'building_prompt', detail: `Preparing ${policies.length} rules for translation`, chunk: 1, totalChunks: 1, promptTokens: 0, responseTokens: 0 });
+    const { system, user } = buildTranslationPrompt(intermediateConfig, targetModel, srxLicense);
+    const promptEstimate = Math.round((system.length + user.length) / 4);
+    totalPromptTokens = promptEstimate;
+    report({ phase: 'calling_llm', detail: `Sending to LLM (~${promptEstimate.toLocaleString()} prompt tokens)`, chunk: 1, totalChunks: 1, promptTokens: promptEstimate, responseTokens: 0 });
+    const response = await _callLLM(user, system, MAX_TOKENS);
+    const responseEstimate = Math.round(response.length / 4);
+    totalResponseTokens = responseEstimate;
+    console.log('[translate] Raw LLM response length:', response.length, 'chars');
+    console.log('[translate] Response preview:', response.slice(0, 500));
+    report({ phase: 'parsing_response', detail: `Parsing LLM response (~${responseEstimate.toLocaleString()} tokens)`, chunk: 1, totalChunks: 1, promptTokens: promptEstimate, responseTokens: responseEstimate });
+    const result = parseTranslationResponse(response);
+    report({ phase: 'complete', detail: `Translated ${result.length} rules`, chunk: 1, totalChunks: 1, promptTokens: totalPromptTokens, responseTokens: totalResponseTokens });
+    return result;
+  }
+
+  // Chunked translation for large rulesets
+  const chunks = [];
+  for (let i = 0; i < policies.length; i += CHUNK_SIZE - OVERLAP) {
+    const end = Math.min(i + CHUNK_SIZE, policies.length);
+    chunks.push({ start: i, end, policies: policies.slice(i, end) });
+    if (end >= policies.length) break;
+  }
+
+  report({ phase: 'building_prompt', detail: `Splitting ${policies.length} rules into ${chunks.length} chunks`, chunk: 0, totalChunks: chunks.length, promptTokens: 0, responseTokens: 0 });
+
+  const allTranslated = [];
+  const seenNames = new Set();
+
+  for (let ci = 0; ci < chunks.length; ci++) {
+    const chunk = chunks[ci];
+    const chunkConfig = {
+      ...intermediateConfig,
+      security_policies: chunk.policies,
+    };
+    const { system, user } = buildTranslationPrompt(chunkConfig, targetModel, srxLicense);
+
+    // Add chunk context
+    const chunkUser = `${user}\n\nNote: This is chunk ${ci + 1}/${chunks.length} (rules ${chunk.start + 1}–${chunk.end} of ${policies.length} total). Translate all rules in this chunk.`;
+
+    const promptEstimate = Math.round((system.length + chunkUser.length) / 4);
+    totalPromptTokens += promptEstimate;
+    report({ phase: 'calling_llm', detail: `Chunk ${ci + 1}/${chunks.length}: rules ${chunk.start + 1}–${chunk.end}`, chunk: ci + 1, totalChunks: chunks.length, promptTokens: totalPromptTokens, responseTokens: totalResponseTokens });
+
+    const response = await _callLLM(chunkUser, system, MAX_TOKENS);
+    const responseEstimate = Math.round(response.length / 4);
+    totalResponseTokens += responseEstimate;
+    console.log(`[translate] Chunk ${ci + 1}/${chunks.length} response length:`, response.length, 'chars');
+    console.log(`[translate] Chunk ${ci + 1} preview:`, response.slice(0, 500));
+
+    report({ phase: 'parsing_response', detail: `Parsing chunk ${ci + 1}/${chunks.length} response`, chunk: ci + 1, totalChunks: chunks.length, promptTokens: totalPromptTokens, responseTokens: totalResponseTokens });
+    const translated = parseTranslationResponse(response);
+
+    // Deduplicate overlap rules by name
+    for (const rule of translated) {
+      if (!seenNames.has(rule.name)) {
+        seenNames.add(rule.name);
+        allTranslated.push(rule);
+      }
+    }
+  }
+
+  // Re-index all rules sequentially
+  const result = allTranslated.map((p, i) => ({ ...p, _rule_index: i }));
+  report({ phase: 'complete', detail: `Translated ${result.length} rules from ${policies.length} source rules`, chunk: chunks.length, totalChunks: chunks.length, promptTokens: totalPromptTokens, responseTokens: totalResponseTokens });
+  return result;
 }

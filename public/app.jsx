@@ -5,7 +5,6 @@
  *   LEFT:   ConfigInput   — paste/upload PAN-OS config
  *   CENTER: Tabbed editor — Security Rules / Zones / Objects / NAT
  *   RIGHT:  InterviewPanel — editable rule details + LLM suggestions
- *           ReviewChatPanel — full-ruleset LLM review chat (when in review mode)
  *   BOTTOM: SRXOutput     — generated SRX commands + warnings
  *
  * State flow:
@@ -14,15 +13,13 @@
  *   3. ModelSelector auto-opens  →  sourceModel + targetModel
  *   4. InterfaceMapper opens  →  interfaceMappings
  *   5. User edits config in tabbed panels
- *   6. User reviews rules (LLM Review + Accept per rule)
- *   7. When all accepted, "Review" opens full-ruleset chat
- *   8. Click "Convert" sends to /api/convert  →  srxOutput + convertWarnings
+ *   6. User reviews/accepts translated rules
+ *   7. Click "Convert" sends to /api/convert  →  srxOutput + convertWarnings
  */
 import React, { useState, useCallback, useMemo } from 'react';
 import ConfigInput from './components/ConfigInput.jsx';
 import PolicyTable from './components/PolicyTable.jsx';
 import InterviewPanel from './components/InterviewPanel.jsx';
-import ReviewChatPanel from './components/ReviewChatPanel.jsx';
 import SRXOutput from './components/SRXOutput.jsx';
 import WarningsPanel from './components/WarningsPanel.jsx';
 import LLMSettings from './components/LLMSettings.jsx';
@@ -39,6 +36,7 @@ import SyslogEditor from './components/SyslogEditor.jsx';
 import DHCPEditor from './components/DHCPEditor.jsx';
 import QoSEditor from './components/QoSEditor.jsx';
 import GreenfieldChat from './components/GreenfieldChat.jsx';
+import { translatePolicies, getLLMStatus } from './utils/llm-client.js';
 
 export default function App() {
   // --- Config input state ---
@@ -66,9 +64,6 @@ export default function App() {
   const [editTab, setEditTab] = useState('rules');
   const [platformView, setPlatformView] = useState('panos'); // 'panos' | 'srx'
 
-  // --- Review mode state ---
-  const [reviewMode, setReviewMode] = useState(false);
-
   // --- Conversion output state ---
   const [srxOutput, setSrxOutput] = useState(null);
   const [convertWarnings, setConvertWarnings] = useState([]);
@@ -94,15 +89,25 @@ export default function App() {
   const [bottomTab, setBottomTab] = useState('output');
   const [error, setError] = useState(null);
 
+  // --- LLM Translation state (feature/llm-translate) ---
+  const [srxTranslatedPolicies, setSrxTranslatedPolicies] = useState(null);
+  const [isTranslating, setIsTranslating] = useState(false);
+  const [translationError, setTranslationError] = useState(null);
+  const [translationProgress, setTranslationProgress] = useState(null);
+
   // --- All warnings combined (parse + convert) ---
   const allWarnings = [...parseWarnings, ...convertWarnings];
 
   // --- Review progress ---
   const reviewProgress = useMemo(() => {
-    const policies = intermediateConfig?.security_policies || [];
+    // When translated policies exist and we're on SRX tab, count those
+    const policies = (platformView === 'srx' && srxTranslatedPolicies)
+      ? srxTranslatedPolicies
+      : (intermediateConfig?.security_policies || []);
     const accepted = policies.filter(r => r._review_status === 'accepted' || r.disabled).length;
-    return { accepted, total: policies.length };
-  }, [intermediateConfig]);
+    const llmReviewed = policies.filter(r => r._review_status === 'llm_reviewed').length;
+    return { accepted, llmReviewed, total: policies.length };
+  }, [intermediateConfig, srxTranslatedPolicies, platformView]);
 
   const allRulesAccepted = reviewProgress.total > 0 && reviewProgress.accepted === reviewProgress.total;
 
@@ -177,7 +182,8 @@ export default function App() {
     setConversionSummary(null);
     setSelectedRule(null);
     setEditTab('rules');
-    setReviewMode(false);
+    setSrxTranslatedPolicies(null);
+    setTranslationError(null);
 
     try {
       const response = await fetch('/api/parse', {
@@ -244,10 +250,15 @@ export default function App() {
     setError(null);
 
     try {
+      // Merge translated policies into the config sent to /api/convert
+      const configForConversion = srxTranslatedPolicies
+        ? { ...intermediateConfig, security_policies: srxTranslatedPolicies }
+        : intermediateConfig;
+
       const response = await fetch('/api/convert', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ intermediateConfig, format, interfaceMappings, targetContext: targetContext.type !== 'none' ? targetContext : null }),
+        body: JSON.stringify({ intermediateConfig: configForConversion, format, interfaceMappings, targetContext: targetContext.type !== 'none' ? targetContext : null }),
       });
 
       const data = await response.json();
@@ -412,7 +423,6 @@ export default function App() {
     setConvertWarnings([]);
     setSelectedRule(null);
     setEditTab('rules');
-    setReviewMode(false);
     setLlmWarningDismissed(true); // Greenfield configs have no sensitive data
     setPlatformView('panos'); // Start on the "from LLM Interview" tab
     setShowModelSelector(true);
@@ -561,36 +571,129 @@ export default function App() {
   }, []);
 
 
+  // ------------------------------------------------------------------
+  // Translated policy handlers (for LLM-translated SRX policies)
+  // ------------------------------------------------------------------
+
+  /** Update a translated policy by index */
+  const handleUpdateTranslatedRule = useCallback((index, updatedRule) => {
+    setSrxTranslatedPolicies(prev => {
+      if (!prev) return prev;
+      const policies = [...prev];
+      policies[index] = updatedRule;
+      return policies;
+    });
+  }, []);
+
+  /** Accept a translated policy by index */
+  const handleAcceptTranslatedRule = useCallback((index) => {
+    setSrxTranslatedPolicies(prev => {
+      if (!prev) return prev;
+      const policies = [...prev];
+      policies[index] = { ...policies[index], _review_status: 'accepted' };
+      return policies;
+    });
+    setSelectedRule(prev => prev ? { ...prev, _review_status: 'accepted' } : prev);
+  }, []);
+
+  /** Delete a translated policy by index */
+  const handleDeleteTranslatedRule = useCallback((index) => {
+    setSrxTranslatedPolicies(prev => {
+      if (!prev) return prev;
+      return prev.filter((_, i) => i !== index).map((p, i) => ({ ...p, _rule_index: i }));
+    });
+    setSelectedRule(null);
+  }, []);
+
+  /** Add a new rule to translated policies */
+  const handleAddTranslatedRule = useCallback(() => {
+    setSrxTranslatedPolicies(prev => {
+      const arr = prev || [];
+      const newIndex = arr.length;
+      return [...arr, {
+        name: `new-rule-${newIndex + 1}`,
+        _rule_index: newIndex,
+        action: 'deny',
+        src_zones: [],
+        dst_zones: [],
+        src_addresses: [],
+        dst_addresses: [],
+        negate_source: false,
+        negate_destination: false,
+        applications: [],
+        services: [],
+        log_start: false,
+        log_end: true,
+        disabled: false,
+        description: '',
+        tags: [],
+        profile_group: '',
+        security_profiles: {},
+        _review_status: 'accepted',
+        _translation_notes: 'Manually added rule',
+      }];
+    });
+  }, []);
+
+  /** Translate policies with LLM */
+  const handleTranslateWithLLM = useCallback(async () => {
+    if (!intermediateConfig?.security_policies?.length) return;
+
+    // Check sanitization
+    if (!isSanitized && !llmWarningDismissed) {
+      setShowLLMWarning(true);
+      return;
+    }
+
+    // Check LLM is configured
+    const status = getLLMStatus();
+    if (!status.configured) {
+      setError('No LLM provider configured. Open Settings to configure one.');
+      return;
+    }
+
+    setIsTranslating(true);
+    setTranslationError(null);
+    setTranslationProgress(null);
+    setError(null);
+    setIsLoading(true);
+    setLoadingMessage('Translating policies with LLM...');
+
+    try {
+      const translated = await translatePolicies(intermediateConfig, targetModel, srxLicense, (progress) => {
+        setTranslationProgress(progress);
+      });
+      setSrxTranslatedPolicies(translated);
+      // Auto-switch to SRX view and rules tab
+      setPlatformView('srx');
+      setEditTab('rules');
+      setSelectedRule(null);
+    } catch (err) {
+      setTranslationError(err.message);
+      setError(`Translation error: ${err.message}`);
+    } finally {
+      setIsTranslating(false);
+      setIsLoading(false);
+      setLoadingMessage('');
+    }
+  }, [intermediateConfig, targetModel, srxLicense, isSanitized, llmWarningDismissed]);
+
   /** Get current rule index for the selected rule */
   const getCurrentRuleIndex = useCallback(() => {
     if (!selectedRule || !intermediateConfig) return -1;
-    return intermediateConfig.security_policies.findIndex(
+    // Check translated policies first when on SRX tab
+    const policies = (platformView === 'srx' && srxTranslatedPolicies)
+      ? srxTranslatedPolicies
+      : intermediateConfig.security_policies;
+    return policies.findIndex(
       r => r.name === selectedRule.name && r._rule_index === selectedRule._rule_index
     );
-  }, [selectedRule, intermediateConfig]);
+  }, [selectedRule, intermediateConfig, srxTranslatedPolicies, platformView]);
 
-  /** Handle Review button click — only available in SRX view */
-  const [showReviewWarning, setShowReviewWarning] = useState(false);
-
-  const handleReviewClick = useCallback(() => {
-    if (platformView !== 'srx') {
-      setError('Switch to the SRX view to start the full-ruleset review.');
-      return;
-    }
-    if (!allRulesAccepted) {
-      setShowReviewWarning(true);
-      return;
-    }
-    setReviewMode(true);
-  }, [allRulesAccepted, platformView]);
-
-  /** Switch platform view — exit review mode when leaving SRX */
+  /** Switch platform view */
   const handlePlatformViewChange = useCallback((view) => {
     setPlatformView(view);
-    if (view !== 'srx' && reviewMode) {
-      setReviewMode(false);
-    }
-  }, [reviewMode]);
+  }, []);
 
   // ------------------------------------------------------------------
   // Model / mapping handlers
@@ -657,6 +760,11 @@ export default function App() {
             {intermediateConfig && (
               <span className="review-progress">
                 {reviewProgress.accepted}/{reviewProgress.total} accepted
+                {reviewProgress.llmReviewed > 0 && (
+                  <span style={{ color: 'var(--accent)', marginLeft: 6 }}>
+                    ({reviewProgress.llmReviewed} LLM reviewed)
+                  </span>
+                )}
               </span>
             )}
           </div>
@@ -759,6 +867,18 @@ export default function App() {
                     }
                   </button>
                   <button
+                    className="btn btn-translate"
+                    onClick={handleTranslateWithLLM}
+                    disabled={isTranslating || !intermediateConfig?.security_policies?.length}
+                    title="Translate source policies to SRX format using LLM"
+                  >
+                    {isTranslating ? (
+                      <><span className="spinner" /> {greenfieldMode ? 'Importing...' : 'Translating...'}</>
+                    ) : (
+                      greenfieldMode ? 'Import LLM Config' : 'Translate with LLM'
+                    )}
+                  </button>
+                  <button
                     className={`platform-view-btn ${platformView === 'srx' ? 'active' : ''}`}
                     onClick={() => handlePlatformViewChange('srx')}
                   >
@@ -787,17 +907,6 @@ export default function App() {
                           style={{ maxWidth: 100, textAlign: 'left' }}
                         />
                       )}
-                      <button
-                        className="btn btn-secondary btn-sm"
-                        onClick={handleReviewClick}
-                        title={
-                          allRulesAccepted
-                            ? 'Start full ruleset review with LLM'
-                            : `${reviewProgress.accepted}/${reviewProgress.total} rules accepted — click to review anyway`
-                        }
-                      >
-                        Review All w/LLM
-                      </button>
                       <button
                         className="btn btn-primary btn-sm"
                         onClick={() => handleConvertClick('set')}
@@ -923,17 +1032,43 @@ export default function App() {
                 flex: 1, overflow: 'hidden', display: (greenfieldMode && platformView === 'panos') ? 'none' : 'flex', flexDirection: 'column',
               }}>
                 {editTab === 'rules' && (
-                  <PolicyTable
-                    policies={intermediateConfig.security_policies || []}
-                    warnings={allWarnings}
-                    selectedRule={selectedRule}
-                    onSelectRule={setSelectedRule}
-                    onUpdateRule={handleUpdateRule}
-                    onDeleteRule={handleDeleteRule}
-                    onAddRule={handleAddRule}
-                    viewMode={effectiveViewMode}
-                    platformView={platformView}
-                  />
+                  platformView === 'srx' && !srxTranslatedPolicies ? (
+                    <div className="panel-body">
+                      <div className="empty-state">
+                        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" opacity="0.3">
+                          <path d="M12 2L2 7l10 5 10-5-10-5z" />
+                          <path d="M2 17l10 5 10-5" />
+                          <path d="M2 12l10 5 10-5" />
+                        </svg>
+                        <h3>No translated policies yet</h3>
+                        <p>Click "{greenfieldMode ? 'Import LLM Config' : 'Translate with LLM'}" to send the source ruleset to the LLM for translation to SRX format.</p>
+                        <button
+                          className="btn btn-translate"
+                          onClick={handleTranslateWithLLM}
+                          disabled={isTranslating || !intermediateConfig?.security_policies?.length}
+                          style={{ marginTop: 12 }}
+                        >
+                          {isTranslating ? (greenfieldMode ? 'Importing...' : 'Translating...') : (greenfieldMode ? 'Import LLM Config' : 'Translate with LLM')}
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <PolicyTable
+                      policies={
+                        platformView === 'srx'
+                          ? (srxTranslatedPolicies || [])
+                          : (intermediateConfig.security_policies || [])
+                      }
+                      warnings={allWarnings}
+                      selectedRule={selectedRule}
+                      onSelectRule={setSelectedRule}
+                      onUpdateRule={platformView === 'srx' && srxTranslatedPolicies ? handleUpdateTranslatedRule : handleUpdateRule}
+                      onDeleteRule={platformView === 'srx' && srxTranslatedPolicies ? handleDeleteTranslatedRule : handleDeleteRule}
+                      onAddRule={platformView === 'srx' && srxTranslatedPolicies ? handleAddTranslatedRule : handleAddRule}
+                      viewMode={effectiveViewMode}
+                      platformView={platformView}
+                    />
+                  )
                 )}
                 {editTab === 'zones' && (
                   <ZoneEditor
@@ -1048,43 +1183,46 @@ export default function App() {
           )}
         </div>
 
-        {/* RIGHT: Interview / Rule Details / Review Chat */}
-        {reviewMode ? (
-          <ReviewChatPanel
-            intermediateConfig={intermediateConfig}
-            onUpdateRule={handleUpdateRule}
-            targetModel={targetModel}
-            srxLicense={srxLicense}
-            isSanitized={isSanitized}
-            llmWarningDismissed={llmWarningDismissed}
-            onLLMWarning={() => setShowLLMWarning(true)}
-            onExitReview={() => setReviewMode(false)}
-          />
-        ) : (
-          <InterviewPanel
-            selectedRule={selectedRule}
-            intermediateConfig={intermediateConfig}
-            warnings={allWarnings}
-            onUpdateRule={(updatedRule) => {
-              if (!selectedRule || !intermediateConfig) return;
-              const index = intermediateConfig.security_policies.findIndex(
-                r => r.name === selectedRule.name && r._rule_index === selectedRule._rule_index
-              );
-              if (index >= 0) {
+        {/* RIGHT: Interview / Rule Details */}
+        <InterviewPanel
+          selectedRule={selectedRule}
+          intermediateConfig={intermediateConfig}
+          warnings={allWarnings}
+          isTranslating={isTranslating}
+          translationProgress={translationProgress}
+          onUpdateRule={(updatedRule) => {
+            if (!selectedRule) return;
+            const isTranslated = platformView === 'srx' && srxTranslatedPolicies;
+            const policies = isTranslated
+              ? srxTranslatedPolicies
+              : intermediateConfig?.security_policies;
+            if (!policies) return;
+            const index = policies.findIndex(
+              r => r.name === selectedRule.name && r._rule_index === selectedRule._rule_index
+            );
+            if (index >= 0) {
+              if (isTranslated) {
+                handleUpdateTranslatedRule(index, updatedRule);
+              } else {
                 handleUpdateRule(index, updatedRule);
-                setSelectedRule(updatedRule);
               }
-            }}
-            targetModel={targetModel}
-            srxLicense={srxLicense}
-            viewMode={effectiveViewMode}
-            platformView={platformView}
-            onAcceptRule={() => {
-              const index = getCurrentRuleIndex();
-              if (index >= 0) handleAcceptRule(index);
-            }}
-          />
-        )}
+              setSelectedRule(updatedRule);
+            }
+          }}
+          targetModel={targetModel}
+          srxLicense={srxLicense}
+          viewMode={effectiveViewMode}
+          platformView={platformView}
+          onAcceptRule={() => {
+            const index = getCurrentRuleIndex();
+            if (index < 0) return;
+            if (platformView === 'srx' && srxTranslatedPolicies) {
+              handleAcceptTranslatedRule(index);
+            } else {
+              handleAcceptRule(index);
+            }
+          }}
+        />
 
         {/* BOTTOM: SRX Output + Warnings */}
         <div className="panel output-panel">
@@ -1172,35 +1310,6 @@ export default function App() {
               </button>
               <button className="btn btn-primary" onClick={() => { setShowConvertConfirm(false); handleConvert('set'); }}>
                 Convert Anyway
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Review warning — unaccepted policies */}
-      {showReviewWarning && (
-        <div className="modal-overlay" onClick={() => setShowReviewWarning(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ width: 440 }}>
-            <div className="modal-header" style={{ borderBottomColor: 'rgba(234, 179, 8, 0.3)' }}>
-              <h2 style={{ color: 'var(--warning)' }}>Unaccepted Policies</h2>
-              <button className="modal-close" onClick={() => setShowReviewWarning(false)}>x</button>
-            </div>
-            <div className="modal-body">
-              <p style={{ marginBottom: 8 }}>
-                <strong>{reviewProgress.total - reviewProgress.accepted}</strong> of {reviewProgress.total} policies
-                have not been accepted yet.
-              </p>
-              <p style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-                Starting the full-ruleset review without accepting all policies means the LLM will review rules that haven't been individually validated.
-              </p>
-            </div>
-            <div className="modal-footer" style={{ gap: 8 }}>
-              <button className="btn btn-secondary" onClick={() => setShowReviewWarning(false)}>
-                Go Back
-              </button>
-              <button className="btn btn-primary" onClick={() => { setShowReviewWarning(false); setReviewMode(true); }}>
-                Review Anyway
               </button>
             </div>
           </div>

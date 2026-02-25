@@ -64,28 +64,21 @@ The interface mapper shows every source interface found in the config alongside 
 
 The center panel shows all security rules in a sortable, filterable table. Use the **from/to** toggle above the tabs to switch between source and target views. Click any rule to see its full details in the right panel, where every field is editable. Use the tabs to also edit Zones, Objects/Address Book, and NAT rules.
 
-### 5. LLM Review (Optional)
+### 5. Translate with LLM (Optional)
 
-Configure an LLM provider in **Settings** (gear icon). On the "to SRX" tab, for each rule:
+Configure an LLM provider in **Settings** (gear icon). Click **Translate with LLM** above the policy table to send all source policies to the LLM for translation into optimized SRX-compatible policies. The LLM:
 
-1. Select the rule in the table
-2. Click **LLM Review** in the right panel
-3. Review the structured suggestions — each shows the field, current value, suggested value, and reasoning
-4. Click **Accept** or **Reject** on each suggestion individually. Accepted changes apply to the rule immediately
-5. For informational notes (no field change), click **Accept** to save the note to the rule or **Dismiss** to discard. Accepted notes appear in a **Notes** section on the rule and are emitted as `# NOTE:` comments in the SRX config output
-6. Click **Accept Policy** when satisfied
+- Translates actions, zones, addresses, applications, and services to SRX equivalents
+- Applies vendor-specific migration knowledge (PAN-OS, FortiGate, Cisco ASA, Check Point, SonicWall, Huawei USG)
+- Maps security profiles to SRX subscription tiers (Base/A1/A2/P1/P2) and flags features requiring upgrades
+- Optimizes rule ordering, merges redundant rules, and adds default deny-all cleanup rules
+- Sets logging best practices (log-end for permit, log-start for deny)
 
-### 6. Full-Ruleset Review (Optional)
+During translation, the right panel shows a live progress indicator with elapsed time, chunk progress, and token estimates. In **Greenfield** mode, this button is labeled **Import LLM Config**.
 
-Once all rules are accepted, the **Review** button in the tab bar becomes active. Click it to open a chat interface where the LLM analyzes the entire ruleset for:
+### 6. Review & Accept Translated Rules
 
-- Rule ordering and shadowed rules
-- Missing deny-all cleanup rules
-- Inconsistent logging
-- Zone coverage gaps
-- Security profile and license recommendations
-
-Accept or reject individual suggestions inline, and ask follow-up questions.
+After translation, all rules appear in the "to SRX" table with **LLM Reviewed** status (blue). Click any rule to see its full details and translation notes in the right panel. Review each rule and click **Accept** to mark it as accepted. A progress counter in the navbar tracks accepted vs LLM-reviewed rules.
 
 ### 7. Convert
 
@@ -158,21 +151,21 @@ Click **Convert to SRX** to generate the output. Switch between **Set Commands**
 - **SRX subscriptions** — Select the target SRX subscription level (Base, A1 Advanced Data Protection, A2 Advanced Edge Protection, P1 Premium Data Protection, P2 Premium Edge Protection) to gate feature availability and inform LLM reviews. Includes footnote explaining SDC (Security Director Cloud) and ATP (Advanced Threat Protection) capabilities
 - **SRX datasheet links** — Quick-access popup with links to official HPE Juniper SRX spec sheets for all current models, grouped by tier (Branch, Enterprise, Data Center, Chassis-Based, Virtual)
 
-### Rule Review Workflow
-- **Review status tracking** — Every rule starts as *Unreviewed* and can progress through *LLM Reviewed* to *Accepted*. Disabled rules show a *Disabled* label. Status labels are color-coded in the policy table
+### LLM Translation & Review Workflow
+- **Translate with LLM** — One-click translation of all source policies to optimized SRX format using vendor-aware, subscription-aware LLM prompts. The translation prompt includes vendor-specific migration pitfalls and cross-vendor gap analysis for all 6 supported source vendors
+- **Translation progress** — Real-time progress panel in the right pane showing elapsed time (live ticking timer), chunk progress, and estimated prompt/response token counts
+- **Review status tracking** — Every translated rule starts as *LLM Reviewed* and must be manually accepted. Status labels are color-coded: blue for LLM Reviewed, green for Accepted, grey for Disabled
 - **Status filtering** — Filter the policy table by review status (All / Unreviewed / LLM Reviewed / Accepted / Disabled) — available on the "to SRX" tab
-- **Per-rule LLM review** — Click "LLM Review" on any rule to get structured AI suggestions with specific field changes (including security profiles), reasons, and individual Accept/Reject buttons. The LLM sees the full SRX policy path, resolved address/service object definitions, application services, and subscription context. Informational notes can be accepted (saved to rule and emitted as `# NOTE:` comments in SRX output) or dismissed. Type coercion protects against malformed LLM output
-- **Accept rules** — Mark rules as accepted individually. A progress counter in the navbar tracks how many rules are accepted
-- **Full-ruleset review** — Once all rules are accepted, the "Review" button opens a chat interface for multi-turn LLM conversation about the entire ruleset, with inline suggestion cards you can accept or reject
+- **Accept rules** — Click any rule to review its details and translation notes, then click Accept. A progress counter in the navbar tracks accepted vs LLM-reviewed rules
+- **Subscription-aware translation** — SRX subscription tier (Base/A1/A2/P1/P2) is passed to the LLM, which maps security profiles to the correct tier and flags features requiring upgrades in `_translation_notes`
 
 ### LLM Integration
 - **Multiple providers** — Claude (Anthropic), OpenAI, Ollama, LM Studio, or any OpenAI-compatible endpoint
 - **Browser-only API keys** — All credentials stay in `localStorage` and never touch the server
-- **Three editable system prompts** — Separate prompts for per-rule review, full-ruleset review, and greenfield interview. Prompts are stored as plain-text files in `static/prompts/` (editable on disk) with Settings UI overrides and hardcoded fallback defaults. Each has its own sub-tab in Settings with independent Reset to Default
-- **Structured responses** — LLM returns JSON with analysis, per-field suggestions, informational notes, and a verdict — parsed into interactive cards with per-item Accept/Reject buttons
-- **Multi-turn chat** — The full-ruleset review panel maintains conversation history so you can ask follow-up questions
-- **Vendor-aware prompts** — LLM prompts dynamically reference the detected source vendor (PAN-OS, FortiGate, Cisco ASA, or SRX) with vendor-specific migration pitfall guidance
-- **Subscription-aware prompts** — SRX subscription level is included in LLM prompts so suggestions account for available features
+- **Editable system prompts** — Separate prompts for ruleset translation and greenfield interview. Prompts are stored as plain-text files in `static/prompts/` (editable on disk) with Settings UI overrides and hardcoded fallback defaults. Each has its own sub-tab in Settings with independent Reset to Default
+- **Vendor-aware translation** — Translation prompts include vendor-specific migration pitfalls for all 6 source vendors (PAN-OS, FortiGate, Cisco ASA, Check Point, SonicWall, Huawei USG) plus a cross-vendor gap summary
+- **Subscription-aware translation** — SRX subscription tier is included in both the system prompt and user prompt, ensuring security profiles are correctly mapped to available features
+- **Real-time progress** — Translation progress panel shows live elapsed time, chunk progress, and token estimates during LLM calls
 
 ### Conversion Features
 - **Security policies** — Zone-based firewall rules with source/dest addresses, applications, services, actions, logging
@@ -222,8 +215,8 @@ firewall-intent-converter/
 ├── static/                       # Static assets served as-is (Vite publicDir)
 │   ├── logo.png                  # Application logo
 │   └── prompts/                  # Editable LLM system prompts (plain text)
-│       ├── rule-review.txt       # Per-rule review prompt — SRX best practices, vendor migration pitfalls
-│       ├── full-review.txt       # Full-ruleset review prompt — holistic security posture analysis
+│       ├── translate.txt         # Translation prompt — SRX rules, vendor mapping, subscription tiers
+│       ├── full-review.txt       # Translation instructions — vendor pitfalls, cross-vendor gaps
 │       └── greenfield.txt        # Greenfield interview prompt — guided SRX config builder
 ├── src/                          # Server-side modules
 │   ├── parsers/
@@ -299,12 +292,12 @@ All LLM configuration is stored in `localStorage` under the key `llm-settings`. 
 
 ### LLM System Prompts
 
-Three editable plain-text prompt files control how the LLM behaves during reviews and greenfield interviews. Edit these files directly on disk — changes take effect on page reload:
+Editable plain-text prompt files control how the LLM behaves during translation and greenfield interviews. Edit these files directly on disk — changes take effect on page reload:
 
 | File | Purpose |
 |------|---------|
-| `static/prompts/rule-review.txt` | **Per-rule review** — SRX best practices, zone architecture, logging, security profiles, NAT, VPN, vendor-specific migration pitfalls, compliance (PCI DSS, NIST, CIS) |
-| `static/prompts/full-review.txt` | **Full-ruleset review** — holistic security posture analysis, rule ordering, shadowed/redundant rules, address/NAT/zone/HA review, JSON suggestion format |
+| `static/prompts/translate.txt` | **Translate ruleset** — SRX translation rules, vendor action mapping, subscription tiers, security profile mapping, logging best practices, rule optimization |
+| `static/prompts/full-review.txt` | **Translate LLM instructions** — Vendor-specific migration pitfalls (all 6 vendors), cross-vendor gap summary, SRX best practices, translation priorities |
 | `static/prompts/greenfield.txt` | **Greenfield interview** — guided SRX config builder with use-case discovery, progressive config building via JSON action blocks, best-practice recommendations |
 
 **Priority order:** User edits in the Settings UI (localStorage) take precedence over the on-disk files, which take precedence over the hardcoded defaults in `llm-client.js`. To revert to the on-disk version, click "Reset to Default" in the Settings prompt editor.

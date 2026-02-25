@@ -690,6 +690,24 @@ html, body, #root {
   font-style: italic;
 }
 
+.warning-item.resolved { opacity: 0.5; }
+.warning-item.resolved:hover { opacity: 0.8; }
+
+.warning-actions { display: flex; gap: 4px; margin-left: auto; flex-shrink: 0; align-items: flex-start; padding-top: 2px; }
+.btn-xs { padding: 2px 8px; font-size: 0.7rem; border-radius: 4px; border: none; cursor: pointer; white-space: nowrap; }
+.btn-ack { background: var(--accent); color: white; }
+.btn-ack:hover { filter: brightness(1.15); }
+.btn-fixed { background: var(--success); color: white; }
+.btn-fixed:hover { filter: brightness(1.15); }
+.btn-ignore { background: var(--surface-2); color: var(--text-secondary); }
+.btn-ignore:hover { filter: brightness(1.15); }
+
+.warning-status-badge { font-size: 0.7rem; padding: 2px 8px; border-radius: 4px; cursor: pointer; white-space: nowrap; }
+.warning-status-badge.acknowledged { background: var(--accent); color: white; }
+.warning-status-badge.fixed { background: var(--success); color: white; }
+.warning-status-badge.ignored { background: var(--surface-2); color: var(--text-secondary); }
+.warning-status-badge:hover { filter: brightness(1.15); }
+
 /* --- Conversion Summary --- */
 .conversion-summary {
   display: grid;

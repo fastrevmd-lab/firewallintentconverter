@@ -101,6 +101,8 @@ export default function App() {
 
   // --- All warnings combined (parse + convert) ---
   const allWarnings = [...parseWarnings, ...convertWarnings];
+  const [warningStatuses, setWarningStatuses] = useState({});
+  const unresolvedWarningCount = allWarnings.filter((_, i) => !warningStatuses[i]).length;
 
   // --- Review progress ---
   const reviewProgress = useMemo(() => {
@@ -218,6 +220,7 @@ export default function App() {
 
       setIntermediateConfig(data.intermediateConfig);
       setParseWarnings(data.warnings || []);
+      setWarningStatuses({});
       setParseStats(data.parseStats || null);
 
       // Auto-open model selector after successful parse
@@ -226,6 +229,7 @@ export default function App() {
       setError(`Parse error: ${err.message}`);
       setIntermediateConfig(null);
       setParseWarnings([]);
+      setWarningStatuses({});
       setParseStats(null);
     } finally {
       setIsLoading(false);
@@ -281,6 +285,7 @@ export default function App() {
 
       setSrxOutput(data.output);
       setConvertWarnings(data.output.warnings || []);
+      setWarningStatuses({});
       setConversionSummary(data.output.summary || null);
       setOutputFormat(format);
       setBottomTab('output');
@@ -771,15 +776,15 @@ export default function App() {
               </span>
             )}
             {allWarnings.length > 0 && (
-              <span className="stat-badge">
-                Warnings <span className="stat-value" style={{ color: 'var(--warning)' }}>
-                  {allWarnings.length}
+              <span className="stat-badge" style={{ cursor: 'pointer' }} onClick={() => setBottomTab('warnings')}>
+                Warnings <span className="stat-value" style={{ color: unresolvedWarningCount > 0 ? 'var(--warning)' : 'var(--success)' }}>
+                  {unresolvedWarningCount}/{allWarnings.length}
                 </span>
               </span>
             )}
             {intermediateConfig && (
               <span className="review-progress">
-                {reviewProgress.accepted}/{reviewProgress.total} accepted
+                Policies: {reviewProgress.accepted}/{reviewProgress.total} accepted
                 {reviewProgress.llmReviewed > 0 && (
                   <span style={{ color: 'var(--accent)', marginLeft: 6 }}>
                     ({reviewProgress.llmReviewed} LLM reviewed)
@@ -1398,7 +1403,15 @@ export default function App() {
                 sanitizationTable={sanitizationTable}
               />
             ) : (
-              <WarningsPanel warnings={allWarnings} />
+              <WarningsPanel
+                warnings={allWarnings}
+                warningStatuses={warningStatuses}
+                onWarningAction={(index, action) => setWarningStatuses(prev => {
+                  const next = { ...prev };
+                  if (action) { next[index] = action; } else { delete next[index]; }
+                  return next;
+                })}
+              />
             )}
           </div>
         </div>

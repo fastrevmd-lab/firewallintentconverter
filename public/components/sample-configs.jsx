@@ -138,6 +138,15 @@ export const SAMPLE_CONFIGS = {
                   <action>allow</action>
                   <log-start>no</log-start>
                   <log-end>yes</log-end>
+                  <profile-setting>
+                    <profiles>
+                      <virus><member>default</member></virus>
+                      <spyware><member>strict</member></spyware>
+                      <vulnerability><member>strict</member></vulnerability>
+                      <url-filtering><member>default</member></url-filtering>
+                      <wildfire-analysis><member>default</member></wildfire-analysis>
+                    </profiles>
+                  </profile-setting>
                 </entry>
                 <entry name="allow-dns">
                   <from>
@@ -161,6 +170,11 @@ export const SAMPLE_CONFIGS = {
                   <action>allow</action>
                   <log-start>no</log-start>
                   <log-end>yes</log-end>
+                  <profile-setting>
+                    <profiles>
+                      <spyware><member>strict</member></spyware>
+                    </profiles>
+                  </profile-setting>
                 </entry>
                 <entry name="allow-inbound-https">
                   <from>
@@ -185,6 +199,14 @@ export const SAMPLE_CONFIGS = {
                   <action>allow</action>
                   <log-start>yes</log-start>
                   <log-end>yes</log-end>
+                  <profile-setting>
+                    <profiles>
+                      <virus><member>default</member></virus>
+                      <spyware><member>strict</member></spyware>
+                      <vulnerability><member>strict</member></vulnerability>
+                      <file-blocking><member>basic file blocking</member></file-blocking>
+                    </profiles>
+                  </profile-setting>
                 </entry>
                 <entry name="allow-inbound-alt-https">
                   <from>
@@ -208,6 +230,9 @@ export const SAMPLE_CONFIGS = {
                   <action>allow</action>
                   <log-start>yes</log-start>
                   <log-end>yes</log-end>
+                  <profile-setting>
+                    <group><member>office-security</member></group>
+                  </profile-setting>
                 </entry>
                 <entry name="allow-ssh-mgmt">
                   <from>
@@ -234,6 +259,11 @@ export const SAMPLE_CONFIGS = {
                   <log-start>no</log-start>
                   <log-end>yes</log-end>
                   <schedule>business-hours</schedule>
+                  <profile-setting>
+                    <profiles>
+                      <vulnerability><member>default</member></vulnerability>
+                    </profiles>
+                  </profile-setting>
                 </entry>
                 <entry name="deny-all">
                   <from>
@@ -380,6 +410,52 @@ export const SAMPLE_CONFIGS = {
               </schedule-type>
             </entry>
           </schedule>
+          <profiles>
+            <virus>
+              <entry name="default">
+                <decoder><entry name="ftp"><action>default</action><wildfire-action>default</wildfire-action></entry><entry name="http"><action>default</action><wildfire-action>default</wildfire-action></entry><entry name="smb"><action>default</action><wildfire-action>default</wildfire-action></entry></decoder>
+              </entry>
+            </virus>
+            <spyware>
+              <entry name="strict">
+                <rules><entry name="simple-critical"><severity><member>critical</member></severity><action><reset-both/></action></entry><entry name="simple-high"><severity><member>high</member></severity><action><reset-both/></action></entry><entry name="simple-medium"><severity><member>medium</member></severity><action><drop/></action></entry><entry name="simple-low"><severity><member>low</member></severity><action><alert/></action></entry></rules>
+              </entry>
+            </spyware>
+            <vulnerability>
+              <entry name="strict">
+                <rules><entry name="simple-critical"><severity><member>critical</member></severity><action><reset-both/></action></entry><entry name="simple-high"><severity><member>high</member></severity><action><reset-both/></action></entry><entry name="simple-medium"><severity><member>medium</member></severity><action><drop/></action></entry></rules>
+              </entry>
+              <entry name="default">
+                <rules><entry name="simple-critical"><severity><member>critical</member></severity><action><reset-both/></action></entry><entry name="simple-high"><severity><member>high</member></severity><action><alert/></action></entry></rules>
+              </entry>
+            </vulnerability>
+            <url-filtering>
+              <entry name="default">
+                <block><member>adult</member><member>gambling</member><member>hacking</member><member>malware</member><member>phishing</member><member>command-and-control</member></block>
+                <alert><member>social-networking</member><member>streaming-media</member></alert>
+              </entry>
+            </url-filtering>
+            <file-blocking>
+              <entry name="basic file blocking">
+                <rules><entry name="block-executables"><application><member>any</member></application><file-type><member>exe</member><member>dll</member><member>bat</member></file-type><direction>both</direction><action>block</action></entry></rules>
+              </entry>
+            </file-blocking>
+            <wildfire-analysis>
+              <entry name="default">
+                <rules><entry name="default-fwd"><application><member>any</member></application><file-type><member>any</member></file-type><direction>both</direction><analysis>public-cloud</analysis></entry></rules>
+              </entry>
+            </wildfire-analysis>
+          </profiles>
+          <profile-group>
+            <entry name="office-security">
+              <virus><member>default</member></virus>
+              <spyware><member>strict</member></spyware>
+              <vulnerability><member>strict</member></vulnerability>
+              <url-filtering><member>default</member></url-filtering>
+              <file-blocking><member>basic file blocking</member></file-blocking>
+              <wildfire-analysis><member>default</member></wildfire-analysis>
+            </entry>
+          </profile-group>
         </entry>
       </vsys>
       <network>

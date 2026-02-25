@@ -20,6 +20,12 @@ Return ONLY a JSON array of translated policies. No explanation outside the JSON
   "disabled": false,
   "description": "Business justification",
   "security_profiles": {"idp": "recommended", "utm": "utm-policy"},
+  "_srx_idp": true,
+  "_srx_flow_av": true,
+  "_srx_antimalware": true,
+  "_srx_content_security": true,
+  "_srx_secintel": false,
+  "_srx_decrypt": false,
   "_translation_notes": "Explanation of changes from source rule",
   "_review_status": "llm_reviewed"
 }
@@ -141,14 +147,14 @@ Source PAN-OS security profiles MUST be translated to SRX equivalents and noted 
 - **P2** (Premium Edge Protection): A2 + ATP Cloud
 
 **PAN-OS to SRX profile mapping:**
-- PAN-OS Antivirus profile → SRX antivirus (requires A1+)
-- PAN-OS Anti-Spyware profile → SRX IDP + SecIntel C&C feeds (requires A1+)
-- PAN-OS Vulnerability Protection → SRX IDP policy (requires A1+)
-- PAN-OS URL Filtering → SRX EWF (requires A2+)
-- PAN-OS File Blocking → SRX content-security content-filtering (requires A2+) — note: MIME/extension only, no true type detection
-- PAN-OS WildFire Analysis → SRX ATP Cloud (requires P1/P2) — note: async, not inline hold
-- PAN-OS Data Filtering / DLP → SRX content-security + ICAP (requires A2+) — note: limited compared to PAN-OS
-- PAN-OS SSL Decryption → SRX SSL Proxy (Base, but need A1+ for IDP on decrypted traffic)
+- PAN-OS Antivirus profile → SRX **Flow-based AV** (requires A1+) → set `_srx_flow_av: true`
+- PAN-OS Anti-Spyware profile → SRX **Anti-malware** (requires A1+) → set `_srx_antimalware: true`
+- PAN-OS Vulnerability Protection → SRX **IPS** (requires A1+) → set `_srx_idp: true`
+- PAN-OS URL Filtering → SRX **Destination object** (requires A2+) → set `_srx_content_security: true`, note: URL category matching uses EWF destination objects, not inline deep-learning
+- PAN-OS File Blocking → SRX **Content Filtering** (requires A2+) → set `_srx_content_security: true`, note: MIME/extension-based only, no true file-type detection
+- PAN-OS WildFire Analysis → **No direct SRX equivalent** — note in _translation_notes that ATP Cloud (P1/P2) should be subscribed/enabled for cloud sandboxing, but it is async (submit-and-alert), not inline hold like WildFire
+- PAN-OS Data Filtering / DLP → SRX content-security + ICAP (requires A2+) → set `_srx_content_security: true`, note: limited compared to PAN-OS
+- PAN-OS SSL Decryption → SRX SSL Proxy (Base, but need A1+ for IDP on decrypted traffic) → set `_srx_decrypt: true`
 - PAN-OS GeoIP blocking → SRX DAE + ATP Cloud feeds (requires P1/P2)
 
 **If the target subscription is specified:**
@@ -156,12 +162,23 @@ Source PAN-OS security profiles MUST be translated to SRX equivalents and noted 
 - For profiles requiring a HIGHER tier, still include them but add: "WARNING: [feature] requires [tier] subscription, but target is [current tier]. This profile will not function without upgrading."
 - If no subscription specified (Base only), flag ALL advanced security features
 
-**If source rules have security profiles, you MUST include a "security_profiles" object:**
-"security_profiles": {
-  "idp": "policy-name",
-  "utm": "utm-policy-name",
-  "ssl_proxy": "ssl-profile-name"
-}
+**When source rules have security profiles, you MUST set `_srx_*` boolean flags on the translated rule.**
+These flags control which SRX Security Subscription toggles appear in the UI:
+
+```
+"_srx_idp": true,              // IPS — from PAN-OS Vulnerability Protection
+"_srx_flow_av": true,          // Flow-based AV — from PAN-OS Antivirus
+"_srx_antimalware": true,      // Anti-malware — from PAN-OS Anti-Spyware
+"_srx_content_security": true, // Content Security — from PAN-OS URL Filtering / File Blocking
+"_srx_secintel": true,         // SecIntel — from EDL replacement or threat intel
+"_srx_decrypt": true           // Decrypt — from PAN-OS SSL Decryption
+```
+
+You may ALSO include a `"security_profiles"` object with descriptive profile names for documentation:
+```
+"security_profiles": {"idp": "recommended", "utm": "utm-policy", "ssl_proxy": "ssl-profile"}
+```
+But the `_srx_*` boolean flags are what controls the UI — they are REQUIRED when profiles are present.
 
 ## Important
 - Translate ALL PAN-OS rules — do not skip any

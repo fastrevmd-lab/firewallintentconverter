@@ -87,6 +87,7 @@
 - [x] **PAN-OS SSL Decryption parser** — Parses `<rulebase><decryption>` rules from PAN-OS configs including action (decrypt/no-decrypt), type (ssl-forward-proxy/ssh-proxy/ssl-inbound-inspection), certificate references, URL categories, and decryption profiles. Displayed in a new "SSL B&I" tab in the from-PA view
 - [x] **PAN-OS Policy-Based Forwarding parser** — Parses `<rulebase><pbf>` rules from PAN-OS configs including from-zone/interface, forwarding action (forward/discard/no-pbf), egress interface, next-hop, monitor settings, and symmetric return. Displayed in a new "PBF" tab in the from-PA view
 - [x] **SSL B&I and PBF tabs** — Two new tabs in the center panel between Security Rules and Objects (from-PA view only). Read-only display tables showing decryption and PBF rules parsed from the source PAN-OS config
+- [x] **PAN-OS → SRX security profile mapping fix** — Corrected the PAN-OS security profile to SRX subscription mapping: Antivirus→Flow-based AV, Anti-Spyware→Anti-malware, Vulnerability→IPS, URL Filtering→Content Security (destination object), File Blocking→Content Security (Content Filtering), WildFire→no direct mapping (note ATP). Updated translate-panos.txt prompt to instruct LLM to set `_srx_*` boolean flags. Added safety-net mapping in `parseTranslationResponse()` so UI toggles display correctly regardless of LLM output format
 
 ---
 

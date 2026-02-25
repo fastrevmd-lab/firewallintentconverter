@@ -1112,16 +1112,10 @@ Flag features requiring a higher subscription than ${srxLicense} in _translation
     delete clean._rule_index;
     delete clean._review_status;
     delete clean._llm_reviewed;
-    delete clean._srx_idp;
-    delete clean._srx_content_security;
-    delete clean._srx_decrypt;
-    delete clean._srx_flow_av;
-    delete clean._srx_antimalware;
-    delete clean._srx_secintel;
-    delete clean._srx_secure_web_proxy;
-    delete clean._srx_icap_redirect;
-    delete clean._srx_log_count;
-    delete clean._srx_rule_options;
+    // Remove all _srx_* internal flags
+    for (const key of Object.keys(clean)) {
+      if (key.startsWith('_srx_')) delete clean[key];
+    }
     // Remove empty arrays/objects to save tokens
     if (clean.tags && clean.tags.length === 0) delete clean.tags;
     if (clean.security_profiles && Object.keys(clean.security_profiles).length === 0) delete clean.security_profiles;
@@ -1230,6 +1224,21 @@ export function parseTranslationResponse(response) {
     p.log_start = !!p.log_start;
     p.log_end = p.log_end !== undefined ? !!p.log_end : true;
     p.disabled = !!p.disabled;
+
+    // Map security_profiles (PAN-OS keys) → _srx_* boolean flags as safety net
+    // The LLM prompt asks for _srx_* flags directly, but if PAN-OS keys survive
+    // (virus, spyware, vulnerability, url-filtering, file-blocking, wildfire-analysis)
+    // we still want the UI to show the correct subscriptions.
+    const sp = p.security_profiles || {};
+    if (sp.virus && p._srx_flow_av === undefined) p._srx_flow_av = true;
+    if (sp.spyware && p._srx_antimalware === undefined) p._srx_antimalware = true;
+    if (sp.vulnerability && p._srx_idp === undefined) p._srx_idp = true;
+    if ((sp['url-filtering'] || sp['file-blocking']) && p._srx_content_security === undefined) p._srx_content_security = true;
+    if (sp.secintel && p._srx_secintel === undefined) p._srx_secintel = true;
+    // LLM-style keys (idp, utm, ssl_proxy) → _srx_* flags
+    if (sp.idp && p._srx_idp === undefined) p._srx_idp = true;
+    if (sp.utm && p._srx_content_security === undefined) p._srx_content_security = true;
+    if (sp.ssl_proxy && p._srx_decrypt === undefined) p._srx_decrypt = true;
 
     // Ensure translation metadata
     p._translation_notes = p._translation_notes || '';

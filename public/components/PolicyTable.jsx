@@ -223,15 +223,15 @@ export default function PolicyTable({
       : (policy._secIntelAddresses?.length > 0);
     const rows = [];
 
-    // IPS — single IDP policy
-    if (policy._srx_idp || sp.spyware || sp.vulnerability) {
-      const value = policy._srx_idp_profile || [sp.vulnerability, sp.spyware].filter(Boolean).join(', ') || 'enabled';
+    // IPS (PAN-OS Vulnerability Protection → SRX IPS)
+    if (policy._srx_idp || sp.vulnerability) {
+      const value = policy._srx_idp_profile || sp.vulnerability || 'enabled';
       rows.push({ label: 'IPS', cls: 'ips', value });
     }
 
-    // Content Security — UTM (url-filtering)
-    if (policy._srx_content_security || sp['url-filtering']) {
-      const value = policy._srx_content_security_profile || sp['url-filtering'] || 'enabled';
+    // Content Security (PAN-OS File Blocking → SRX Content Filtering, URL Filtering → destination object)
+    if (policy._srx_content_security || sp['file-blocking'] || sp['url-filtering']) {
+      const value = policy._srx_content_security_profile || [sp['file-blocking'], sp['url-filtering']].filter(Boolean).join(', ') || 'enabled';
       rows.push({ label: 'Content Security', cls: 'urlfilter', value });
     }
 
@@ -241,15 +241,15 @@ export default function PolicyTable({
       rows.push({ label: 'Decrypt', cls: 'ips', value });
     }
 
-    // Flow-based AV
-    if (policy._srx_flow_av) {
-      const value = policy._srx_flow_av_profile || 'enabled';
+    // Flow-based AV (PAN-OS Antivirus → SRX Flow-based AV)
+    if (policy._srx_flow_av || sp.virus) {
+      const value = policy._srx_flow_av_profile || sp.virus || 'enabled';
       rows.push({ label: 'Flow-based AV', cls: 'antimalware', value });
     }
 
-    // Anti-malware
-    if (policy._srx_antimalware || sp.virus || sp['wildfire-analysis']) {
-      const value = policy._srx_antimalware_profile || [sp.virus, sp['wildfire-analysis']].filter(Boolean).join(', ') || 'enabled';
+    // Anti-malware (PAN-OS Anti-Spyware → SRX Anti-malware)
+    if (policy._srx_antimalware || sp.spyware) {
+      const value = policy._srx_antimalware_profile || sp.spyware || 'enabled';
       rows.push({ label: 'Anti-malware', cls: 'antimalware', value });
     }
 

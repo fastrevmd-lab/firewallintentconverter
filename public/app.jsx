@@ -37,6 +37,7 @@ import DHCPEditor from './components/DHCPEditor.jsx';
 import QoSEditor from './components/QoSEditor.jsx';
 import GreenfieldChat from './components/GreenfieldChat.jsx';
 import FeedbackModal from './components/FeedbackModal.jsx';
+import DiffPanel from './components/DiffPanel.jsx';
 import SaveProjectModal from './components/SaveProjectModal.jsx';
 import { translatePolicies, getLLMStatus } from './utils/llm-client.js';
 import { buildProjectPayload, validateProjectFile, generateProjectName } from './utils/project-io.js';
@@ -124,6 +125,7 @@ export default function App() {
 
   const allRulesAccepted = reviewProgress.total > 0 && reviewProgress.accepted === reviewProgress.total;
   const isHealthCheckMode = sourceVendor === 'srx_healthcheck';
+  const hasDiffData = !!srxTranslatedPolicies && !!intermediateConfig?.security_policies;
 
   // Compute effective viewMode: 'from' tab uses vendor-specific style
   const effectiveViewMode = platformView === 'srx' ? 'srx'
@@ -1076,6 +1078,7 @@ export default function App() {
           isLoading={isLoading}
           isParsed={!!intermediateConfig}
           isSanitized={isSanitized}
+          sanitizationTable={sanitizationTable}
           sourceModel={sourceModel}
           targetModel={targetModel}
           onOpenModels={() => setShowModelSelector(true)}
@@ -1574,6 +1577,14 @@ export default function App() {
                   <span className="tab-badge warning-count">{allWarnings.length}</span>
                 )}
               </button>
+              <button
+                className={`tab-btn ${bottomTab === 'diff' ? 'active' : ''}`}
+                onClick={() => setBottomTab('diff')}
+                disabled={!hasDiffData}
+                title={hasDiffData ? 'Compare source vs LLM-translated policies' : 'Run LLM translation first'}
+              >
+                Diff
+              </button>
             </div>
             {bottomTab === 'output' && srxOutput && (
               <div className="output-toolbar">
@@ -1595,7 +1606,7 @@ export default function App() {
             )}
           </div>
           <div className="panel-body">
-            {bottomTab === 'output' ? (
+            {bottomTab === 'output' && (
               <SRXOutput
                 output={srxOutput}
                 format={outputFormat}
@@ -1603,7 +1614,8 @@ export default function App() {
                 isParsed={!!intermediateConfig}
                 sanitizationTable={sanitizationTable}
               />
-            ) : (
+            )}
+            {bottomTab === 'warnings' && (
               <WarningsPanel
                 warnings={allWarnings}
                 warningStatuses={warningStatuses}
@@ -1612,6 +1624,12 @@ export default function App() {
                   if (action) { next[index] = action; } else { delete next[index]; }
                   return next;
                 })}
+              />
+            )}
+            {bottomTab === 'diff' && (
+              <DiffPanel
+                sourcePolicies={intermediateConfig?.security_policies || []}
+                translatedPolicies={srxTranslatedPolicies}
               />
             )}
           </div>

@@ -159,6 +159,15 @@ Click **Convert to SRX** to generate the output. Switch between **Set Commands**
 - **Application mapping** — 120+ cross-vendor application mappings (PAN-OS, FortiGate, Cisco ASA) to Junos predefined applications. Unmapped applications receive a `Customfwic` placeholder suffix with a warning to create a custom application definition on the SRX
 - **Application groups** — PAN-OS `<application-group>` entries are parsed with their members and expanded during conversion. The Applications tab shows groups with expandable member lists, and the SRX view displays per-app Junos mapping (e.g., `junos-ssh`) or `custom:app:'name'` for unmapped apps
 - **Sanitization** — One-click replacement of sensitive data (IPs, hostnames, keys) with placeholders before sharing or sending to an LLM. Originals are restored on export
+- **Sanitization mapping table** — Clickable sanitize badge expands a collapsible table showing all replacements: type-colored badges (Hash, Key, SNMP, User, Public IP), masked originals for secrets (full values for public IPs), placeholder codes, and restore-on-export indicator. Inline stats summary
+
+### Post-Conversion Diff View
+- **Diff tab** — New "Diff" tab in the bottom panel (alongside SRX Output and Warnings) comparing source policies vs LLM-translated policies
+- **Three-pass rule matching** — Matches rules by `_rule_index`, exact name, then fuzzy name similarity (Levenshtein with 50% threshold). Unmatched source rules shown as removed, unmatched translated rules as added
+- **Field-level comparison** — For each modified rule, shows a table of changed fields (action, zones, addresses, applications, services, logging, description) with source value (red) and translated value (green)
+- **Color-coded status** — Added (green), Removed (red), Modified (amber), Unchanged (dimmed). Status icons, badges, and expandable detail rows
+- **Filter bar** — Filter by All, Modified, Added, Removed, or Unchanged with counts
+- **LLM translation notes** — Displayed inline when rules have `_translation_notes` from the LLM
 
 ### Dual Platform View
 - **"from" / "to" toggle** — Switch between source view ("from PAN-OS", "from SRX", "from FortiGate", "from Cisco ASA", "from Check Point", "from SonicWall", or "from Huawei") and target view ("to SRX") above the tab bar
@@ -311,6 +320,7 @@ firewall-intent-converter/
 │   │   ├── InterviewPanel.jsx    # Right panel — rule details, LLM review, accept
 │   │   ├── SRXOutput.jsx         # Bottom panel — SRX output display
 │   │   ├── WarningsPanel.jsx     # Bottom panel — conversion warnings + optimization suggestions
+│   │   ├── DiffPanel.jsx         # Bottom panel — source vs LLM-translated policy diff view
 │   │   ├── ModelSelector.jsx     # Modal — source/target hardware model picker + site identification
 │   │   ├── InterfaceMapper.jsx   # Modal — per-zone interface mapping
 │   │   ├── FeedbackModal.jsx     # Modal — feedback/suggestion submission via GitHub Issues

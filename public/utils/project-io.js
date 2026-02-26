@@ -8,7 +8,7 @@ const VENDOR_NAMES = {
   panos: 'PAN-OS', srx: 'SRX', fortigate: 'FortiGate',
   cisco_asa: 'Cisco-ASA', checkpoint: 'CheckPoint',
   sonicwall: 'SonicWall', huawei_usg: 'Huawei-USG',
-  greenfield: 'Greenfield', srx_healthcheck: 'SRX-HealthCheck',
+  greenfield: 'Greenfield', srx_healthcheck: 'SRX-BestPractice',
 };
 
 const STATE_KEYS = [

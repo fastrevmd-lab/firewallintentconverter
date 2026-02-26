@@ -23,7 +23,7 @@ const VENDOR_LABELS = {
   sonicwall: 'SonicWall → SRX',
   huawei_usg: 'Huawei USG → SRX',
   srx: 'SRX → SRX (Optimize)',
-  srx_healthcheck: 'SRX Health Check (Audit)',
+  srx_healthcheck: 'SRX Best Practice (Audit)',
 };
 
 const PROVIDERS = [

@@ -979,7 +979,7 @@ function vendorLabel(sourceVendor) {
     case 'sonicwall': return 'SonicWall';
     case 'huawei_usg': return 'Huawei USG';
     case 'greenfield': return 'Greenfield';
-    case 'srx_healthcheck': return 'Junos SRX (Health Check)';
+    case 'srx_healthcheck': return 'Junos SRX (Best Practice)';
     default: return sourceVendor || 'firewall';
   }
 }

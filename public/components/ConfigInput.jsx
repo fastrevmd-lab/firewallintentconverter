@@ -146,7 +146,7 @@ export default function ConfigInput({
           disabled={greenfieldMode || isParsed}
         >
           <option value="greenfield">Greenfield (New Config)</option>
-          <option value="srx_healthcheck">SRX Health Check</option>
+          <option value="srx_healthcheck">Junos SRX Best Practice</option>
           <option value="srx">Junos SRX</option>
           <option value="panos">PAN-OS</option>
           <option value="fortigate">FortiGate</option>
@@ -328,7 +328,7 @@ export default function ConfigInput({
               value={configText}
               onChange={(e) => onConfigChange(e.target.value)}
               placeholder={selectedVendor === 'srx_healthcheck'
-                ? "Paste your Junos SRX configuration here for a health check...\n\nThe audit will assess:\n\u2022 PCI DSS v4.0 compliance\n\u2022 NIST SP 800-41r1 compliance\n\u2022 CIS Juniper OS Benchmark\n\u2022 Logging completeness\n\u2022 Security profile coverage\n\u2022 Rule hygiene & optimization"
+                ? "Paste your Junos SRX configuration here for a best practice audit...\n\nThe audit will assess:\n\u2022 PCI DSS v4.0 compliance\n\u2022 NIST SP 800-41r1 compliance\n\u2022 CIS Juniper OS Benchmark\n\u2022 Logging completeness\n\u2022 Security profile coverage\n\u2022 Rule hygiene & optimization"
                 : selectedVendor === 'srx'
                 ? "Paste your Junos SRX configuration here...\n\nSupported formats:\n\u2022 SRX set commands\n\u2022 SRX hierarchical config"
                 : selectedVendor === 'fortigate'

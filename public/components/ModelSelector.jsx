@@ -148,7 +148,7 @@ export default function ModelSelector({
       <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start', maxHeight: '85vh' }} onClick={(e) => e.stopPropagation()}>
       <div className="modal-content" style={{ width: 580 }}>
         <div className="modal-header">
-          <h2>{isHealthCheckMode ? 'Health Check — Model & License' : 'Hardware Model Selection'}</h2>
+          <h2>{isHealthCheckMode ? 'Best Practice Audit — Model & License' : 'Hardware Model Selection'}</h2>
           <button className="modal-close" onClick={onClose}>x</button>
         </div>
 

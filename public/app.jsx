@@ -739,7 +739,7 @@ export default function App() {
     setTranslationProgress(null);
     setError(null);
     setIsLoading(true);
-    setLoadingMessage(isHealthCheckMode ? 'Running health check audit...' : 'Translating policies with LLM...');
+    setLoadingMessage(isHealthCheckMode ? 'Running best practice audit...' : 'Translating policies with LLM...');
 
     try {
       const translated = await translatePolicies(intermediateConfig, targetModel, srxLicense, (progress) => {
@@ -922,7 +922,7 @@ export default function App() {
           <div className="navbar-stats">
             {isHealthCheckMode ? (
               <span className="stat-badge model-badge" onClick={() => setShowModelSelector(true)} style={{ cursor: 'pointer' }}>
-                SRX Health Check {sourceModel ? `(${sourceModel})` : ''}
+                SRX Best Practice {sourceModel ? `(${sourceModel})` : ''}
               </span>
             ) : (sourceModel || greenfieldMode) && (
               <span className="stat-badge model-badge" onClick={() => setShowModelSelector(true)} style={{ cursor: 'pointer' }}>
@@ -1107,19 +1107,19 @@ export default function App() {
                     className="btn btn-translate"
                     onClick={handleTranslateWithLLM}
                     disabled={isTranslating || !intermediateConfig?.security_policies?.length}
-                    title={isHealthCheckMode ? 'Run security audit on SRX policies using LLM' : 'Translate source policies to SRX format using LLM'}
+                    title={isHealthCheckMode ? 'Check best practices on SRX policies using LLM' : 'Translate source policies to SRX format using LLM'}
                   >
                     {isTranslating ? (
-                      <><span className="spinner" /> {isHealthCheckMode ? 'Auditing...' : greenfieldMode ? 'Importing...' : 'Translating...'}</>
+                      <><span className="spinner" /> {isHealthCheckMode ? 'Checking...' : greenfieldMode ? 'Importing...' : 'Translating...'}</>
                     ) : (
-                      isHealthCheckMode ? 'Run Health Check' : greenfieldMode ? 'Import LLM Config' : 'Translate with LLM'
+                      isHealthCheckMode ? 'Check Best Practice w/LLM' : greenfieldMode ? 'Import LLM Config' : 'Translate with LLM'
                     )}
                   </button>
                   <button
                     className={`platform-view-btn ${platformView === 'srx' ? 'active' : ''}`}
                     onClick={() => handlePlatformViewChange('srx')}
                   >
-                    {isHealthCheckMode ? 'Health Check Results' : `to ${targetModel || 'SRX'}`}
+                    {isHealthCheckMode ? 'Best Practice Status' : `to ${targetModel || 'SRX'}`}
                   </button>
                   {platformView === 'srx' && (
                     <div className="platform-view-actions">

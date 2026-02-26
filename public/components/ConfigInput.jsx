@@ -125,6 +125,7 @@ export default function ConfigInput({
         >
           <option value="greenfield">Greenfield (New Config)</option>
           <option value="srx">Junos SRX</option>
+          <option value="srx_healthcheck">SRX Health Check</option>
           <option value="panos">PAN-OS</option>
           <option value="fortigate">FortiGate</option>
           <option value="cisco_asa">Cisco ASA/FTD</option>
@@ -235,7 +236,7 @@ export default function ConfigInput({
               <label>Load Sample Config</label>
               <div className="sample-buttons">
                 {Object.entries(SAMPLE_CONFIGS)
-                  .filter(([, sample]) => sample.vendor === selectedVendor)
+                  .filter(([, sample]) => sample.vendor === (selectedVendor === 'srx_healthcheck' ? 'srx' : selectedVendor))
                   .map(([key, sample]) => (
                     <button
                       key={key}
@@ -254,7 +255,9 @@ export default function ConfigInput({
               className="config-textarea"
               value={configText}
               onChange={(e) => onConfigChange(e.target.value)}
-              placeholder={selectedVendor === 'srx'
+              placeholder={selectedVendor === 'srx_healthcheck'
+                ? "Paste your Junos SRX configuration here for a health check...\n\nThe audit will assess:\n\u2022 PCI DSS v4.0 compliance\n\u2022 NIST SP 800-41r1 compliance\n\u2022 CIS Juniper OS Benchmark\n\u2022 Logging completeness\n\u2022 Security profile coverage\n\u2022 Rule hygiene & optimization"
+                : selectedVendor === 'srx'
                 ? "Paste your Junos SRX configuration here...\n\nSupported formats:\n\u2022 SRX set commands\n\u2022 SRX hierarchical config"
                 : selectedVendor === 'fortigate'
                 ? "Paste your FortiGate configuration here...\n\nSupported format:\n\u2022 FortiOS config (config/edit/set/next/end)"
@@ -294,7 +297,7 @@ export default function ConfigInput({
             {/* Parse button */}
             <button
               className="btn btn-primary btn-block"
-              onClick={onParse}
+              onClick={() => onParse(selectedVendor)}
               disabled={isLoading || !configText.trim()}
               style={{ marginTop: 4 }}
             >

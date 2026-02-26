@@ -931,7 +931,7 @@ const xmlPredefServiceMap = new Map();
 
 function resolveApps(applications, services, warnings, policyName, appGroups = [], sourceVendor = '') {
   const resolved = [];
-  const isSrxSource = sourceVendor === 'srx' || sourceVendor === 'greenfield';
+  const isSrxSource = sourceVendor === 'srx' || sourceVendor === 'greenfield' || sourceVendor === 'srx_healthcheck';
 
   // Helper to map a single app name to Junos (with Customfwic fallback)
   const mapSingleApp = (appName) => {

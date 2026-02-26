@@ -62,6 +62,22 @@ For blank configs, the LLM walks you through a structured interview:
 
 Toggle between **from LLM Interview** and **to SRX** tabs to see the configuration building in real-time. The chat preserves its state when switching tabs.
 
+### 1c. SRX Health Check (Audit Mode)
+
+Select **SRX Health Check** from the vendor dropdown to audit an existing SRX configuration for best practices, compliance, and security posture — without changing hardware. Paste your SRX config and click **Parse**. A simplified model selector opens where you select the source SRX model and subscription tier (target is automatically set to match). No interface mapping is needed.
+
+Click **Run Health Check** to send all policies to the LLM for a comprehensive audit covering:
+
+- **PCI DSS v4.0** — Explicit deny-all, documented business justification, rule review cadence
+- **NIST SP 800-41r1** — Default-deny per zone pair, denied traffic logging, network segmentation
+- **CIS Juniper OS Benchmark** — Management services, NTP auth, login banners
+- **Logging completeness** — Session-close on permits, session-init on denies
+- **Security profile assessment** — Per-traffic-type recommendations gated by subscription tier
+- **Screen profile coverage** — Zone screen assignments and recommended minimums
+- **Rule hygiene** — Shadowed, redundant, overly broad, disabled, and undocumented rules
+
+Each policy is returned unchanged but annotated with severity-tagged findings (`[CRITICAL]`, `[HIGH]`, `[MEDIUM]`, `[LOW]`, `[INFO]`) in the translation notes. Click any rule to review its findings in the right panel.
+
 ### 2. Select Hardware Models
 
 After parsing, a modal prompts you to select the source model and target SRX model. The tool auto-detects the likely source model from interface names (PAN-OS, SRX, FortiGate, Cisco, Check Point, SonicWall, or Huawei). For FortiGate sources, all current F/G-series and legacy E-series models are available. For Cisco sources, all Firepower 1000/2100/3100/4100/4200 series, virtual appliances, and EOS ASA 5500-X models are available. For Check Point, SonicWall, and Huawei USG, full model ranges are available with throughput specs. You can also select the SRX subscription (Base/A1/A2/P1/P2). Skip this or change it later via the **Models** button.
@@ -95,6 +111,14 @@ After translation, all rules appear in the "to SRX" table with **LLM Reviewed** 
 Click **Convert to SRX** to generate the output. Switch between **Set Commands** and **XML** formats in the bottom panel. The **Warnings** tab shows any conversion notes. Use **Push via MCP** to deploy directly to SRX devices.
 
 ## Features
+
+### SRX Health Check
+- **Compliance audit** — LLM-powered assessment of existing SRX configs against PCI DSS v4.0, NIST SP 800-41r1, and CIS Juniper OS Benchmark
+- **12 audit categories** — Policy hygiene, logging completeness, security profiles, screen coverage, application modernization, naming conventions, NAT best practices, zone architecture, and system infrastructure
+- **Severity-tagged findings** — Each policy annotated with `[CRITICAL]`, `[HIGH]`, `[MEDIUM]`, `[LOW]`, or `[INFO]` findings in translation notes
+- **Subscription-aware** — Security profile recommendations gated by the deployed SRX subscription tier (Base/A1/A2/P1/P2)
+- **Non-destructive** — Policies are returned unchanged; all recommendations are advisory in `_translation_notes`
+- **Simplified workflow** — No hardware migration, no interface mapping. Select source model and license, run the audit
 
 ### Greenfield Configuration Builder
 - **Template picker** — Choose from 4 pre-built deployment templates (Branch Office, Data Center, Campus Edge, Cloud Gateway) or start blank. Templates pre-fill zones, policies, NAT, screens, routes, and system config
@@ -241,7 +265,8 @@ firewall-intent-converter/
 │       ├── translate-huawei_usg.txt # Huawei USG → SRX — 26-feature equivalency matrix + pitfalls
 │       ├── translate-srx.txt     # SRX → SRX — optimization, modernization, best practices
 │       ├── full-review.txt       # Translation instructions — vendor pitfalls, cross-vendor gaps
-│       └── greenfield.txt        # Greenfield interview prompt — guided SRX config builder
+│       ├── greenfield.txt        # Greenfield interview prompt — guided SRX config builder
+│       └── translate-srx_healthcheck.txt # SRX Health Check audit prompt — compliance & best practices
 ├── src/                          # Server-side modules
 │   ├── parsers/
 │   │   ├── panos-parser.js       # PAN-OS XML → intermediate JSON
@@ -325,6 +350,7 @@ Editable plain-text prompt files control how the LLM behaves during translation 
 | `static/prompts/translate-{vendor}.txt` | **Per-vendor translate** — Full feature equivalency matrix, vendor-specific pitfalls, action mapping, profile translation for each source vendor (panos, fortigate, cisco_asa, checkpoint, sonicwall, huawei_usg, srx) |
 | `static/prompts/full-review.txt` | **Translate LLM instructions** — Cross-vendor migration pitfalls summary, SRX best practices, translation priorities |
 | `static/prompts/greenfield.txt` | **Greenfield interview** — guided SRX config builder with use-case discovery, progressive config building via JSON action blocks, best-practice recommendations |
+| `static/prompts/translate-srx_healthcheck.txt` | **SRX Health Check** — audit prompt with 12 assessment categories (PCI DSS v4.0, NIST SP 800-41r1, CIS Benchmark, logging, profiles, screens, hygiene, apps, naming, NAT, zones, system) |
 
 **Priority order:** For translation, vendor-specific prompts take precedence: user edits in Settings UI (per-vendor localStorage) > vendor-specific file (`translate-{vendor}.txt`) > generic user edits > generic file (`translate.txt`) > hardcoded defaults. Select a vendor in the Settings prompt dropdown to view or edit its prompt. Click "Reset to Default" to revert to the on-disk version.
 

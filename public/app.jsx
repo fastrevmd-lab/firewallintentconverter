@@ -57,7 +57,7 @@ export default function App() {
   const [siteName, setSiteName] = useState('');
   const [siteGroup, setSiteGroup] = useState('');
   const [interfaceMappings, setInterfaceMappings] = useState({});
-  const [sourceVendor, setSourceVendor] = useState('panos'); // 'panos' | 'srx' | 'fortigate' | 'cisco_asa' | 'greenfield'
+  const [sourceVendor, setSourceVendor] = useState('panos'); // 'panos' | 'srx' | 'fortigate' | 'cisco_asa' | 'greenfield' | 'srx_healthcheck'
   const [greenfieldMode, setGreenfieldMode] = useState(false);
   const [greenfieldTemplate, setGreenfieldTemplate] = useState(null);
 
@@ -118,10 +118,11 @@ export default function App() {
   }, [intermediateConfig, srxTranslatedPolicies, platformView]);
 
   const allRulesAccepted = reviewProgress.total > 0 && reviewProgress.accepted === reviewProgress.total;
+  const isHealthCheckMode = sourceVendor === 'srx_healthcheck';
 
   // Compute effective viewMode: 'from' tab uses vendor-specific style
   const effectiveViewMode = platformView === 'srx' ? 'srx'
-    : sourceVendor === 'srx' ? 'srx'
+    : sourceVendor === 'srx' || sourceVendor === 'srx_healthcheck' ? 'srx'
     : sourceVendor === 'fortigate' ? 'fortigate'
     : sourceVendor === 'cisco_asa' ? 'cisco'
     : sourceVendor === 'checkpoint' ? 'checkpoint'
@@ -180,7 +181,7 @@ export default function App() {
   // ------------------------------------------------------------------
   // Parse handler: sends config to /api/parse
   // ------------------------------------------------------------------
-  const handleParse = useCallback(async () => {
+  const handleParse = useCallback(async (selectedVendorHint) => {
     if (!configText.trim()) return;
     setIsLoading(true);
     setLoadingMessage('Parsing configuration...');
@@ -211,12 +212,16 @@ export default function App() {
         rule._review_status = 'unreviewed';
       });
 
-      // Store detected vendor
+      // Store detected vendor — override to health check mode if user selected it
       const detectedVendor = data.detectedVendor || data.intermediateConfig?.metadata?.source_vendor || 'panos';
-      setSourceVendor(detectedVendor);
+      const effectiveVendor = selectedVendorHint === 'srx_healthcheck' ? 'srx_healthcheck' : detectedVendor;
+      setSourceVendor(effectiveVendor);
+      if (selectedVendorHint === 'srx_healthcheck') {
+        data.intermediateConfig.metadata.source_vendor = 'srx_healthcheck';
+      }
 
       // If source is not PAN-OS, default to 'panos' platform view (shows the "from" tab)
-      if (['srx', 'fortigate', 'cisco_asa', 'checkpoint', 'sonicwall', 'huawei_usg'].includes(detectedVendor)) {
+      if (['srx', 'srx_healthcheck', 'fortigate', 'cisco_asa', 'checkpoint', 'sonicwall', 'huawei_usg'].includes(effectiveVendor)) {
         setPlatformView('panos');
       }
 
@@ -727,7 +732,7 @@ export default function App() {
     setTranslationProgress(null);
     setError(null);
     setIsLoading(true);
-    setLoadingMessage('Translating policies with LLM...');
+    setLoadingMessage(isHealthCheckMode ? 'Running health check audit...' : 'Translating policies with LLM...');
 
     try {
       const translated = await translatePolicies(intermediateConfig, targetModel, srxLicense, (progress) => {
@@ -784,11 +789,11 @@ export default function App() {
 
   const handleModelContinue = useCallback(() => {
     setShowModelSelector(false);
-    // Skip InterfaceMapper in greenfield mode (no source interfaces to map)
-    if (!greenfieldMode) {
+    // Skip InterfaceMapper in greenfield mode (no source interfaces to map) and health check mode (same hardware)
+    if (!greenfieldMode && !isHealthCheckMode) {
       setShowInterfaceMapper(true);
     }
-  }, [greenfieldMode]);
+  }, [greenfieldMode, isHealthCheckMode]);
 
   const handleMappingComplete = useCallback((mappings) => {
     setInterfaceMappings(mappings);
@@ -812,7 +817,11 @@ export default function App() {
         {/* Stats badges — shown after parsing */}
         {displayStats && (
           <div className="navbar-stats">
-            {(sourceModel || greenfieldMode) && (
+            {isHealthCheckMode ? (
+              <span className="stat-badge model-badge" onClick={() => setShowModelSelector(true)} style={{ cursor: 'pointer' }}>
+                SRX Health Check {sourceModel ? `(${sourceModel})` : ''}
+              </span>
+            ) : (sourceModel || greenfieldMode) && (
               <span className="stat-badge model-badge" onClick={() => setShowModelSelector(true)} style={{ cursor: 'pointer' }}>
                 {greenfieldMode ? 'Greenfield' : sourceModel} <span style={{ color: 'var(--accent)', margin: '0 4px' }}>&rarr;</span> {targetModel || '?'}
               </span>
@@ -857,7 +866,7 @@ export default function App() {
               Models
             </button>
           )}
-          {intermediateConfig && targetModel && (
+          {intermediateConfig && targetModel && !isHealthCheckMode && (
             <button
               className="btn btn-secondary btn-sm"
               onClick={() => setShowInterfaceMapper(true)}
@@ -950,26 +959,28 @@ export default function App() {
                   >
                     {greenfieldMode
                       ? 'from LLM Interview'
-                      : `from ${sourceModel || ({ srx: 'SRX', fortigate: 'FortiGate', cisco_asa: 'Cisco ASA', checkpoint: 'Check Point', sonicwall: 'SonicWall', huawei_usg: 'Huawei USG' }[sourceVendor] || 'PAN-OS')}`
+                      : isHealthCheckMode
+                        ? 'Original Config'
+                        : `from ${sourceModel || ({ srx: 'SRX', fortigate: 'FortiGate', cisco_asa: 'Cisco ASA', checkpoint: 'Check Point', sonicwall: 'SonicWall', huawei_usg: 'Huawei USG' }[sourceVendor] || 'PAN-OS')}`
                     }
                   </button>
                   <button
                     className="btn btn-translate"
                     onClick={handleTranslateWithLLM}
                     disabled={isTranslating || !intermediateConfig?.security_policies?.length}
-                    title="Translate source policies to SRX format using LLM"
+                    title={isHealthCheckMode ? 'Run security audit on SRX policies using LLM' : 'Translate source policies to SRX format using LLM'}
                   >
                     {isTranslating ? (
-                      <><span className="spinner" /> {greenfieldMode ? 'Importing...' : 'Translating...'}</>
+                      <><span className="spinner" /> {isHealthCheckMode ? 'Auditing...' : greenfieldMode ? 'Importing...' : 'Translating...'}</>
                     ) : (
-                      greenfieldMode ? 'Import LLM Config' : 'Translate with LLM'
+                      isHealthCheckMode ? 'Run Health Check' : greenfieldMode ? 'Import LLM Config' : 'Translate with LLM'
                     )}
                   </button>
                   <button
                     className={`platform-view-btn ${platformView === 'srx' ? 'active' : ''}`}
                     onClick={() => handlePlatformViewChange('srx')}
                   >
-                    to {targetModel || 'SRX'}
+                    {isHealthCheckMode ? 'Health Check Results' : `to ${targetModel || 'SRX'}`}
                   </button>
                   {platformView === 'srx' && (
                     <div className="platform-view-actions">

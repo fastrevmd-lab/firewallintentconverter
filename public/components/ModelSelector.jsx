@@ -62,7 +62,8 @@ export default function ModelSelector({
   const [subscriptionError, setSubscriptionError] = useState('');
   const [showDatasheets, setShowDatasheets] = useState(false);
 
-  const isSrxSource = sourceVendor === 'srx';
+  const isHealthCheckMode = sourceVendor === 'srx_healthcheck';
+  const isSrxSource = sourceVendor === 'srx' || isHealthCheckMode;
   const isFortigateSource = sourceVendor === 'fortigate';
   const isCiscoSource = sourceVendor === 'cisco_asa';
   const isCheckpointSource = sourceVendor === 'checkpoint';
@@ -97,14 +98,18 @@ export default function ModelSelector({
 
   // Re-suggest SRX whenever source or metric changes
   useEffect(() => {
-    if (selectedSource) {
+    if (isHealthCheckMode) {
+      // Health check: target = source (same hardware)
+      setSelectedTarget(selectedSource);
+      setRecommendedSrx(null);
+    } else if (selectedSource) {
       const suggestion = suggestSrxModel(selectedSource, throughputMetric);
       setRecommendedSrx(suggestion);
       if (suggestion) {
         setSelectedTarget(suggestion.model);
       }
     }
-  }, [selectedSource, throughputMetric]);
+  }, [selectedSource, throughputMetric, isHealthCheckMode]);
 
   const sourceModelsDb = isSrxSource ? SRX_SOURCE_MODELS : isFortigateSource ? FORTIGATE_SOURCE_MODELS : isCiscoSource ? CISCO_SOURCE_MODELS : isCheckpointSource ? CHECKPOINT_SOURCE_MODELS : isSonicwallSource ? SONICWALL_SOURCE_MODELS : isHuaweiSource ? HUAWEI_SOURCE_MODELS : PANOS_MODELS;
   const sourceInfo = sourceModelsDb[selectedSource];
@@ -122,7 +127,7 @@ export default function ModelSelector({
   const metricLabel = METRIC_PREFIX[throughputMetric] || 'L7';
 
   const handleContinue = () => {
-    if (selectedTarget && !selectedLicense) {
+    if (selectedTarget && !selectedLicense && !isHealthCheckMode) {
       setSubscriptionError('Please select an SRX subscription before continuing to interface mapping.');
       return;
     }
@@ -143,7 +148,7 @@ export default function ModelSelector({
       <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start', maxHeight: '85vh' }} onClick={(e) => e.stopPropagation()}>
       <div className="modal-content" style={{ width: 580 }}>
         <div className="modal-header">
-          <h2>Hardware Model Selection</h2>
+          <h2>{isHealthCheckMode ? 'Health Check — Model & License' : 'Hardware Model Selection'}</h2>
           <button className="modal-close" onClick={onClose}>x</button>
         </div>
 
@@ -221,7 +226,8 @@ export default function ModelSelector({
           </div>
           )}
 
-          {/* Target SRX Model */}
+          {/* Target SRX Model — hidden in health check mode (target = source) */}
+          {!isHealthCheckMode && (
           <div className="model-section" style={{ marginTop: 20 }}>
             <h3 className="model-section-title">Target Firewall (Juniper SRX)</h3>
 
@@ -259,9 +265,10 @@ export default function ModelSelector({
               <ModelInfoCard model={targetInfo} vendor="srx" metric={throughputMetric} />
             )}
           </div>
+          )}
 
-          {/* SRX4700 Port Profile Selector */}
-          {targetRaw?.hasPortProfiles && (
+          {/* SRX4700 Port Profile Selector — hidden in health check mode */}
+          {targetRaw?.hasPortProfiles && !isHealthCheckMode && (
             <div className="model-section" style={{ marginTop: 16 }}>
               <h3 className="model-section-title">Port Profile</h3>
               <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: '0 0 8px', lineHeight: 1.4 }}>
@@ -335,7 +342,8 @@ export default function ModelSelector({
           )}
         </div>
 
-        {/* Site Identification (optional — for SDC/Mist integration) */}
+        {/* Site Identification (optional — for SDC/Mist integration) — hidden in health check mode */}
+        {!isHealthCheckMode && (
         <div className="model-section" style={{ padding: '12px 20px', borderTop: '1px solid var(--border-color)' }}>
           <h3 className="model-section-title" style={{ marginBottom: 4 }}>Site Identification (Optional)</h3>
           <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: '0 0 8px 0' }}>
@@ -366,6 +374,7 @@ export default function ModelSelector({
             </label>
           </div>
         </div>
+        )}
 
         {subscriptionError && (
           <div style={{
@@ -385,9 +394,12 @@ export default function ModelSelector({
           <button
             className="btn btn-primary"
             onClick={handleContinue}
-            disabled={!selectedTarget}
+            disabled={isHealthCheckMode ? !selectedSource : !selectedTarget}
           >
-            {selectedTarget ? 'Continue to Interface Mapping' : 'Select Target Model'}
+            {isHealthCheckMode
+              ? (selectedSource ? 'Continue' : 'Select Source Model')
+              : (selectedTarget ? 'Continue to Interface Mapping' : 'Select Target Model')
+            }
           </button>
         </div>
       </div>

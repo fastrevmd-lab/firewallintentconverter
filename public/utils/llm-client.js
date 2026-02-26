@@ -419,7 +419,7 @@ const _promptFileCache = { fullReview: null, greenfield: null, translate: null }
 const _vendorPromptCache = {};
 
 /** Supported vendor keys for vendor-specific translate prompts */
-export const VENDOR_PROMPT_KEYS = ['panos', 'fortigate', 'cisco_asa', 'checkpoint', 'sonicwall', 'huawei_usg', 'srx'];
+export const VENDOR_PROMPT_KEYS = ['panos', 'fortigate', 'cisco_asa', 'checkpoint', 'sonicwall', 'huawei_usg', 'srx', 'srx_healthcheck'];
 
 const PROMPT_FILE_PATHS = {
   fullReview: '/prompts/full-review.txt',
@@ -979,6 +979,7 @@ function vendorLabel(sourceVendor) {
     case 'sonicwall': return 'SonicWall';
     case 'huawei_usg': return 'Huawei USG';
     case 'greenfield': return 'Greenfield';
+    case 'srx_healthcheck': return 'Junos SRX (Health Check)';
     default: return sourceVendor || 'firewall';
   }
 }
@@ -1137,13 +1138,23 @@ Flag features requiring a higher subscription than ${srxLicense} in _translation
       })))}\n\nFor each security rule whose traffic would match a decryption rule with action="decrypt", set _srx_decrypt: true and note the matching decryption rule in _translation_notes. For "no-decrypt" rules, note that traffic is explicitly excluded from decryption.`
     : '';
 
-  const licenseUserNote = srxLicense
-    ? `\nTarget SRX subscription: ${srxLicense} — translate security profiles within this tier, flag features requiring a higher tier in _translation_notes.`
-    : `\nTarget SRX subscription: Base (none) — flag ALL advanced security features (IDP, UTM, EWF, ATP Cloud) as requiring a subscription upgrade in _translation_notes.`;
+  const isHealthCheck = (sourceVendor === 'srx_healthcheck');
 
-  return {
-    system: systemPrompt,
-    user: `Translate these ${policies.length} security policies from ${vendor} to Juniper SRX (${targetModel || 'SRX'}).
+  const licenseUserNote = srxLicense
+    ? `\nSRX subscription: ${srxLicense} — ${isHealthCheck ? 'assess security profiles against this tier, flag features requiring a higher tier' : 'translate security profiles within this tier, flag features requiring a higher tier'} in _translation_notes.`
+    : `\nSRX subscription: Base (none) — flag ALL advanced security features (IDP, UTM, EWF, ATP Cloud) as requiring a subscription upgrade in _translation_notes.`;
+
+  const userMessage = isHealthCheck
+    ? `Audit these ${policies.length} existing SRX security policies for best practices, compliance, and security posture.
+
+Platform: Juniper SRX ${targetModel || ''}${licenseUserNote}
+Available zones: ${zones.join(', ')}${addressSummary}${groupSummary}
+
+Current policies (JSON):
+${policyJson}
+
+CRITICAL: Return ONLY a valid JSON array. No markdown fences, no explanation, no text before or after. Start with [ and end with ].`
+    : `Translate these ${policies.length} security policies from ${vendor} to Juniper SRX (${targetModel || 'SRX'}).
 
 Source vendor: ${vendor}
 Target platform: Juniper SRX ${targetModel || ''}${licenseUserNote}
@@ -1152,7 +1163,11 @@ Available zones: ${zones.join(', ')}${addressSummary}${groupSummary}${decryption
 Source policies (JSON):
 ${policyJson}
 
-CRITICAL: Return ONLY a valid JSON array. No markdown fences, no explanation, no text before or after. Start with [ and end with ].`,
+CRITICAL: Return ONLY a valid JSON array. No markdown fences, no explanation, no text before or after. Start with [ and end with ].`;
+
+  return {
+    system: systemPrompt,
+    user: userMessage,
   };
 }
 

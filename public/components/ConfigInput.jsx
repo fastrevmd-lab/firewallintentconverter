@@ -12,6 +12,46 @@
  */
 import React, { useRef, useState } from 'react';
 import { SAMPLE_CONFIGS } from './sample-configs.jsx';
+import { GREENFIELD_TEMPLATES } from '../data/greenfield-templates.js';
+
+const TEMPLATE_ICONS = {
+  building: (
+    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+      <rect x="4" y="2" width="16" height="20" rx="1" />
+      <line x1="8" y1="6" x2="8" y2="6.01" /><line x1="12" y1="6" x2="12" y2="6.01" /><line x1="16" y1="6" x2="16" y2="6.01" />
+      <line x1="8" y1="10" x2="8" y2="10.01" /><line x1="12" y1="10" x2="12" y2="10.01" /><line x1="16" y1="10" x2="16" y2="10.01" />
+      <line x1="8" y1="14" x2="8" y2="14.01" /><line x1="12" y1="14" x2="12" y2="14.01" /><line x1="16" y1="14" x2="16" y2="14.01" />
+      <rect x="9" y="18" width="6" height="4" />
+    </svg>
+  ),
+  server: (
+    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+      <rect x="2" y="2" width="20" height="8" rx="2" /><rect x="2" y="14" width="20" height="8" rx="2" />
+      <line x1="6" y1="6" x2="6.01" y2="6" /><line x1="6" y1="18" x2="6.01" y2="18" />
+    </svg>
+  ),
+  globe: (
+    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+      <circle cx="12" cy="12" r="10" /><line x1="2" y1="12" x2="22" y2="12" />
+      <path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z" />
+    </svg>
+  ),
+  user: (
+    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+      <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" /><circle cx="12" cy="7" r="4" />
+    </svg>
+  ),
+  cloud: (
+    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+      <path d="M18 10h-1.26A8 8 0 109 20h9a5 5 0 000-10z" />
+    </svg>
+  ),
+  plus: (
+    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+      <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
+    </svg>
+  ),
+};
 
 export default function ConfigInput({
   configText,
@@ -19,6 +59,7 @@ export default function ConfigInput({
   onParse,
   onSanitize,
   onStartGreenfield,
+  onStartGreenfieldWithTemplate,
   greenfieldMode,
   isLoading,
   isParsed,
@@ -134,25 +175,36 @@ export default function ConfigInput({
               <p>The LLM is building your SRX configuration in the center panel. Toggle between "from LLM Interview" and "to SRX" tabs to see the config building in real-time.</p>
             </div>
           ) : (
-            <div className="empty-state" style={{ flex: 1 }}>
-              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" opacity="0.3">
-                <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
-                <line x1="8" y1="21" x2="16" y2="21" />
-                <line x1="12" y1="17" x2="12" y2="21" />
-              </svg>
-              <h3>Build a New SRX Configuration</h3>
-              <p>Start a guided interview with an AI assistant to build your SRX firewall configuration from scratch. No existing configuration needed.</p>
-              <p style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: 8 }}>
-                The AI will ask about your deployment use case, network architecture, and security requirements, then progressively build the configuration for you.
+            <div className="template-picker" style={{ flex: 1, overflow: 'auto', padding: '12px' }}>
+              <h3 style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 12, textAlign: 'center', fontWeight: 500 }}>
+                Choose a starting template
+              </h3>
+              <div className="template-grid">
+                {Object.entries(GREENFIELD_TEMPLATES).map(([id, tpl]) => (
+                  <button
+                    key={id}
+                    className="template-card"
+                    onClick={() => id === 'blank' ? onStartGreenfield() : onStartGreenfieldWithTemplate(id)}
+                    disabled={isLoading}
+                  >
+                    <div className="template-card-icon">
+                      {TEMPLATE_ICONS[tpl.icon] || TEMPLATE_ICONS.plus}
+                    </div>
+                    <div className="template-card-title">{tpl.label}</div>
+                    <div className="template-card-desc">{tpl.description}</div>
+                    {id !== 'blank' && tpl.config && (
+                      <div className="template-card-stats">
+                        <span>{tpl.config.zones?.length || 0} zones</span>
+                        <span>{tpl.config.security_policies?.length || 0} rules</span>
+                      </div>
+                    )}
+                  </button>
+                ))}
+              </div>
+              <p style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: 10, textAlign: 'center', lineHeight: 1.5 }}>
+                Templates pre-fill zones, policies, NAT, and system basics.
+                The AI chat will open for customization.
               </p>
-              <button
-                className="btn btn-primary btn-block"
-                onClick={onStartGreenfield}
-                disabled={isLoading}
-                style={{ marginTop: 16 }}
-              >
-                Start Interview
-              </button>
             </div>
           )
         ) : (

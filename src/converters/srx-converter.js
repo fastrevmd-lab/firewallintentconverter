@@ -63,6 +63,7 @@ export function convertToSrxSetCommands(config, interfaceMappings = {}, targetCo
   predefServiceMap.clear();
 
   // Generate commands in Junos hierarchy order
+  convertSystemConfig(config.system_config, commands, warnings, summary);
   convertZones(config.zones, commands, warnings, summary, interfaceMappings);
   convertAddressObjects(config.address_objects, commands, warnings, summary);
   convertAddressGroups(config.address_groups, commands, warnings, summary);
@@ -139,6 +140,59 @@ export function convertToSrxSetCommands(config, interfaceMappings = {}, targetCo
   }
 
   return { commands, warnings, summary };
+}
+
+// ---------------------------------------------------------------------------
+// System Configuration Converter (Day-0)
+// ---------------------------------------------------------------------------
+
+function convertSystemConfig(systemConfig, commands, warnings, summary) {
+  if (!systemConfig) return;
+
+  const hasContent = systemConfig.hostname || systemConfig.domain_name ||
+    (systemConfig.dns_servers && systemConfig.dns_servers.length > 0) ||
+    (systemConfig.ntp_servers && systemConfig.ntp_servers.length > 0) ||
+    systemConfig.timezone || systemConfig.login_banner;
+
+  if (!hasContent) return;
+
+  commands.push('# =============================================');
+  commands.push('# System Configuration (Day-0)');
+  commands.push('# =============================================');
+
+  if (systemConfig.hostname) {
+    commands.push(`set system host-name ${systemConfig.hostname}`);
+  }
+  if (systemConfig.domain_name) {
+    commands.push(`set system domain-name ${systemConfig.domain_name}`);
+  }
+  for (const dns of (systemConfig.dns_servers || [])) {
+    commands.push(`set system name-server ${dns}`);
+  }
+  for (const ntp of (systemConfig.ntp_servers || [])) {
+    commands.push(`set system ntp server ${ntp}`);
+  }
+  if (systemConfig.timezone) {
+    commands.push(`set system time-zone ${systemConfig.timezone}`);
+  }
+  if (systemConfig.login_banner) {
+    const escaped = systemConfig.login_banner.replace(/"/g, '\\"');
+    commands.push(`set system login message "${escaped}"`);
+  }
+
+  const mgmt = systemConfig.management_services || {};
+  if (mgmt.ssh) {
+    commands.push('set system services ssh');
+  }
+  if (mgmt.https) {
+    commands.push('set system services web-management https system-generated-certificate');
+  }
+  if (mgmt.netconf) {
+    commands.push('set system services netconf ssh');
+  }
+
+  commands.push('');
+  summary.system_config_converted = 1;
 }
 
 // ---------------------------------------------------------------------------
@@ -1021,7 +1075,7 @@ const predefServiceMap = new Map();
  */
 function resolveApplications(applications, services, warnings, policyName, appGroups = [], sourceVendor = '') {
   const resolved = [];
-  const isSrxSource = sourceVendor === 'srx';
+  const isSrxSource = sourceVendor === 'srx' || sourceVendor === 'greenfield';
 
   // Helper to map a single app name to Junos (with Customfwic fallback)
   const mapSingleApp = (appName) => {

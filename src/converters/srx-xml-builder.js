@@ -61,6 +61,9 @@ export function buildSrxXml(config, interfaceMappings = {}, targetContext = null
     lines.push(`    <name>${escapeXml(sanitizeJunosName(ctx.name))}</name>`);
   }
 
+  // System configuration (Day-0)
+  buildSystemConfigXml(config.system_config, lines, indent);
+
   // Security section
   lines.push(`${indent}<security>`);
 
@@ -928,7 +931,7 @@ const xmlPredefServiceMap = new Map();
 
 function resolveApps(applications, services, warnings, policyName, appGroups = [], sourceVendor = '') {
   const resolved = [];
-  const isSrxSource = sourceVendor === 'srx';
+  const isSrxSource = sourceVendor === 'srx' || sourceVendor === 'greenfield';
 
   // Helper to map a single app name to Junos (with Customfwic fallback)
   const mapSingleApp = (appName) => {
@@ -1507,6 +1510,67 @@ function buildQosXml(qosConfig, lines) {
   lines.push('  </class-of-service>');
 }
 
+
+// ---------------------------------------------------------------------------
+// System Configuration (Day-0)
+// ---------------------------------------------------------------------------
+
+function buildSystemConfigXml(systemConfig, lines, indent = '  ') {
+  if (!systemConfig) return;
+
+  const hasContent = systemConfig.hostname || systemConfig.domain_name ||
+    (systemConfig.dns_servers && systemConfig.dns_servers.length > 0) ||
+    (systemConfig.ntp_servers && systemConfig.ntp_servers.length > 0) ||
+    systemConfig.timezone || systemConfig.login_banner;
+
+  if (!hasContent) return;
+
+  lines.push(`${indent}<!-- System Configuration (Day-0) -->`);
+  lines.push(`${indent}<system>`);
+
+  if (systemConfig.hostname) {
+    lines.push(`${indent}  <host-name>${escapeXml(systemConfig.hostname)}</host-name>`);
+  }
+  if (systemConfig.domain_name) {
+    lines.push(`${indent}  <domain-name>${escapeXml(systemConfig.domain_name)}</domain-name>`);
+  }
+  for (const dns of (systemConfig.dns_servers || [])) {
+    lines.push(`${indent}  <name-server><name>${escapeXml(dns)}</name></name-server>`);
+  }
+  if (systemConfig.timezone) {
+    lines.push(`${indent}  <time-zone>${escapeXml(systemConfig.timezone)}</time-zone>`);
+  }
+  if (systemConfig.login_banner) {
+    lines.push(`${indent}  <login>`);
+    lines.push(`${indent}    <message>${escapeXml(systemConfig.login_banner)}</message>`);
+    lines.push(`${indent}  </login>`);
+  }
+
+  const mgmt = systemConfig.management_services || {};
+  if (mgmt.ssh || mgmt.https || mgmt.netconf) {
+    lines.push(`${indent}  <services>`);
+    if (mgmt.ssh) lines.push(`${indent}    <ssh/>`);
+    if (mgmt.https) {
+      lines.push(`${indent}    <web-management>`);
+      lines.push(`${indent}      <https><system-generated-certificate/></https>`);
+      lines.push(`${indent}    </web-management>`);
+    }
+    if (mgmt.netconf) {
+      lines.push(`${indent}    <netconf><ssh/></netconf>`);
+    }
+    lines.push(`${indent}  </services>`);
+  }
+
+  if (systemConfig.ntp_servers && systemConfig.ntp_servers.length > 0) {
+    lines.push(`${indent}  <ntp>`);
+    for (const ntp of systemConfig.ntp_servers) {
+      lines.push(`${indent}    <server><name>${escapeXml(ntp)}</name></server>`);
+    }
+    lines.push(`${indent}  </ntp>`);
+  }
+
+  lines.push(`${indent}</system>`);
+}
 
 function escapeXml(str) {
   if (!str) return '';

@@ -38,6 +38,7 @@ import QoSEditor from './components/QoSEditor.jsx';
 import GreenfieldChat from './components/GreenfieldChat.jsx';
 import FeedbackModal from './components/FeedbackModal.jsx';
 import { translatePolicies, getLLMStatus } from './utils/llm-client.js';
+import { GREENFIELD_TEMPLATES } from './data/greenfield-templates.js';
 
 export default function App() {
   // --- Config input state ---
@@ -58,6 +59,7 @@ export default function App() {
   const [interfaceMappings, setInterfaceMappings] = useState({});
   const [sourceVendor, setSourceVendor] = useState('panos'); // 'panos' | 'srx' | 'fortigate' | 'cisco_asa' | 'greenfield'
   const [greenfieldMode, setGreenfieldMode] = useState(false);
+  const [greenfieldTemplate, setGreenfieldTemplate] = useState(null);
 
   // --- Modal state ---
   const [showModelSelector, setShowModelSelector] = useState(false);
@@ -413,14 +415,24 @@ export default function App() {
         vpn_tunnel_count: 0,
         static_route_count: 0,
       },
+      system_config: {
+        hostname: '',
+        domain_name: '',
+        dns_servers: [],
+        ntp_servers: [],
+        timezone: '',
+        login_banner: '',
+        management_services: { ssh: true, https: false, netconf: false },
+      },
       zones: [],
       security_policies: [],
       nat_rules: [],
-      addresses: [],
+      address_objects: [],
       address_groups: [],
-      services: [],
+      service_objects: [],
       service_groups: [],
       applications: [],
+      application_groups: [],
       vpn_tunnels: [],
       static_routes: [],
       interfaces: [],
@@ -435,6 +447,7 @@ export default function App() {
     setIntermediateConfig(emptyConfig);
     setSourceVendor('greenfield');
     setGreenfieldMode(true);
+    setGreenfieldTemplate(null);
     setParseWarnings([]);
     setParseStats(emptyConfig.metadata);
     setSrxOutput(null);
@@ -445,6 +458,29 @@ export default function App() {
     setPlatformView('panos'); // Start on the "from LLM Interview" tab
     setShowModelSelector(true);
   }, []);
+
+  /** Start greenfield with a pre-built template */
+  const handleStartGreenfieldWithTemplate = useCallback((templateId) => {
+    const template = GREENFIELD_TEMPLATES[templateId];
+    if (!template || templateId === 'blank') {
+      handleStartGreenfield();
+      return;
+    }
+    const config = JSON.parse(JSON.stringify(template.config));
+    setIntermediateConfig(config);
+    setSourceVendor('greenfield');
+    setGreenfieldMode(true);
+    setGreenfieldTemplate(templateId);
+    setParseWarnings([]);
+    setParseStats(config.metadata);
+    setSrxOutput(null);
+    setConvertWarnings([]);
+    setSelectedRule(null);
+    setEditTab('rules');
+    setLlmWarningDismissed(true);
+    setPlatformView('panos');
+    setShowModelSelector(true);
+  }, [handleStartGreenfield]);
 
   /** Apply an action from the greenfield LLM interview */
   const handleGreenfieldAction = useCallback((action, data) => {
@@ -462,13 +498,16 @@ export default function App() {
           }];
           break;
 
-        case 'add_address':
-          updated.addresses = [...(updated.addresses || []), {
+        case 'add_address': {
+          const ip = data.ip || data.value || '';
+          updated.address_objects = [...(updated.address_objects || []), {
             name: data.name,
-            ip: data.ip || '',
+            type: data.type || (ip.endsWith('/32') ? 'host' : 'subnet'),
+            value: ip,
             description: data.description || '',
           }];
           break;
+        }
 
         case 'add_address_group':
           updated.address_groups = [...(updated.address_groups || []), {
@@ -479,7 +518,7 @@ export default function App() {
           break;
 
         case 'add_service':
-          updated.services = [...(updated.services || []), {
+          updated.service_objects = [...(updated.service_objects || []), {
             name: data.name,
             protocol: data.protocol || 'tcp',
             port: data.port || '',
@@ -554,6 +593,19 @@ export default function App() {
           }];
           break;
 
+        case 'set_system':
+          updated.system_config = {
+            ...(updated.system_config || {}),
+            ...data,
+            dns_servers: data.dns_servers || updated.system_config?.dns_servers || [],
+            ntp_servers: data.ntp_servers || updated.system_config?.ntp_servers || [],
+            management_services: {
+              ...(updated.system_config?.management_services || {}),
+              ...(data.management_services || {}),
+            },
+          };
+          break;
+
         default:
           break;
       }
@@ -564,7 +616,7 @@ export default function App() {
         zone_count: updated.zones?.length || 0,
         rule_count: updated.security_policies?.length || 0,
         nat_rule_count: updated.nat_rules?.length || 0,
-        object_count: (updated.addresses?.length || 0) + (updated.address_groups?.length || 0) + (updated.services?.length || 0),
+        object_count: (updated.address_objects?.length || 0) + (updated.address_groups?.length || 0) + (updated.service_objects?.length || 0),
         vpn_tunnel_count: updated.vpn_tunnels?.length || 0,
         static_route_count: updated.static_routes?.length || 0,
       };
@@ -874,6 +926,7 @@ export default function App() {
           onParse={handleParse}
           onSanitize={handleSanitize}
           onStartGreenfield={handleStartGreenfield}
+          onStartGreenfieldWithTemplate={handleStartGreenfieldWithTemplate}
           greenfieldMode={greenfieldMode}
           isLoading={isLoading}
           isParsed={!!intermediateConfig}
@@ -1072,6 +1125,7 @@ export default function App() {
                     intermediateConfig={intermediateConfig}
                     targetModel={targetModel}
                     srxLicense={srxLicense}
+                    greenfieldTemplate={greenfieldTemplate}
                     onApplyAction={handleGreenfieldAction}
                   />
                 </div>

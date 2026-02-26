@@ -18,6 +18,7 @@ export default function GreenfieldChat({
   intermediateConfig,
   targetModel,
   srxLicense,
+  greenfieldTemplate,
   onApplyAction,
 }) {
   const [messages, setMessages] = useState([]);
@@ -53,10 +54,25 @@ export default function GreenfieldChat({
   const sendInitialGreeting = async () => {
     const targetInfo = targetModel ? ` for a ${targetModel}` : '';
     const licenseInfo = srxLicense ? ` with ${srxLicense} subscription` : '';
-    const userMsg = {
-      role: 'user',
-      content: `I need to build a new Juniper SRX firewall configuration from scratch${targetInfo}${licenseInfo}. Please help me through a guided interview to set up the configuration. Start by asking about my deployment use case.`,
-    };
+
+    let content;
+    if (greenfieldTemplate && greenfieldTemplate !== 'blank') {
+      const cfg = intermediateConfig;
+      const zoneNames = (cfg.zones || []).map(z => z.name).join(', ');
+      const policyCount = cfg.security_policies?.length || 0;
+      const natCount = cfg.nat_rules?.length || 0;
+      const sysHost = cfg.system_config?.hostname || 'not set';
+      content = `I have loaded the "${greenfieldTemplate}" template${targetInfo}${licenseInfo}. ` +
+        `The template pre-configured: ${cfg.zones?.length || 0} zones (${zoneNames}), ` +
+        `${policyCount} security policies, ${natCount} NAT rules, ` +
+        `hostname "${sysHost}", and basic system settings (DNS, NTP, screen profiles, syslog). ` +
+        `Please briefly review what's configured and ask what I'd like to customize or add.`;
+    } else {
+      content = `I need to build a new Juniper SRX firewall configuration from scratch${targetInfo}${licenseInfo}. ` +
+        `Please help me through a guided interview to set up the configuration. Start by asking about my deployment use case.`;
+    }
+
+    const userMsg = { role: 'user', content };
 
     setMessages([userMsg]);
     setIsLoading(true);
@@ -165,6 +181,7 @@ export default function GreenfieldChat({
       add_screen: 'Screen Profile',
       set_syslog: 'Syslog',
       add_route: 'Static Route',
+      set_system: 'System Config',
     };
     return labels[action] || action;
   };
@@ -208,7 +225,7 @@ export default function GreenfieldChat({
                           Applied
                         </span>
                       </div>
-                      <div style={{ fontWeight: 500 }}>{part.data.data?.name || ''}</div>
+                      <div style={{ fontWeight: 500 }}>{part.data.data?.name || part.data.data?.hostname || ''}</div>
                       {part.data.data?.description && (
                         <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 2 }}>
                           {part.data.data.description}

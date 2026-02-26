@@ -44,10 +44,20 @@ Select your source vendor from the dropdown (Junos SRX, PAN-OS, FortiGate, Cisco
 
 ### 1b. Greenfield Mode (Build from Scratch)
 
-Select **Greenfield (New Config)** from the vendor dropdown (preselected by default). Click **Start Interview** to begin an LLM-guided conversation that builds your SRX configuration from scratch. The LLM walks you through a structured interview:
+Select **Greenfield (New Config)** from the vendor dropdown (preselected by default). Choose a starting template from the template picker:
 
-1. **Use Case Discovery** — Deployment type (branch office, data center, campus edge, remote/teleworker, cloud gateway), connectivity details, and requirements
-2. **Configuration Building** — Zones, interfaces, address objects, security policies, and NAT rules are built progressively as you answer questions
+- **Branch Office** — Small office with trust/untrust/management zones, outbound web/DNS/NTP policies, source NAT, screen profiles, and syslog
+- **Data Center** — Multi-tier architecture with trust/untrust/dmz/server/management zones, strict inter-tier segmentation, dual screen profiles
+- **Campus Edge** — Enterprise edge with trust/untrust/guest/voip/management zones, guest isolation, VoIP policies, user segmentation
+- **Cloud Gateway** — Hybrid cloud with trust/untrust/cloud-east/cloud-west zones, cross-cloud routing, multi-region policies
+- **Blank** — Empty configuration, start from scratch with the full LLM interview
+
+Each template pre-fills zones, security policies, NAT rules, address objects, screen profiles, syslog, static routes, and **day-0 system config** (hostname, DNS servers, NTP servers, timezone, login banner, management services). The LLM interview skips use-case discovery for template-based configs and jumps straight to refinements.
+
+For blank configs, the LLM walks you through a structured interview:
+
+1. **Use Case Discovery** — Deployment type, connectivity details, and requirements
+2. **Configuration Building** — Zones, interfaces, address objects, security policies, NAT rules, and system config are built progressively as you answer questions
 3. **Best Practices** — Use-case-aware recommendations for screen profiles, logging, default-deny rules, and more
 
 Toggle between **from LLM Interview** and **to SRX** tabs to see the configuration building in real-time. The chat preserves its state when switching tabs.
@@ -87,11 +97,13 @@ Click **Convert to SRX** to generate the output. Switch between **Set Commands**
 ## Features
 
 ### Greenfield Configuration Builder
-- **LLM-guided interview** — Build an SRX configuration from scratch through a structured conversation with an AI assistant
-- **Progressive config building** — Zones, addresses, policies, NAT, routes, and screens are added to the intermediate config in real-time as the LLM collects answers
-- **JSON action blocks** — LLM responses include structured action blocks (`add_zone`, `add_policy`, `add_address`, `add_nat`, `add_route`, `add_screen`, etc.) that auto-apply to the configuration
+- **Template picker** — Choose from 4 pre-built deployment templates (Branch Office, Data Center, Campus Edge, Cloud Gateway) or start blank. Templates pre-fill zones, policies, NAT, screens, routes, and system config
+- **Day-0 system config** — Templates include hostname, DNS servers, NTP servers, timezone, login banner, and management services (SSH/HTTPS/NETCONF). System config is emitted in both SRX set commands (`set system host-name`, `set system name-server`, etc.) and XML output (`<system>` block)
+- **LLM-guided interview** — Build an SRX configuration from scratch through a structured conversation with an AI assistant. Template-aware: skips use-case discovery when a template is loaded
+- **Progressive config building** — Zones, addresses, policies, NAT, routes, screens, and system config are added to the intermediate config in real-time as the LLM collects answers
+- **JSON action blocks** — LLM responses include structured action blocks (`add_zone`, `add_policy`, `add_address`, `add_nat`, `add_route`, `add_screen`, `set_system`, etc.) that auto-apply to the configuration
 - **Inline action cards** — Each applied action renders as a visual card in the chat with the action type, name, and description
-- **Use-case-aware** — The interview adapts to your deployment scenario (branch office, data center, campus edge, remote/teleworker) with tailored zone layouts and policy recommendations
+- **Use-case-aware** — The interview adapts to your deployment scenario (branch office, data center, campus edge, cloud gateway) with tailored zone layouts and policy recommendations
 - **Real-time preview** — Toggle to the "to SRX" tab at any time to see all normal editors (Security Policies, Zones, Objects, NAT) populated with the configuration built so far
 - **Seamless review** — After the interview, click **Review** to have the LLM analyze the complete built configuration for best practices and security posture
 
@@ -276,7 +288,8 @@ firewall-intent-converter/
 │   │   ├── llm-client.js         # Browser-side LLM API client (multi-provider)
 │   │   └── srx-view-transforms.js # SRX display transforms + license tier data
 │   └── data/
-│       └── hardware-db.js        # PAN-OS, SRX, FortiGate, Cisco, Check Point, SonicWall + Huawei model database (current + EOS)
+│       ├── hardware-db.js        # PAN-OS, SRX, FortiGate, Cisco, Check Point, SonicWall + Huawei model database (current + EOS)
+│       └── greenfield-templates.js # Pre-built greenfield templates (branch, datacenter, campus, cloud, blank)
 └── dist/                         # Production build output (generated)
 ```
 

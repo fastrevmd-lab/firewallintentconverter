@@ -112,7 +112,7 @@
 - [ ] **Post-conversion diff view** — Side-by-side comparison of source vs generated SRX policy coverage with match highlighting
 - [ ] **Save/load projects** — JSON export/import of full state (intermediate config, interface mappings, review status, LLM history)
 - [ ] **Bulk rule operations** — Multi-select rules for batch accept/edit/delete/move
-- [ ] **Greenfield templates** — Pre-built config templates for common deployments (branch office, DC edge, remote access VPN, hub-and-spoke)
+- [x] **Greenfield templates + day-0 system config** — 4 pre-built deployment templates (Branch Office, Data Center, Campus Edge, Cloud Gateway) plus Blank, with template picker UI. Each template pre-fills zones, security policies, NAT, address objects, screen profiles, syslog, static routes, and day-0 system config (hostname, DNS, NTP, timezone, login banner, management services). System config emitted as SRX set commands and XML. Template-aware LLM interview skips use-case discovery and jumps to refinements. Fixed greenfield address/service field name bug (`addresses`→`address_objects`, `services`→`service_objects`)
 - [ ] **Config syntax validation** — SRX commit-check equivalent (syntax validation, reference checks, conflict detection)
 
 ### Rev9 — Dynamic Routing & Identity

@@ -37,7 +37,9 @@ import DHCPEditor from './components/DHCPEditor.jsx';
 import QoSEditor from './components/QoSEditor.jsx';
 import GreenfieldChat from './components/GreenfieldChat.jsx';
 import FeedbackModal from './components/FeedbackModal.jsx';
+import SaveProjectModal from './components/SaveProjectModal.jsx';
 import { translatePolicies, getLLMStatus } from './utils/llm-client.js';
+import { buildProjectPayload, validateProjectFile, generateProjectName } from './utils/project-io.js';
 import { GREENFIELD_TEMPLATES } from './data/greenfield-templates.js';
 
 export default function App() {
@@ -94,6 +96,9 @@ export default function App() {
   const [showPushToast, setShowPushToast] = useState('');
   const [bottomTab, setBottomTab] = useState('output');
   const [error, setError] = useState(null);
+  const [showSaveModal, setShowSaveModal] = useState(false);
+  const [showLoadConfirm, setShowLoadConfirm] = useState(null);
+  const projectFileInputRef = React.useRef(null);
 
   // --- LLM Translation state (feature/llm-translate) ---
   const [srxTranslatedPolicies, setSrxTranslatedPolicies] = useState(null);
@@ -801,6 +806,102 @@ export default function App() {
   }, []);
 
   // ------------------------------------------------------------------
+  // Project Save / Load
+  // ------------------------------------------------------------------
+
+  const handleSaveProject = useCallback((projectName) => {
+    const stateBag = {
+      configText, intermediateConfig, sourceVendor, sourceModel, targetModel,
+      srxLicense, portProfile, siteName, siteGroup, interfaceMappings,
+      isSanitized, sanitizationTable, parseWarnings, parseStats,
+      warningStatuses, srxTranslatedPolicies, srxOutput, convertWarnings,
+      conversionSummary, outputFormat, targetContext, greenfieldMode,
+      greenfieldTemplate, editTab, platformView, bottomTab,
+    };
+    const payload = buildProjectPayload(stateBag, projectName);
+    const jsonStr = JSON.stringify(payload, null, 2);
+    const blob = new Blob([jsonStr], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${projectName}.fpic.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setShowSaveModal(false);
+  }, [
+    configText, intermediateConfig, sourceVendor, sourceModel, targetModel,
+    srxLicense, portProfile, siteName, siteGroup, interfaceMappings,
+    isSanitized, sanitizationTable, parseWarnings, parseStats,
+    warningStatuses, srxTranslatedPolicies, srxOutput, convertWarnings,
+    conversionSummary, outputFormat, targetContext, greenfieldMode,
+    greenfieldTemplate, editTab, platformView, bottomTab,
+  ]);
+
+  const handleLoadProjectFile = useCallback((e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = '';
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const json = JSON.parse(event.target.result);
+        const result = validateProjectFile(json);
+        if (!result.valid) {
+          setError(`Load project failed: ${result.error}`);
+          return;
+        }
+        setShowLoadConfirm({ project: result.project, warnings: result.warnings });
+      } catch (err) {
+        setError(`Load project failed: Invalid JSON file. ${err.message}`);
+      }
+    };
+    reader.readAsText(file);
+  }, []);
+
+  const applyLoadedProject = useCallback((project) => {
+    const s = project.state;
+
+    setConfigText(s.configText ?? '');
+    setIntermediateConfig(s.intermediateConfig ?? null);
+    setSourceVendor(s.sourceVendor ?? 'panos');
+    setSourceModel(s.sourceModel ?? '');
+    setTargetModel(s.targetModel ?? '');
+    setSrxLicense(s.srxLicense ?? '');
+    setPortProfile(s.portProfile ?? null);
+    setSiteName(s.siteName ?? '');
+    setSiteGroup(s.siteGroup ?? '');
+    setInterfaceMappings(s.interfaceMappings ?? {});
+    setIsSanitized(s.isSanitized ?? false);
+    setSanitizationTable(s.sanitizationTable ?? null);
+    setParseWarnings(s.parseWarnings ?? []);
+    setParseStats(s.parseStats ?? null);
+    setWarningStatuses(s.warningStatuses ?? {});
+    setSrxTranslatedPolicies(s.srxTranslatedPolicies ?? null);
+    setSrxOutput(s.srxOutput ?? null);
+    setConvertWarnings(s.convertWarnings ?? []);
+    setConversionSummary(s.conversionSummary ?? null);
+    setOutputFormat(s.outputFormat ?? 'set');
+    setTargetContext(s.targetContext ?? { type: 'none', name: '' });
+    setGreenfieldMode(s.greenfieldMode ?? false);
+    setGreenfieldTemplate(s.greenfieldTemplate ?? null);
+
+    setEditTab(s.editTab ?? 'rules');
+    setPlatformView(s.platformView ?? 'panos');
+    setBottomTab(s.bottomTab ?? 'output');
+
+    // Reset transient state
+    setSelectedRule(null);
+    setError(null);
+    setIsLoading(false);
+    setShowModelSelector(false);
+    setShowInterfaceMapper(false);
+    setShowLLMWarning(false);
+    setLlmWarningDismissed(s.isSanitized || s.greenfieldMode || false);
+    setShowLoadConfirm(null);
+  }, []);
+
+  // ------------------------------------------------------------------
   // Render
   // ------------------------------------------------------------------
   return (
@@ -875,6 +976,41 @@ export default function App() {
               Interfaces
             </button>
           )}
+          <button
+            className="settings-btn"
+            onClick={() => {
+              if (!intermediateConfig && !configText) {
+                setError('Nothing to save. Parse a config or start a Greenfield interview first.');
+                return;
+              }
+              setShowSaveModal(true);
+            }}
+            title="Save project to file"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z" />
+              <polyline points="17 21 17 13 7 13 7 21" />
+              <polyline points="7 3 7 8 15 8" />
+            </svg>
+          </button>
+          <button
+            className="settings-btn"
+            onClick={() => projectFileInputRef.current?.click()}
+            title="Load project from file"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
+              <line x1="12" y1="11" x2="12" y2="17" />
+              <polyline points="9 14 12 11 15 14" />
+            </svg>
+          </button>
+          <input
+            ref={projectFileInputRef}
+            type="file"
+            accept=".fpic.json,.json"
+            style={{ display: 'none' }}
+            onChange={handleLoadProjectFile}
+          />
           <button
             className="settings-btn"
             onClick={() => setShowFeedback(true)}
@@ -1577,6 +1713,61 @@ export default function App() {
           onMappingComplete={handleMappingComplete}
           onClose={() => setShowInterfaceMapper(false)}
         />
+      )}
+
+      {/* Save Project Modal */}
+      {showSaveModal && (
+        <SaveProjectModal
+          defaultName={generateProjectName(sourceVendor, sourceModel, siteName)}
+          onSave={handleSaveProject}
+          onClose={() => setShowSaveModal(false)}
+        />
+      )}
+
+      {/* Load Project Confirmation */}
+      {showLoadConfirm && (
+        <div className="modal-overlay" onClick={() => setShowLoadConfirm(null)}>
+          <div className="modal-content" onClick={e => e.stopPropagation()} style={{ width: 480 }}>
+            <div className="modal-header">
+              <h2>Load Project</h2>
+              <button className="modal-close" onClick={() => setShowLoadConfirm(null)}>&times;</button>
+            </div>
+            <div className="modal-body" style={{ padding: '16px 20px' }}>
+              <p style={{ fontWeight: 600, marginBottom: 8 }}>
+                {showLoadConfirm.project.name || 'Unnamed Project'}
+              </p>
+              <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 12 }}>
+                <div>Saved: {new Date(showLoadConfirm.project.savedAt).toLocaleString()}</div>
+                <div>Vendor: {showLoadConfirm.project.state?.sourceVendor || 'Unknown'}</div>
+                <div>Source Model: {showLoadConfirm.project.state?.sourceModel || 'Not set'}</div>
+                <div>Target Model: {showLoadConfirm.project.state?.targetModel || 'Not set'}</div>
+                {showLoadConfirm.project.state?.intermediateConfig?.security_policies && (
+                  <div>Policies: {showLoadConfirm.project.state.intermediateConfig.security_policies.length}</div>
+                )}
+              </div>
+              {(intermediateConfig || configText) && (
+                <p style={{ color: 'var(--warning)', fontSize: 12, marginBottom: 8 }}>
+                  Loading this project will replace your current work. This cannot be undone.
+                </p>
+              )}
+              {showLoadConfirm.warnings?.length > 0 && (
+                <div>
+                  {showLoadConfirm.warnings.map((w, i) => (
+                    <p key={i} style={{ color: 'var(--warning)', fontSize: 12 }}>{w}</p>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="modal-footer" style={{ gap: 8 }}>
+              <button className="btn btn-secondary" onClick={() => setShowLoadConfirm(null)}>
+                Cancel
+              </button>
+              <button className="btn btn-primary" onClick={() => applyLoadedProject(showLoadConfirm.project)}>
+                Load Project
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* LLM Warning Modal — shown when user tries AI suggestions without sanitizing */}

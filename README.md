@@ -120,6 +120,13 @@ Click **Convert to SRX** to generate the output. Switch between **Set Commands**
 - **Non-destructive** — Policies are returned unchanged; all recommendations are advisory in `_translation_notes`
 - **Simplified workflow** — No hardware migration, no interface mapping. Select source model and license, run the audit
 
+### Save/Load Projects
+- **Save project** — Export the entire project state (parsed config, interface mappings, model selections, review status, warnings, LLM-translated policies) to a `.fpic.json` file via the floppy-disk icon in the navbar
+- **Load project** — Import a previously saved project via the folder icon in the navbar. A confirmation modal shows project details (name, date, vendor, model, policy count) before replacing current state
+- **Auto-generated naming** — Project names are auto-generated from vendor, model, and date (e.g., `PAN-OS-PA-5260-2026-02-26`) with an editable text field before download
+- **Version-safe** — Project files include a version field for forward-compatible migrations. Missing state fields are filled with defaults on load
+- **Full state preservation** — Saves all workflow progress including greenfield mode, health check mode, sanitization state, and warning resolutions
+
 ### Greenfield Configuration Builder
 - **Template picker** — Choose from 4 pre-built deployment templates (Branch Office, Data Center, Campus Edge, Cloud Gateway) or start blank. Templates pre-fill zones, policies, NAT, screens, routes, and system config
 - **Day-0 system config** — Templates include hostname, DNS servers, NTP servers, timezone, login banner, and management services (SSH/HTTPS/NETCONF). System config is emitted in both SRX set commands (`set system host-name`, `set system name-server`, etc.) and XML output (`<system>` block)
@@ -307,10 +314,12 @@ firewall-intent-converter/
 │   │   ├── ModelSelector.jsx     # Modal — source/target hardware model picker + site identification
 │   │   ├── InterfaceMapper.jsx   # Modal — per-zone interface mapping
 │   │   ├── FeedbackModal.jsx     # Modal — feedback/suggestion submission via GitHub Issues
+│   │   ├── SaveProjectModal.jsx  # Modal — project naming before download (.fpic.json)
 │   │   ├── LLMSettings.jsx       # Modal — LLM provider config, MCP connection, system prompts
 │   │   └── sample-configs.jsx    # Built-in sample configs (PAN-OS, SRX, FortiGate, Cisco, Check Point, SonicWall, Huawei)
 │   ├── utils/
 │   │   ├── llm-client.js         # Browser-side LLM API client (multi-provider)
+│   │   ├── project-io.js         # Save/load project serialization, validation, migration
 │   │   └── srx-view-transforms.js # SRX display transforms + license tier data
 │   └── data/
 │       ├── hardware-db.js        # PAN-OS, SRX, FortiGate, Cisco, Check Point, SonicWall + Huawei model database (current + EOS)

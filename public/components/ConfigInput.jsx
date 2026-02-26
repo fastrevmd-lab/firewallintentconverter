@@ -124,8 +124,8 @@ export default function ConfigInput({
           disabled={greenfieldMode || isParsed}
         >
           <option value="greenfield">Greenfield (New Config)</option>
-          <option value="srx">Junos SRX</option>
           <option value="srx_healthcheck">SRX Health Check</option>
+          <option value="srx">Junos SRX</option>
           <option value="panos">PAN-OS</option>
           <option value="fortigate">FortiGate</option>
           <option value="cisco_asa">Cisco ASA/FTD</option>

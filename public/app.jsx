@@ -43,6 +43,8 @@ import { translatePolicies, getLLMStatus } from './utils/llm-client.js';
 import { buildProjectPayload, validateProjectFile, generateProjectName } from './utils/project-io.js';
 import { GREENFIELD_TEMPLATES } from './data/greenfield-templates.js';
 import { safeJsonParse } from './utils/safe-json.js';
+import BulkActionBar from './components/BulkActionBar.jsx';
+import GuidedTour from './components/GuidedTour.jsx';
 
 export default function App() {
   // --- Config input state ---
@@ -101,6 +103,13 @@ export default function App() {
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [showLoadConfirm, setShowLoadConfirm] = useState(null);
   const projectFileInputRef = React.useRef(null);
+
+  // --- Bulk rule selection state ---
+  const [selectedRuleKeys, setSelectedRuleKeys] = useState(new Set());
+  const [lastClickedKey, setLastClickedKey] = useState(null);
+
+  // --- Guided tour state ---
+  const [showTour, setShowTour] = useState(() => localStorage.getItem('tour-completed') !== 'true');
 
   // --- Multi-Firewall Merge mode state ---
   const [mergeMode, setMergeMode] = useState(false);
@@ -935,6 +944,134 @@ export default function App() {
     });
   }, []);
 
+  // ------------------------------------------------------------------
+  // Bulk rule operation handlers
+  // ------------------------------------------------------------------
+
+  const makeRuleKey = (policy) => `${policy.name}::${policy._rule_index}`;
+
+  const getCurrentPolicies = useCallback(() => {
+    if (platformView === 'srx' && srxTranslatedPolicies) return srxTranslatedPolicies;
+    return (mergeMode ? activeConfig : intermediateConfig)?.security_policies || [];
+  }, [platformView, srxTranslatedPolicies, mergeMode, activeConfig, intermediateConfig]);
+
+  const handleToggleRuleSelect = useCallback((policy, event) => {
+    const key = makeRuleKey(policy);
+    setSelectedRuleKeys(prev => {
+      const next = new Set(prev);
+      if (event?.shiftKey && lastClickedKey) {
+        const policies = getCurrentPolicies();
+        const lastIdx = policies.findIndex(p => makeRuleKey(p) === lastClickedKey);
+        const curIdx = policies.findIndex(p => makeRuleKey(p) === key);
+        if (lastIdx >= 0 && curIdx >= 0) {
+          const [start, end] = [Math.min(lastIdx, curIdx), Math.max(lastIdx, curIdx)];
+          for (let i = start; i <= end; i++) next.add(makeRuleKey(policies[i]));
+        }
+      } else if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+    setLastClickedKey(key);
+  }, [lastClickedKey, getCurrentPolicies]);
+
+  const handleSelectAllRules = useCallback((selectAll) => {
+    if (selectAll) {
+      setSelectedRuleKeys(new Set(getCurrentPolicies().map(makeRuleKey)));
+    } else {
+      setSelectedRuleKeys(new Set());
+    }
+  }, [getCurrentPolicies]);
+
+  const handleBulkAccept = useCallback(() => {
+    const isTranslated = platformView === 'srx' && srxTranslatedPolicies;
+    if (isTranslated) {
+      setSrxTranslatedPolicies(prev => prev ? prev.map(p =>
+        selectedRuleKeys.has(makeRuleKey(p)) ? { ...p, _review_status: 'accepted' } : p
+      ) : prev);
+    } else {
+      updateConfig(prev => ({
+        ...prev,
+        security_policies: prev.security_policies.map(p =>
+          selectedRuleKeys.has(makeRuleKey(p)) ? { ...p, _review_status: 'accepted' } : p
+        ),
+      }));
+    }
+    setSelectedRuleKeys(new Set());
+    setSelectedRule(null);
+  }, [selectedRuleKeys, platformView, srxTranslatedPolicies, updateConfig]);
+
+  const handleBulkDelete = useCallback(() => {
+    const isTranslated = platformView === 'srx' && srxTranslatedPolicies;
+    if (isTranslated) {
+      setSrxTranslatedPolicies(prev => prev
+        ? prev.filter(p => !selectedRuleKeys.has(makeRuleKey(p))).map((p, i) => ({ ...p, _rule_index: i }))
+        : prev
+      );
+    } else {
+      updateConfig(prev => ({
+        ...prev,
+        security_policies: prev.security_policies.filter(p => !selectedRuleKeys.has(makeRuleKey(p))),
+      }));
+    }
+    setSelectedRuleKeys(new Set());
+    setSelectedRule(null);
+  }, [selectedRuleKeys, platformView, srxTranslatedPolicies, updateConfig]);
+
+  const handleBulkToggleDisable = useCallback(() => {
+    const isTranslated = platformView === 'srx' && srxTranslatedPolicies;
+    if (isTranslated) {
+      setSrxTranslatedPolicies(prev => prev ? prev.map(p =>
+        selectedRuleKeys.has(makeRuleKey(p)) ? { ...p, disabled: !p.disabled } : p
+      ) : prev);
+    } else {
+      updateConfig(prev => ({
+        ...prev,
+        security_policies: prev.security_policies.map(p =>
+          selectedRuleKeys.has(makeRuleKey(p)) ? { ...p, disabled: !p.disabled } : p
+        ),
+      }));
+    }
+    setSelectedRuleKeys(new Set());
+  }, [selectedRuleKeys, platformView, srxTranslatedPolicies, updateConfig]);
+
+  const handleBulkMove = useCallback((direction) => {
+    const mutate = (policies) => {
+      const result = [...policies];
+      const selectedIndices = result
+        .map((p, i) => selectedRuleKeys.has(makeRuleKey(p)) ? i : -1)
+        .filter(i => i >= 0);
+      if (direction === 'up') {
+        for (const idx of selectedIndices) {
+          if (idx === 0) return result;
+          if (selectedRuleKeys.has(makeRuleKey(result[idx - 1]))) continue;
+          [result[idx - 1], result[idx]] = [result[idx], result[idx - 1]];
+        }
+      } else {
+        for (let j = selectedIndices.length - 1; j >= 0; j--) {
+          const idx = selectedIndices[j];
+          if (idx >= result.length - 1) return result;
+          if (selectedRuleKeys.has(makeRuleKey(result[idx + 1]))) continue;
+          [result[idx], result[idx + 1]] = [result[idx + 1], result[idx]];
+        }
+      }
+      return result.map((p, i) => ({ ...p, _rule_index: i }));
+    };
+    const isTranslated = platformView === 'srx' && srxTranslatedPolicies;
+    if (isTranslated) {
+      setSrxTranslatedPolicies(prev => prev ? mutate(prev) : prev);
+    } else {
+      updateConfig(prev => ({ ...prev, security_policies: mutate(prev.security_policies) }));
+    }
+  }, [selectedRuleKeys, platformView, srxTranslatedPolicies, updateConfig]);
+
+  // Clear bulk selection when view context changes
+  React.useEffect(() => {
+    setSelectedRuleKeys(new Set());
+  }, [platformView, editTab, activeSlotIndex]);
+
   /** Translate policies with LLM */
   const handleTranslateWithLLM = useCallback(async () => {
     if (!intermediateConfig?.security_policies?.length) return;
@@ -1260,6 +1397,17 @@ export default function App() {
           />
           <button
             className="settings-btn"
+            onClick={() => setShowTour(true)}
+            title="Start guided tour"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <circle cx="12" cy="12" r="10" />
+              <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+              <line x1="12" y1="17" x2="12.01" y2="17" />
+            </svg>
+          </button>
+          <button
+            className="settings-btn"
             onClick={() => setShowFeedback(true)}
             title="Send feedback or suggest a feature"
           >
@@ -1340,7 +1488,7 @@ export default function App() {
         />
 
         {/* CENTER: Tabbed Editor Panel */}
-        <div className="panel policy-table-panel">
+        <div className="panel policy-table-panel" data-tour="center-panel">
           {(mergeMode ? activeConfig : intermediateConfig) ? (
             <>
               {/* Merge mode: config slot selector bar */}
@@ -1386,6 +1534,7 @@ export default function App() {
                   </button>
                   <button
                     className="btn btn-translate"
+                    data-tour="translate-btn"
                     onClick={handleTranslateWithLLM}
                     disabled={isTranslating || !intermediateConfig?.security_policies?.length}
                     title={isHealthCheckMode ? 'Check best practices on SRX policies using LLM' : 'Translate source policies to SRX format using LLM'}
@@ -1588,6 +1737,7 @@ export default function App() {
                       </div>
                     </div>
                   ) : (
+                    <>
                     <PolicyTable
                       policies={
                         platformView === 'srx'
@@ -1602,7 +1752,20 @@ export default function App() {
                       onAddRule={platformView === 'srx' && srxTranslatedPolicies ? handleAddTranslatedRule : handleAddRule}
                       viewMode={effectiveViewMode}
                       platformView={platformView}
+                      selectedRuleKeys={selectedRuleKeys}
+                      onToggleRuleSelect={handleToggleRuleSelect}
+                      onSelectAllRules={handleSelectAllRules}
                     />
+                    <BulkActionBar
+                      selectedCount={selectedRuleKeys.size}
+                      onAcceptAll={handleBulkAccept}
+                      onDeleteSelected={handleBulkDelete}
+                      onToggleDisable={handleBulkToggleDisable}
+                      onMoveUp={() => handleBulkMove('up')}
+                      onMoveDown={() => handleBulkMove('down')}
+                      onClearSelection={() => setSelectedRuleKeys(new Set())}
+                    />
+                    </>
                   )
                 )}
                 {editTab === 'decryption' && (
@@ -1788,6 +1951,7 @@ export default function App() {
         </div>
 
         {/* RIGHT: Interview / Rule Details */}
+        <div data-tour="right-panel" style={{ display: 'contents' }}>
         <InterviewPanel
           selectedRule={selectedRule}
           intermediateConfig={mergeMode ? activeConfig : intermediateConfig}
@@ -1828,8 +1992,10 @@ export default function App() {
           }}
         />
 
+        </div>
+
         {/* BOTTOM: SRX Output + Warnings */}
-        <div className="panel output-panel">
+        <div className="panel output-panel" data-tour="output-panel">
           <div className="panel-header">
             <div className="tab-bar">
               <button
@@ -2151,6 +2317,9 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* Guided Tour */}
+      {showTour && <GuidedTour onClose={() => setShowTour(false)} />}
     </div>
   );
 }

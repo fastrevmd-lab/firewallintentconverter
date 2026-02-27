@@ -3426,3 +3426,166 @@ html, body, #root {
   margin-left: auto;
   cursor: help;
 }
+
+/* --- Bulk Rule Selection --- */
+.bulk-checkbox {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  accent-color: var(--accent);
+}
+
+.policy-table th .bulk-checkbox {
+  vertical-align: middle;
+}
+
+.policy-table tr.bulk-selected td {
+  background: rgba(77, 208, 200, 0.08);
+}
+
+.bulk-action-bar {
+  position: sticky;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  background: var(--bg-elevated);
+  border-top: 2px solid var(--accent-dim);
+  box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.3);
+  z-index: 10;
+  animation: slideUp 0.2s ease;
+}
+
+@keyframes slideUp {
+  from { transform: translateY(100%); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+
+.bulk-action-count {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+.bulk-action-buttons {
+  display: flex;
+  gap: 8px;
+  flex: 1;
+}
+
+.bulk-btn { font-size: 12px; padding: 5px 12px; }
+
+.bulk-btn-accept {
+  background: rgba(52, 211, 153, 0.15);
+  color: var(--success);
+  border: 1px solid rgba(52, 211, 153, 0.3);
+}
+.bulk-btn-accept:hover { background: rgba(52, 211, 153, 0.25); }
+
+.bulk-btn-delete {
+  background: rgba(248, 113, 113, 0.1);
+  color: var(--error);
+  border: 1px solid rgba(248, 113, 113, 0.3);
+}
+.bulk-btn-delete:hover { background: rgba(248, 113, 113, 0.2); }
+
+.bulk-btn-disable,
+.bulk-btn-move {
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-color);
+}
+.bulk-btn-disable:hover,
+.bulk-btn-move:hover {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+}
+
+/* --- Guided Tour --- */
+.tour-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 200;
+}
+
+.tour-spotlight {
+  position: fixed;
+  border: 2px solid var(--accent);
+  border-radius: var(--radius);
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.6), 0 0 20px rgba(77, 208, 200, 0.3);
+  z-index: 201;
+  pointer-events: none;
+  transition: all 0.3s ease;
+}
+
+.tour-tooltip {
+  position: fixed;
+  z-index: 202;
+  background: var(--bg-secondary);
+  border: 1px solid var(--accent-dim);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  width: 340px;
+  transition: all 0.3s ease;
+}
+
+.tour-tooltip-header {
+  padding: 14px 16px 8px;
+}
+
+.tour-step-indicator {
+  font-size: 11px;
+  color: var(--accent);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.tour-tooltip-header h3 {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 4px 0 0;
+}
+
+.tour-tooltip-content {
+  padding: 0 16px 12px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.tour-tooltip-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  border-top: 1px solid var(--border-color);
+  background: var(--bg-tertiary);
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+}
+
+.tour-dont-show {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.tour-dont-show input[type="checkbox"] {
+  accent-color: var(--accent);
+}
+
+.tour-tooltip-actions {
+  display: flex;
+  gap: 8px;
+}

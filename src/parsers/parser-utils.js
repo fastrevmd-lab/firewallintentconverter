@@ -642,6 +642,9 @@ export function detectVendor(configText) {
   if (trimmed.includes('set security policies') || trimmed.includes('set security zones')) {
     return { vendor: 'srx', format: 'set', confidence: 0.95 };
   }
+  if (trimmed.includes('set logical-systems') || trimmed.includes('set tenants')) {
+    return { vendor: 'srx', format: 'set', confidence: 0.95 };
+  }
   if (trimmed.includes('set security') && (trimmed.includes('from-zone') || trimmed.includes('address-book'))) {
     return { vendor: 'srx', format: 'set', confidence: 0.9 };
   }
@@ -655,7 +658,7 @@ export function detectVendor(configText) {
   }
 
   // Junos generic (could be SRX or other Junos device)
-  if (/^set\s+(system|interfaces|routing-options|protocols|security)\s/m.test(trimmed)) {
+  if (/^set\s+(system|interfaces|routing-options|protocols|security|logical-systems|tenants)\s/m.test(trimmed)) {
     return { vendor: 'srx', format: 'set', confidence: 0.7 };
   }
 

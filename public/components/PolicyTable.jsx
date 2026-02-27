@@ -20,6 +20,9 @@ export default function PolicyTable({
   onAddRule,
   viewMode,
   platformView,
+  selectedRuleKeys = new Set(),
+  onToggleRuleSelect,
+  onSelectAllRules,
 }) {
   const [sortField, setSortField] = useState('_rule_index');
   const [sortDir, setSortDir] = useState('asc');
@@ -129,6 +132,47 @@ export default function PolicyTable({
 
     return result;
   }, [policies, filter, statusFilter, sortField, sortDir]);
+
+  // --- Bulk selection helpers ---
+  const makeKey = (p) => `${p.name}::${p._rule_index}`;
+  const allSelected = displayPolicies.length > 0 && displayPolicies.every(p => selectedRuleKeys.has(makeKey(p)));
+  const someSelected = displayPolicies.some(p => selectedRuleKeys.has(makeKey(p)));
+
+  const renderHeaderCheckbox = () => (
+    <th style={{ width: 36, textAlign: 'center' }}>
+      <input
+        type="checkbox"
+        className="bulk-checkbox"
+        checked={allSelected}
+        ref={el => { if (el) el.indeterminate = someSelected && !allSelected; }}
+        onChange={() => onSelectAllRules && onSelectAllRules(!allSelected)}
+        onClick={(e) => e.stopPropagation()}
+      />
+    </th>
+  );
+
+  const renderRowCheckbox = (policy, e) => (
+    <td style={{ textAlign: 'center' }} onClick={(ev) => ev.stopPropagation()}>
+      <input
+        type="checkbox"
+        className="bulk-checkbox"
+        checked={selectedRuleKeys.has(makeKey(policy))}
+        onChange={(ev) => {
+          ev.stopPropagation();
+          onToggleRuleSelect && onToggleRuleSelect(policy, ev.nativeEvent);
+        }}
+        onClick={(ev) => ev.stopPropagation()}
+      />
+    </td>
+  );
+
+  const handleRowClick = (policy, isSelected, e) => {
+    if (e.ctrlKey || e.metaKey || e.shiftKey) {
+      onToggleRuleSelect && onToggleRuleSelect(policy, e);
+    } else {
+      onSelectRule(isSelected ? null : policy);
+    }
+  };
 
   /** Start editing a cell */
   const startEdit = (realIndex, field, currentValue) => {
@@ -516,6 +560,7 @@ export default function PolicyTable({
     <table className="policy-table">
       <thead>
         <tr>
+          {renderHeaderCheckbox()}
           <th onClick={() => handleSort('_rule_index')}>#{sortIndicator('_rule_index')}</th>
           <th onClick={() => handleSort('name')}>Name{sortIndicator('name')}</th>
           {hasIdentityPolicies && <th>Users</th>}
@@ -538,10 +583,11 @@ export default function PolicyTable({
           return (
             <tr
               key={`${policy.name}-${policy._rule_index}`}
-              className={`${isSelected ? 'selected' : ''} ${policy.disabled ? 'disabled-rule' : ''} ${policy._implicit ? 'implicit-rule' : ''}`}
-              onClick={() => onSelectRule(isSelected ? null : policy)}
+              className={`${isSelected ? 'selected' : ''} ${selectedRuleKeys.has(makeKey(policy)) ? 'bulk-selected' : ''} ${policy.disabled ? 'disabled-rule' : ''} ${policy._implicit ? 'implicit-rule' : ''}`}
+              onClick={(e) => handleRowClick(policy, isSelected, e)}
               style={{ cursor: 'pointer' }}
             >
+              {renderRowCheckbox(policy)}
               <td>{policy._rule_index}</td>
               <td title={policy.name}>
                 {policy._implicit && <span className="cell-chip implicit-chip">Implicit</span>}
@@ -581,12 +627,13 @@ export default function PolicyTable({
   /** Render the SRX Security Director-style table */
   const renderSrxTable = () => {
     const zonePairGroups = groupByZonePair(displayPolicies);
-    const srxColCount = hasIdentityPolicies ? 9 : 8;
+    const srxColCount = (hasIdentityPolicies ? 9 : 8) + 1; // +1 for checkbox column
 
     return (
       <table className="policy-table srx-table">
         <thead>
           <tr>
+            {renderHeaderCheckbox()}
             <th onClick={() => handleSort('_rule_index')} style={{ width: 52 }}>Seq{sortIndicator('_rule_index')}</th>
             <th onClick={() => handleSort('name')}>Name{sortIndicator('name')}</th>
             <th>Sources</th>
@@ -624,10 +671,11 @@ export default function PolicyTable({
                 return (
                   <tr
                     key={`${policy.name}-${policy._rule_index}`}
-                    className={`${isSelected ? 'selected' : ''} ${policy.disabled ? 'disabled-rule' : ''} ${policy._implicit ? 'implicit-rule' : ''}`}
-                    onClick={() => onSelectRule(isSelected ? null : policy)}
+                    className={`${isSelected ? 'selected' : ''} ${selectedRuleKeys.has(makeKey(policy)) ? 'bulk-selected' : ''} ${policy.disabled ? 'disabled-rule' : ''} ${policy._implicit ? 'implicit-rule' : ''}`}
+                    onClick={(e) => handleRowClick(policy, isSelected, e)}
                     style={{ cursor: 'pointer' }}
                   >
+                    {renderRowCheckbox(policy)}
                     <td>
                       <div className="srx-seq">{policy._rule_index}</div>
                     </td>
@@ -769,6 +817,7 @@ export default function PolicyTable({
     <table className="policy-table fg-table">
       <thead>
         <tr>
+          {renderHeaderCheckbox()}
           <th onClick={() => handleSort('_rule_index')} style={{ width: 44 }}>Seq{sortIndicator('_rule_index')}</th>
           <th onClick={() => handleSort('name')}>Name{sortIndicator('name')}</th>
           <th onClick={() => handleSort('src_zones')}>From{sortIndicator('src_zones')}</th>
@@ -794,10 +843,11 @@ export default function PolicyTable({
           return (
             <tr
               key={`${policy.name}-${policy._rule_index}`}
-              className={`${isSelected ? 'selected' : ''} ${policy.disabled ? 'disabled-rule fg-disabled-row' : ''} ${policy._implicit ? 'implicit-rule' : ''}`}
-              onClick={() => onSelectRule(isSelected ? null : policy)}
+              className={`${isSelected ? 'selected' : ''} ${selectedRuleKeys.has(makeKey(policy)) ? 'bulk-selected' : ''} ${policy.disabled ? 'disabled-rule fg-disabled-row' : ''} ${policy._implicit ? 'implicit-rule' : ''}`}
+              onClick={(e) => handleRowClick(policy, isSelected, e)}
               style={{ cursor: 'pointer' }}
             >
+              {renderRowCheckbox(policy)}
               <td>
                 <div className="fg-seq">
                   {renderFortigateStatus(policy)}
@@ -854,6 +904,7 @@ export default function PolicyTable({
     <table className="policy-table cp-table">
       <thead>
         <tr>
+          {renderHeaderCheckbox()}
           <th onClick={() => handleSort('_rule_index')} style={{ width: 44 }}>#{sortIndicator('_rule_index')}</th>
           <th onClick={() => handleSort('name')}>Name{sortIndicator('name')}</th>
           <th onClick={() => handleSort('src_addresses')}>Source{sortIndicator('src_addresses')}</th>
@@ -875,10 +926,11 @@ export default function PolicyTable({
           return (
             <tr
               key={`${policy.name}-${policy._rule_index}`}
-              className={`${isSelected ? 'selected' : ''} ${policy.disabled ? 'disabled-rule' : ''} ${policy._implicit ? 'implicit-rule' : ''}`}
-              onClick={() => onSelectRule(isSelected ? null : policy)}
+              className={`${isSelected ? 'selected' : ''} ${selectedRuleKeys.has(makeKey(policy)) ? 'bulk-selected' : ''} ${policy.disabled ? 'disabled-rule' : ''} ${policy._implicit ? 'implicit-rule' : ''}`}
+              onClick={(e) => handleRowClick(policy, isSelected, e)}
               style={{ cursor: 'pointer' }}
             >
+              {renderRowCheckbox(policy)}
               <td>{cp.ruleNumber || policy._rule_index}</td>
               <td>
                 {policy._implicit && <span className="cell-chip implicit-chip">Implicit</span>}
@@ -929,6 +981,7 @@ export default function PolicyTable({
     <table className="policy-table sw-table">
       <thead>
         <tr>
+          {renderHeaderCheckbox()}
           <th onClick={() => handleSort('_rule_index')} style={{ width: 50 }}>Pri{sortIndicator('_rule_index')}</th>
           <th onClick={() => handleSort('name')}>Name{sortIndicator('name')}</th>
           <th onClick={() => handleSort('src_zones')}>From{sortIndicator('src_zones')}</th>
@@ -952,10 +1005,11 @@ export default function PolicyTable({
           return (
             <tr
               key={`${policy.name}-${policy._rule_index}`}
-              className={`${isSelected ? 'selected' : ''} ${policy.disabled ? 'disabled-rule' : ''} ${policy._implicit ? 'implicit-rule' : ''}`}
-              onClick={() => onSelectRule(isSelected ? null : policy)}
+              className={`${isSelected ? 'selected' : ''} ${selectedRuleKeys.has(makeKey(policy)) ? 'bulk-selected' : ''} ${policy.disabled ? 'disabled-rule' : ''} ${policy._implicit ? 'implicit-rule' : ''}`}
+              onClick={(e) => handleRowClick(policy, isSelected, e)}
               style={{ cursor: 'pointer' }}
             >
+              {renderRowCheckbox(policy)}
               <td>{sw.priority || policy._rule_index}</td>
               <td>
                 {policy._implicit && <span className="cell-chip implicit-chip">Implicit</span>}
@@ -999,6 +1053,7 @@ export default function PolicyTable({
     <table className="policy-table hw-table">
       <thead>
         <tr>
+          {renderHeaderCheckbox()}
           <th onClick={() => handleSort('_rule_index')} style={{ width: 44 }}>#{sortIndicator('_rule_index')}</th>
           <th onClick={() => handleSort('name')}>Rule Name{sortIndicator('name')}</th>
           <th onClick={() => handleSort('src_zones')}>Src Zone{sortIndicator('src_zones')}</th>
@@ -1021,10 +1076,11 @@ export default function PolicyTable({
           return (
             <tr
               key={`${policy.name}-${policy._rule_index}`}
-              className={`${isSelected ? 'selected' : ''} ${policy.disabled ? 'disabled-rule' : ''} ${policy._implicit ? 'implicit-rule' : ''}`}
-              onClick={() => onSelectRule(isSelected ? null : policy)}
+              className={`${isSelected ? 'selected' : ''} ${selectedRuleKeys.has(makeKey(policy)) ? 'bulk-selected' : ''} ${policy.disabled ? 'disabled-rule' : ''} ${policy._implicit ? 'implicit-rule' : ''}`}
+              onClick={(e) => handleRowClick(policy, isSelected, e)}
               style={{ cursor: 'pointer' }}
             >
+              {renderRowCheckbox(policy)}
               <td>{policy._rule_index}</td>
               <td>
                 {policy._implicit && <span className="cell-chip implicit-chip">Implicit</span>}
@@ -1123,6 +1179,7 @@ export default function PolicyTable({
     <table className="policy-table cisco-table">
       <thead>
         <tr>
+          {renderHeaderCheckbox()}
           <th onClick={() => handleSort('_rule_index')} style={{ width: 50 }}>#ACE{sortIndicator('_rule_index')}</th>
           <th onClick={() => handleSort('action')} style={{ width: 80 }}>Action{sortIndicator('action')}</th>
           <th onClick={() => handleSort('name')}>Name / Remark{sortIndicator('name')}</th>
@@ -1145,10 +1202,11 @@ export default function PolicyTable({
           return (
             <tr
               key={`${policy.name}-${policy._rule_index}`}
-              className={`${isSelected ? 'selected' : ''} ${policy.disabled ? 'disabled-rule cisco-inactive-row' : ''} ${policy._implicit ? 'implicit-rule' : ''}`}
-              onClick={() => onSelectRule(isSelected ? null : policy)}
+              className={`${isSelected ? 'selected' : ''} ${selectedRuleKeys.has(makeKey(policy)) ? 'bulk-selected' : ''} ${policy.disabled ? 'disabled-rule cisco-inactive-row' : ''} ${policy._implicit ? 'implicit-rule' : ''}`}
+              onClick={(e) => handleRowClick(policy, isSelected, e)}
               style={{ cursor: 'pointer' }}
             >
+              {renderRowCheckbox(policy)}
               <td>
                 <div className="cisco-ace-num">
                   {policy._rule_index}

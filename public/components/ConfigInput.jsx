@@ -144,7 +144,7 @@ export default function ConfigInput({
   };
 
   return (
-    <div className="panel config-input-panel">
+    <div className="panel config-input-panel" data-tour="config-input">
       <div className="panel-header">
         <h2>Source Configuration</h2>
         <select
@@ -417,6 +417,7 @@ export default function ConfigInput({
             {/* Parse button */}
             <button
               className="btn btn-primary btn-block"
+              data-tour="parse-btn"
               onClick={() => onParse(selectedVendor)}
               disabled={isLoading || !configText.trim()}
               style={{ marginTop: 4 }}

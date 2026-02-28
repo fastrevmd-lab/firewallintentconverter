@@ -9,12 +9,12 @@
  *
  * State flow:
  *   1. User pastes/uploads config  →  configText
- *   2. Click "Parse" sends to /api/parse  →  intermediateConfig + parseWarnings
+ *   2. Click "Parse" runs parseConfig()  →  intermediateConfig + parseWarnings
  *   3. ModelSelector auto-opens  →  sourceModel + targetModel
  *   4. InterfaceMapper opens  →  interfaceMappings
  *   5. User edits config in tabbed panels
  *   6. User reviews/accepts translated rules
- *   7. Click "Convert" sends to /api/convert  →  srxOutput + convertWarnings
+ *   7. Click "Convert" runs convertConfig()  →  srxOutput + convertWarnings
  */
 import React, { useState, useCallback, useMemo } from 'react';
 import ConfigInput from './components/ConfigInput.jsx';
@@ -45,6 +45,7 @@ import { GREENFIELD_TEMPLATES } from './data/greenfield-templates.js';
 import { safeJsonParse } from './utils/safe-json.js';
 import BulkActionBar from './components/BulkActionBar.jsx';
 import GuidedTour from './components/GuidedTour.jsx';
+import { parseConfig, convertConfig, mergeConvert, sanitizeConfig } from './utils/engine.js';
 
 export default function App() {
   // --- Config input state ---
@@ -168,24 +169,14 @@ export default function App() {
   // ------------------------------------------------------------------
   // Sanitize handler: strips sensitive data from config text
   // ------------------------------------------------------------------
-  const handleSanitize = useCallback(async () => {
+  const handleSanitize = useCallback(() => {
     if (!configText.trim()) return;
     setIsLoading(true);
     setLoadingMessage('Sanitizing configuration...');
     setError(null);
 
     try {
-      const response = await fetch('/api/sanitize', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ configText }),
-      });
-
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.error || 'Sanitization failed');
-      }
-
+      const data = sanitizeConfig(configText);
       setConfigText(data.sanitizedText);
       setSanitizationTable(data.replacements);
       setIsSanitized(true);
@@ -208,12 +199,12 @@ export default function App() {
   }, [isSanitized]);
 
   // ------------------------------------------------------------------
-  // Parse handler: sends config to /api/parse
+  // Parse handler: runs parseConfig() locally
   // ------------------------------------------------------------------
-  const handleParse = useCallback(async (selectedVendorHint) => {
+  const handleParse = useCallback((selectedVendorHint) => {
     if (!configText.trim()) return;
     setIsLoading(true);
-    setLoadingMessage('Parsing configuration...');
+    setLoadingMessage('Sanitizing & parsing configuration...');
     setError(null);
     setSrxOutput(null);
     setConvertWarnings([]);
@@ -224,16 +215,17 @@ export default function App() {
     setTranslationError(null);
 
     try {
-      const response = await fetch('/api/parse', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ configText }),
-      });
-
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.error || 'Parse failed');
+      // Auto-sanitize before parsing
+      let textToParse = configText;
+      if (!isSanitized) {
+        const sanitized = sanitizeConfig(configText);
+        textToParse = sanitized.sanitizedText;
+        setConfigText(textToParse);
+        setSanitizationTable(sanitized.replacements);
+        setIsSanitized(true);
       }
+
+      const data = parseConfig(textToParse);
 
       // Inject _review_status on every rule
       const policies = data.intermediateConfig.security_policies || [];
@@ -296,16 +288,16 @@ export default function App() {
   }, [allRulesAccepted]);
 
   // ------------------------------------------------------------------
-  // Convert handler: sends intermediate config to /api/convert
+  // Convert handler: runs convertConfig() locally
   // ------------------------------------------------------------------
-  const handleConvert = useCallback(async (format = 'set') => {
+  const handleConvert = useCallback((format = 'set') => {
     if (!intermediateConfig) return;
     setIsLoading(true);
     setLoadingMessage('Converting to SRX format...');
     setError(null);
 
     try {
-      // Merge translated policies into the config sent to /api/convert
+      // Merge translated policies into the config for conversion
       const configForConversion = srxTranslatedPolicies
         ? { ...intermediateConfig, security_policies: srxTranslatedPolicies }
         : intermediateConfig;
@@ -319,16 +311,7 @@ export default function App() {
         };
       }
 
-      const response = await fetch('/api/convert', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ intermediateConfig: configForConversion, format, interfaceMappings, targetContext: targetContext.type !== 'none' ? targetContext : null }),
-      });
-
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.error || 'Conversion failed');
-      }
+      const data = convertConfig(configForConversion, format, interfaceMappings, targetContext.type !== 'none' ? targetContext : null);
 
       setSrxOutput(data.output);
       setConvertWarnings(data.output.warnings || []);
@@ -447,7 +430,7 @@ export default function App() {
   }, [showAutoSplitPrompt, configText, parseWarnings, isSanitized, sanitizationTable]);
 
   // Merge convert handler
-  const handleMergeConvert = useCallback(async (format = 'set') => {
+  const handleMergeConvert = useCallback((format = 'set') => {
     const parsedSlots = configSlots.filter(s => s.intermediateConfig);
     if (parsedSlots.length === 0) return;
 
@@ -470,14 +453,7 @@ export default function App() {
         syslog_config: parsedSlots.flatMap(s => s.intermediateConfig.syslog_config || []),
       };
 
-      const response = await fetch('/api/merge-convert', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ configSlots: slotsPayload, crossLsLinks, format, globalConfig }),
-      });
-
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'Merge conversion failed');
+      const data = mergeConvert(slotsPayload, crossLsLinks, format, globalConfig);
 
       setSrxOutput(data.output);
       setConvertWarnings(data.output.warnings || []);
@@ -493,7 +469,7 @@ export default function App() {
   }, [configSlots, crossLsLinks]);
 
   // Parse a slot's config in merge mode
-  const handleParseSlot = useCallback(async (slotIndex, vendorHint) => {
+  const handleParseSlot = useCallback((slotIndex, vendorHint) => {
     const slot = configSlots[slotIndex];
     if (!slot || !slot.configText.trim()) return;
     setIsLoading(true);
@@ -501,13 +477,11 @@ export default function App() {
     setError(null);
 
     try {
-      const response = await fetch('/api/parse', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ configText: slot.configText }),
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'Parse failed');
+      // Auto-sanitize the slot's config before parsing
+      const sanitized = sanitizeConfig(slot.configText);
+      const textToParse = sanitized.sanitizedText;
+
+      const data = parseConfig(textToParse);
 
       const policies = data.intermediateConfig.security_policies || [];
       policies.forEach(rule => { rule._review_status = 'unreviewed'; });
@@ -516,7 +490,10 @@ export default function App() {
 
       setConfigSlots(prev => prev.map((s, i) => i === slotIndex ? {
         ...s,
+        configText: textToParse,
         intermediateConfig: data.intermediateConfig,
+        isSanitized: true,
+        sanitizationTable: sanitized.replacements,
         sourceVendor: detectedVendor,
         parseWarnings: data.warnings || [],
         parseStats: data.parseStats || null,
@@ -1467,7 +1444,6 @@ export default function App() {
             : handleConfigChange
           }
           onParse={mergeMode ? (() => handleParseSlot(activeSlotIndex)) : handleParse}
-          onSanitize={handleSanitize}
           onStartGreenfield={handleStartGreenfield}
           onStartGreenfieldWithTemplate={handleStartGreenfieldWithTemplate}
           greenfieldMode={greenfieldMode}

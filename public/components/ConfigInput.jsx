@@ -77,7 +77,6 @@ export default function ConfigInput({
   configText,
   onConfigChange,
   onParse,
-  onSanitize,
   onStartGreenfield,
   onStartGreenfieldWithTemplate,
   greenfieldMode,
@@ -225,66 +224,6 @@ export default function ConfigInput({
           </div>
         )}
 
-        {/* Sanitization status badge + collapsible mapping table */}
-        {isSanitized && (
-          <div className="sanitize-section">
-            <div
-              className="sanitize-badge sanitize-badge-clickable"
-              onClick={() => setShowSanitizeTable(prev => !prev)}
-              title="Click to view/hide sanitization mapping table"
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-              </svg>
-              <span style={{ flex: 1 }}>Configuration sanitized</span>
-              {sanitizationTable && sanitizationTable.length > 0 && (
-                <span className="sanitize-stats">{formatSanitizeStats(sanitizationTable)}</span>
-              )}
-              <svg
-                width="12" height="12" viewBox="0 0 24 24" fill="none"
-                stroke="currentColor" strokeWidth="2"
-                style={{ transform: showSanitizeTable ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }}
-              >
-                <polyline points="6 9 12 15 18 9" />
-              </svg>
-            </div>
-
-            {showSanitizeTable && sanitizationTable && sanitizationTable.length > 0 && (
-              <div className="sanitize-table-container">
-                <table className="sanitize-table">
-                  <thead>
-                    <tr>
-                      <th>Type</th>
-                      <th>Original</th>
-                      <th>Placeholder</th>
-                      <th>Restore</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {sanitizationTable.map((entry, i) => (
-                      <tr key={i}>
-                        <td>
-                          <span className={`sanitize-type-badge ${entry.type}`}>
-                            {SANITIZE_TYPE_LABELS[entry.type] || entry.type}
-                          </span>
-                        </td>
-                        <td className="sanitize-original">{maskSensitiveValue(entry)}</td>
-                        <td className="sanitize-placeholder"><code>{entry.placeholder}</code></td>
-                        <td>
-                          {entry.restore
-                            ? <span className="sanitize-restore-yes">Yes</span>
-                            : <span className="sanitize-restore-no">No</span>
-                          }
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        )}
-
         {isGreenfield ? (
           /* ---- Greenfield mode ---- */
           greenfieldMode ? (
@@ -395,24 +334,65 @@ export default function ConfigInput({
               style={{ flex: 1 }}
             />
 
-            {/* Sanitize button — above Parse */}
-            <button
-              className={`btn btn-block ${isSanitized ? 'btn-sanitized' : 'btn-sanitize'}`}
-              onClick={onSanitize}
-              disabled={isLoading || !configText.trim() || isSanitized}
-              title="Remove passwords, hashes, public IPs, usernames — replaced with placeholders"
-            >
-              {isSanitized ? (
-                <>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: 6 }}>
+            {/* Sanitization status badge + collapsible mapping table */}
+            {isSanitized && (
+              <div className="sanitize-section" style={{ marginBottom: 4 }}>
+                <div
+                  className="sanitize-badge sanitize-badge-clickable"
+                  onClick={() => setShowSanitizeTable(prev => !prev)}
+                  title="Click to view/hide sanitization mapping table"
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
                   </svg>
-                  Configuration Sanitized
-                </>
-              ) : (
-                'Sanitize Configuration'
-              )}
-            </button>
+                  <span style={{ flex: 1 }}>Configuration sanitized</span>
+                  {sanitizationTable && sanitizationTable.length > 0 && (
+                    <span className="sanitize-stats">{formatSanitizeStats(sanitizationTable)}</span>
+                  )}
+                  <svg
+                    width="12" height="12" viewBox="0 0 24 24" fill="none"
+                    stroke="currentColor" strokeWidth="2"
+                    style={{ transform: showSanitizeTable ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }}
+                  >
+                    <polyline points="6 9 12 15 18 9" />
+                  </svg>
+                </div>
+
+                {showSanitizeTable && sanitizationTable && sanitizationTable.length > 0 && (
+                  <div className="sanitize-table-container">
+                    <table className="sanitize-table">
+                      <thead>
+                        <tr>
+                          <th>Type</th>
+                          <th>Original</th>
+                          <th>Placeholder</th>
+                          <th>Restore</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {sanitizationTable.map((entry, i) => (
+                          <tr key={i}>
+                            <td>
+                              <span className={`sanitize-type-badge ${entry.type}`}>
+                                {SANITIZE_TYPE_LABELS[entry.type] || entry.type}
+                              </span>
+                            </td>
+                            <td className="sanitize-original">{maskSensitiveValue(entry)}</td>
+                            <td className="sanitize-placeholder"><code>{entry.placeholder}</code></td>
+                            <td>
+                              {entry.restore
+                                ? <span className="sanitize-restore-yes">Yes</span>
+                                : <span className="sanitize-restore-no">No</span>
+                              }
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Parse button */}
             <button

@@ -5,15 +5,14 @@ export default defineConfig({
   plugins: [react()],
   // Rename Vite's static asset directory so 'public/' can hold React source
   publicDir: 'static',
+  // Relative base so the built SPA works from file:// URLs or subdirectories
+  base: './',
   build: {
     outDir: 'dist',
     emptyOutDir: true,
   },
   server: {
-    // Vite dev server proxies API calls to Express when running standalone;
-    // in integrated mode (server.js), Express attaches Vite as middleware instead.
-    proxy: {
-      '/api': 'http://localhost:3001',
-    },
+    // Allow LAN access in dev mode
+    host: true,
   },
 });

@@ -1434,3 +1434,204 @@ export async function translatePolicies(intermediateConfig, targetModel, srxLice
   report({ phase: 'complete', detail: `Translated ${result.length} rules from ${policies.length} source rules`, chunk: chunks.length, totalChunks: chunks.length, promptTokens: totalPromptTokens, responseTokens: totalResponseTokens });
   return result;
 }
+
+// ---------------------------------------------------------------------------
+// LLM Rule Grouping — Security Director-style logical grouping
+// ---------------------------------------------------------------------------
+
+const RULE_GROUPING_SYSTEM_PROMPT = `You are an expert firewall policy analyst. Your task is to organize a flat list of firewall security policies into logical groups, similar to how Juniper Security Director or Panorama organizes policies.
+
+## Grouping Strategy
+
+Analyze the rules and group them by their **business intent**. Consider these signals:
+
+1. **Zone pair patterns** — Rules with the same source→destination zone pair often serve the same purpose
+2. **Application/service similarity** — Rules allowing the same applications (web, DNS, email, VPN) belong together
+3. **Naming conventions** — Rule names often encode intent (e.g., "INET-ACCESS-*", "DC-EAST-WEST-*", "VPN-*")
+4. **Address patterns** — Rules referencing the same address objects/groups serve related functions
+5. **Action similarity** — Deny/cleanup rules form their own group; permit rules group by purpose
+6. **Description keywords** — Parse descriptions for business context
+
+## Group Naming
+
+- Use clear, concise business-oriented names: "Internet Access", "East-West Data Center", "Management Access", "VPN Traffic", "DNS Services", "Cleanup Deny Rules"
+- Avoid generic names like "Group 1" or "Miscellaneous"
+- Aim for 3-8 groups for typical rulesets. Fewer for small rulesets (<15 rules), more for large ones (100+)
+- Every rule must be assigned to exactly one group
+
+## Output Format
+
+Return ONLY a JSON array, no other text. Each element:
+
+\`\`\`json
+[
+  {
+    "group_name": "Internet Access",
+    "rule_indices": [0, 1, 4, 7],
+    "reasoning": "Rules permitting outbound web/DNS/email traffic from trust to untrust zone"
+  },
+  {
+    "group_name": "Cleanup Rules",
+    "rule_indices": [14, 15],
+    "reasoning": "Implicit deny-all rules at the end of each zone pair"
+  }
+]
+\`\`\`
+
+Rules are 0-indexed. Every rule index from the input must appear exactly once across all groups.`;
+
+/**
+ * Builds a compact rule summary for the grouping prompt.
+ */
+function buildGroupingRuleSummary(policies) {
+  return policies.map((r, i) => {
+    const src = (r.src_zones || r.source_zones || []).join(',') || 'any';
+    const dst = (r.dst_zones || r.destination_zones || []).join(',') || 'any';
+    const srcAddr = (r.src_addresses || r.source_addresses || []).join(',') || 'any';
+    const dstAddr = (r.dst_addresses || r.destination_addresses || []).join(',') || 'any';
+    const apps = (r.applications || []).join(',') || 'any';
+    const svcs = (r.services || []).join(',') || 'any';
+    const flags = [
+      r.disabled ? 'DISABLED' : '',
+      r._implicit || r.added_by_fpic ? 'IMPLICIT' : '',
+    ].filter(Boolean).join(' ');
+    const desc = r.description ? ` "${r.description}"` : '';
+    return `${i}. [${r.action}] "${r.name}" ${src}->${dst} src=${srcAddr} dst=${dstAddr} apps=${apps} svc=${svcs}${desc} ${flags}`.trim();
+  }).join('\n');
+}
+
+/**
+ * Parses the LLM grouping response, extracting JSON from markdown fences if needed.
+ */
+function parseGroupingResponse(response, ruleCount) {
+  // Try to extract JSON from markdown code fence
+  let jsonStr = response;
+  const fenceMatch = response.match(/```(?:json)?\s*\n?([\s\S]*?)```/);
+  if (fenceMatch) {
+    jsonStr = fenceMatch[1].trim();
+  } else {
+    // Try to find raw JSON array
+    const arrayMatch = response.match(/\[\s*\{[\s\S]*\}\s*\]/);
+    if (arrayMatch) {
+      jsonStr = arrayMatch[0];
+    }
+  }
+
+  const groups = safeJsonParse(jsonStr);
+  if (!Array.isArray(groups)) {
+    throw new Error('LLM response is not a JSON array');
+  }
+
+  // Validate structure
+  const allIndices = new Set();
+  for (const g of groups) {
+    if (!g.group_name || !Array.isArray(g.rule_indices)) {
+      throw new Error(`Invalid group structure: ${JSON.stringify(g).slice(0, 100)}`);
+    }
+    for (const idx of g.rule_indices) {
+      if (typeof idx !== 'number' || idx < 0 || idx >= ruleCount) {
+        throw new Error(`Invalid rule index ${idx} (ruleset has ${ruleCount} rules)`);
+      }
+      allIndices.add(idx);
+    }
+  }
+
+  // Check for unassigned rules — assign to "Ungrouped" if any
+  if (allIndices.size < ruleCount) {
+    const missing = [];
+    for (let i = 0; i < ruleCount; i++) {
+      if (!allIndices.has(i)) missing.push(i);
+    }
+    if (missing.length > 0) {
+      groups.push({
+        group_name: 'Ungrouped',
+        rule_indices: missing,
+        reasoning: 'Rules not assigned by the LLM analysis',
+      });
+    }
+  }
+
+  return groups;
+}
+
+/**
+ * Requests LLM-powered rule grouping for a set of security policies.
+ *
+ * @param {Array} policies - Security policies array from intermediate config
+ * @param {Function} [onProgress] - Progress callback: ({ phase, detail, chunk, totalChunks })
+ * @returns {Promise<Array<{group_name: string, rule_indices: number[], reasoning: string}>>}
+ */
+export async function groupPolicies(policies, onProgress) {
+  if (!policies || policies.length === 0) {
+    throw new Error('No security policies to group.');
+  }
+
+  const CHUNK_SIZE = 50; // Grouping can handle larger chunks (less output per rule)
+  const MAX_TOKENS = 8192;
+  const t0 = Date.now();
+  const report = (data) => onProgress?.({ ...data, elapsed: Date.now() - t0 });
+
+  if (policies.length <= 60) {
+    // Single call for small-to-medium rulesets
+    const ruleSummary = buildGroupingRuleSummary(policies);
+    const userPrompt = `Analyze and group these ${policies.length} firewall rules:\n\n${ruleSummary}`;
+
+    report({ phase: 'calling_llm', detail: `Grouping ${policies.length} rules`, chunk: 1, totalChunks: 1 });
+    const response = await _callLLM(userPrompt, RULE_GROUPING_SYSTEM_PROMPT, MAX_TOKENS);
+    report({ phase: 'parsing_response', detail: 'Parsing grouping response', chunk: 1, totalChunks: 1 });
+
+    const groups = parseGroupingResponse(response, policies.length);
+    report({ phase: 'complete', detail: `Created ${groups.length} groups`, chunk: 1, totalChunks: 1 });
+    return groups;
+  }
+
+  // Chunked grouping for large rulesets
+  // Phase 1: Get groups for each chunk independently
+  const chunks = [];
+  for (let i = 0; i < policies.length; i += CHUNK_SIZE) {
+    const end = Math.min(i + CHUNK_SIZE, policies.length);
+    chunks.push({ start: i, end, policies: policies.slice(i, end) });
+  }
+
+  report({ phase: 'building_prompt', detail: `Splitting ${policies.length} rules into ${chunks.length} chunks`, chunk: 0, totalChunks: chunks.length + 1 });
+
+  // Collect per-chunk group assignments (using global indices)
+  const perChunkGroups = [];
+
+  for (let ci = 0; ci < chunks.length; ci++) {
+    const chunk = chunks[ci];
+    const ruleSummary = buildGroupingRuleSummary(chunk.policies);
+    const userPrompt = `Analyze and group these ${chunk.policies.length} firewall rules (rules ${chunk.start}–${chunk.end - 1} of ${policies.length} total):\n\n${ruleSummary}`;
+
+    report({ phase: 'calling_llm', detail: `Chunk ${ci + 1}/${chunks.length}: rules ${chunk.start}–${chunk.end - 1}`, chunk: ci + 1, totalChunks: chunks.length + 1 });
+    const response = await _callLLM(userPrompt, RULE_GROUPING_SYSTEM_PROMPT, MAX_TOKENS);
+
+    const chunkGroups = parseGroupingResponse(response, chunk.policies.length);
+    // Remap local indices to global indices
+    for (const g of chunkGroups) {
+      g.rule_indices = g.rule_indices.map(idx => idx + chunk.start);
+    }
+    perChunkGroups.push(...chunkGroups);
+  }
+
+  // Phase 2: Merge groups with similar names across chunks
+  report({ phase: 'merging', detail: `Merging ${perChunkGroups.length} chunk groups`, chunk: chunks.length + 1, totalChunks: chunks.length + 1 });
+
+  const mergedMap = new Map(); // normalized_name → { group_name, rule_indices[], reasoning }
+  for (const g of perChunkGroups) {
+    const key = g.group_name.toLowerCase().replace(/[^a-z0-9]/g, '-');
+    if (mergedMap.has(key)) {
+      const existing = mergedMap.get(key);
+      existing.rule_indices.push(...g.rule_indices);
+      if (g.reasoning && !existing.reasoning.includes(g.reasoning)) {
+        existing.reasoning += '; ' + g.reasoning;
+      }
+    } else {
+      mergedMap.set(key, { ...g });
+    }
+  }
+
+  const groups = Array.from(mergedMap.values());
+  report({ phase: 'complete', detail: `Created ${groups.length} groups from ${policies.length} rules`, chunk: chunks.length + 1, totalChunks: chunks.length + 1 });
+  return groups;
+}

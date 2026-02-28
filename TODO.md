@@ -159,6 +159,25 @@
   - LLM: schema, translation rules, normalization, greenfield prompt
   - Shadow detector: identity-aware shadow analysis
 
+### Rev10 — LLM Rule Grouping
+- [x] **AI-powered policy grouping** — LLM analyzes rulesets and organizes them into logical groups (Security Director-style):
+  - `groupPolicies()` in `llm-client.js` — system prompt analyzes zone pairs, applications, naming conventions, descriptions
+  - Chunked support for large rulesets (50 rules/chunk, cross-chunk group merging)
+  - Structured JSON output: `[{ group_name, rule_indices[], reasoning }]`
+  - Response parsing with validation, duplicate detection, and ungrouped rule handling
+- [x] **Grouped PolicyTable UI** — Collapsible group sections across all vendor views:
+  - Group headers with arrow toggle, rule count, LLM reasoning tooltip
+  - Rename group (inline edit), dissolve group (move to Ungrouped), clear all groups
+  - "Auto-Group" button in filter toolbar (shows progress, group count when active)
+  - SRX view renders grouped rules with full zone-pair sub-grouping
+  - Other vendor views render generic grouped tables
+- [x] **Group comments in SRX output** — JUNOS-preserved comments marking group boundaries:
+  - Set commands: `/* ===== Group: Internet Access ===== */`
+  - XML: `<!-- ===== Group: Internet Access ===== -->`
+  - Comments survive JUNOS `commit` and `show configuration`
+- [x] **Project persistence** — Groups saved/loaded in `.fpic.json` project files (`ruleGroups` state key)
+- [x] **Groups cleared on re-parse** — Ensures stale groups don't persist across different configs
+
 ### Blocked — Waiting on Vendor APIs
 - [ ] **Push to SDC / SD On-Prem / Mist** — Direct deployment to Juniper management platforms. Requires HPE Juniper public REST APIs. UI placeholder already present ("Push via MCP" button)
 

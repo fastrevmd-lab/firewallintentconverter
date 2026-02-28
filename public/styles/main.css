@@ -3589,3 +3589,97 @@ html, body, #root {
   display: flex;
   gap: 8px;
 }
+
+/* ── Policy Group Sections (LLM Rule Grouping) ── */
+.policy-group-section {
+  margin-bottom: 2px;
+}
+.policy-group-section:last-child {
+  margin-bottom: 0;
+}
+.policy-group-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px 4px 0 0;
+  cursor: pointer;
+  user-select: none;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  transition: background 0.15s;
+}
+.policy-group-header.collapsed {
+  border-radius: 4px;
+  margin-bottom: 4px;
+}
+.policy-group-header:hover {
+  background: var(--bg-hover);
+}
+.policy-group-arrow {
+  font-size: 10px;
+  color: var(--text-muted);
+  width: 12px;
+  text-align: center;
+}
+.policy-group-name {
+  font-family: var(--font-mono);
+  color: var(--accent);
+}
+.policy-group-name-input {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--bg-primary);
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  padding: 1px 6px;
+  outline: none;
+  min-width: 140px;
+}
+.policy-group-count {
+  font-weight: 400;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.policy-group-reasoning {
+  font-weight: 400;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-style: italic;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.policy-group-actions {
+  display: flex;
+  gap: 2px;
+  margin-left: auto;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.policy-group-header:hover .policy-group-actions {
+  opacity: 1;
+}
+.policy-group-actions .btn-icon {
+  color: var(--text-muted);
+  font-size: 11px;
+  padding: 0 4px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  border-radius: 3px;
+}
+.policy-group-actions .btn-icon:hover {
+  color: var(--text-primary);
+  background: var(--bg-primary);
+}
+.policy-group-section > table {
+  border-top: none;
+  border-radius: 0 0 4px 4px;
+}

@@ -39,7 +39,7 @@ import GreenfieldChat from './components/GreenfieldChat.jsx';
 import FeedbackModal from './components/FeedbackModal.jsx';
 import DiffPanel from './components/DiffPanel.jsx';
 import SaveProjectModal from './components/SaveProjectModal.jsx';
-import { translatePolicies, getLLMStatus } from './utils/llm-client.js';
+import { translatePolicies, getLLMStatus, groupPolicies } from './utils/llm-client.js';
 import { buildProjectPayload, validateProjectFile, generateProjectName } from './utils/project-io.js';
 import { GREENFIELD_TEMPLATES } from './data/greenfield-templates.js';
 import { safeJsonParse } from './utils/safe-json.js';
@@ -108,6 +108,10 @@ export default function App() {
   // --- Bulk rule selection state ---
   const [selectedRuleKeys, setSelectedRuleKeys] = useState(new Set());
   const [lastClickedKey, setLastClickedKey] = useState(null);
+
+  // --- Rule grouping state ---
+  const [ruleGroups, setRuleGroups] = useState([]);
+  const [groupingInProgress, setGroupingInProgress] = useState(false);
 
   // --- Guided tour state ---
   const [showTour, setShowTour] = useState(() => localStorage.getItem('tour-completed') !== 'true');
@@ -251,6 +255,7 @@ export default function App() {
       setParseWarnings(data.warnings || []);
       setWarningStatuses({});
       setParseStats(data.parseStats || null);
+      setRuleGroups([]); // Clear groups when parsing new config
 
       // Auto-open model selector after successful parse
       setShowModelSelector(true);
@@ -299,9 +304,14 @@ export default function App() {
 
     try {
       // Merge translated policies into the config for conversion
-      const configForConversion = srxTranslatedPolicies
+      let configForConversion = srxTranslatedPolicies
         ? { ...intermediateConfig, security_policies: srxTranslatedPolicies }
-        : intermediateConfig;
+        : { ...intermediateConfig };
+
+      // Attach rule groups for group comment output
+      if (ruleGroups && ruleGroups.length > 0) {
+        configForConversion._rule_groups = ruleGroups;
+      }
 
       // Inject site identification metadata for output headers
       if (siteName || siteGroup) {
@@ -1055,6 +1065,33 @@ export default function App() {
     setSelectedRuleKeys(new Set());
   }, [platformView, editTab, activeSlotIndex]);
 
+  /** Auto-group rules using LLM */
+  const handleGroupWithAI = useCallback(async () => {
+    const policies = platformView === 'srx' && srxTranslatedPolicies
+      ? srxTranslatedPolicies
+      : (intermediateConfig?.security_policies || []);
+    if (policies.length === 0) return;
+
+    const llmStatus = getLLMStatus();
+    if (!llmStatus.configured) {
+      setError('LLM provider not configured. Open Settings to configure one.');
+      return;
+    }
+
+    setGroupingInProgress(true);
+    try {
+      const groups = await groupPolicies(policies, (progress) => {
+        console.log('[group]', progress.phase, progress.detail);
+      });
+      setRuleGroups(groups);
+    } catch (err) {
+      console.error('[group] Error:', err);
+      setError(`Grouping failed: ${err.message}`);
+    } finally {
+      setGroupingInProgress(false);
+    }
+  }, [platformView, srxTranslatedPolicies, intermediateConfig]);
+
   /** Translate policies with LLM */
   const handleTranslateWithLLM = useCallback(async () => {
     if (!intermediateConfig?.security_policies?.length) return;
@@ -1157,6 +1194,7 @@ export default function App() {
       warningStatuses, srxTranslatedPolicies, srxOutput, convertWarnings,
       conversionSummary, outputFormat, targetContext, greenfieldMode,
       greenfieldTemplate, editTab, platformView, bottomTab,
+      ruleGroups,
     };
     const payload = buildProjectPayload(stateBag, projectName);
     const jsonStr = JSON.stringify(payload, null, 2);
@@ -1175,6 +1213,7 @@ export default function App() {
     warningStatuses, srxTranslatedPolicies, srxOutput, convertWarnings,
     conversionSummary, outputFormat, targetContext, greenfieldMode,
     greenfieldTemplate, editTab, platformView, bottomTab,
+    ruleGroups,
   ]);
 
   const handleLoadProjectFile = useCallback((e) => {
@@ -1229,6 +1268,7 @@ export default function App() {
     setEditTab(s.editTab ?? 'rules');
     setPlatformView(s.platformView ?? 'panos');
     setBottomTab(s.bottomTab ?? 'output');
+    setRuleGroups(s.ruleGroups ?? []);
 
     // Reset transient state
     setSelectedRule(null);
@@ -1738,6 +1778,10 @@ export default function App() {
                       selectedRuleKeys={selectedRuleKeys}
                       onToggleRuleSelect={handleToggleRuleSelect}
                       onSelectAllRules={handleSelectAllRules}
+                      ruleGroups={ruleGroups}
+                      onUpdateGroups={setRuleGroups}
+                      onGroupWithAI={handleGroupWithAI}
+                      groupingInProgress={groupingInProgress}
                     />
                     <BulkActionBar
                       selectedCount={selectedRuleKeys.size}

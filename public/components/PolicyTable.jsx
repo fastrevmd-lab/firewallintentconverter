@@ -23,6 +23,10 @@ export default function PolicyTable({
   selectedRuleKeys = new Set(),
   onToggleRuleSelect,
   onSelectAllRules,
+  ruleGroups = [],
+  onUpdateGroups,
+  onGroupWithAI,
+  groupingInProgress = false,
 }) {
   const [sortField, setSortField] = useState('_rule_index');
   const [sortDir, setSortDir] = useState('asc');
@@ -30,6 +34,9 @@ export default function PolicyTable({
   const [statusFilter, setStatusFilter] = useState('all');
   const [editingCell, setEditingCell] = useState(null); // { index, field }
   const [editValue, setEditValue] = useState('');
+  const [collapsedGroups, setCollapsedGroups] = useState(new Set());
+  const [editingGroupName, setEditingGroupName] = useState(null);
+  const [newGroupNameValue, setNewGroupNameValue] = useState('');
 
   const isSrx = viewMode === 'srx';
   const isFortigate = viewMode === 'fortigate';
@@ -87,6 +94,72 @@ export default function PolicyTable({
     interview: 'Needs review — manual input required to resolve',
   };
 
+  // --- Grouping helpers ---
+  const hasGroups = ruleGroups && ruleGroups.length > 0;
+
+  const toggleGroup = (groupName) => {
+    setCollapsedGroups(prev => {
+      const next = new Set(prev);
+      if (next.has(groupName)) next.delete(groupName);
+      else next.add(groupName);
+      return next;
+    });
+  };
+
+  const startGroupRename = (groupName) => {
+    setEditingGroupName(groupName);
+    setNewGroupNameValue(groupName);
+  };
+
+  const commitGroupRename = () => {
+    if (!editingGroupName || !onUpdateGroups) return;
+    const newName = newGroupNameValue.trim();
+    if (!newName || newName === editingGroupName) {
+      setEditingGroupName(null);
+      return;
+    }
+    const updated = ruleGroups.map(g =>
+      g.group_name === editingGroupName ? { ...g, group_name: newName } : g
+    );
+    onUpdateGroups(updated);
+    setEditingGroupName(null);
+    // Update collapsed set
+    setCollapsedGroups(prev => {
+      const next = new Set(prev);
+      if (next.has(editingGroupName)) {
+        next.delete(editingGroupName);
+        next.add(newName);
+      }
+      return next;
+    });
+  };
+
+  const dissolveGroup = (groupName) => {
+    if (!onUpdateGroups) return;
+    const target = ruleGroups.find(g => g.group_name === groupName);
+    if (!target) return;
+    // Move all rule indices to "Ungrouped" or remove group
+    const ungrouped = ruleGroups.find(g => g.group_name === 'Ungrouped');
+    let updated;
+    if (ungrouped) {
+      updated = ruleGroups.map(g => {
+        if (g.group_name === 'Ungrouped') return { ...g, rule_indices: [...g.rule_indices, ...target.rule_indices] };
+        return g;
+      }).filter(g => g.group_name !== groupName);
+    } else {
+      updated = [
+        ...ruleGroups.filter(g => g.group_name !== groupName),
+        { group_name: 'Ungrouped', rule_indices: target.rule_indices, reasoning: '' },
+      ];
+    }
+    onUpdateGroups(updated);
+  };
+
+  const clearAllGroups = () => {
+    if (onUpdateGroups) onUpdateGroups([]);
+    setCollapsedGroups(new Set());
+  };
+
   const handleSort = (field) => {
     if (sortField === field) {
       setSortDir(d => d === 'asc' ? 'desc' : 'asc');
@@ -132,6 +205,40 @@ export default function PolicyTable({
 
     return result;
   }, [policies, filter, statusFilter, sortField, sortDir]);
+
+  /** Build display groups: ordered list of { group_name, policies[], reasoning } */
+  const displayGroups = useMemo(() => {
+    if (!hasGroups) return [];
+    // Build index→group map (rule_indices are 0-based)
+    const idxToGroup = {};
+    for (const g of ruleGroups) {
+      for (const idx of g.rule_indices) {
+        idxToGroup[idx] = g.group_name;
+      }
+    }
+    // Tag each display policy with its group
+    const tagged = displayPolicies.map(p => {
+      // Try _rule_index (1-based) → 0-based, then array position fallback
+      const zeroIdx = p._rule_index != null ? p._rule_index - 1 : policies.indexOf(p);
+      return { ...p, _group: idxToGroup[zeroIdx] || 'Ungrouped' };
+    });
+    // Build ordered groups (preserving LLM order)
+    const groups = [];
+    const seen = new Set();
+    for (const g of ruleGroups) {
+      const gPols = tagged.filter(p => p._group === g.group_name);
+      if (gPols.length > 0) {
+        groups.push({ group_name: g.group_name, policies: gPols, reasoning: g.reasoning });
+        seen.add(g.group_name);
+      }
+    }
+    // Any unassigned
+    const ungrouped = tagged.filter(p => p._group === 'Ungrouped');
+    if (ungrouped.length > 0 && !seen.has('Ungrouped')) {
+      groups.push({ group_name: 'Ungrouped', policies: ungrouped, reasoning: '' });
+    }
+    return groups;
+  }, [hasGroups, ruleGroups, displayPolicies, policies]);
 
   // --- Bulk selection helpers ---
   const makeKey = (p) => `${p.name}::${p._rule_index}`;
@@ -1273,6 +1380,72 @@ export default function PolicyTable({
     </table>
   );
 
+  /** Render a group header with collapse/rename/dissolve controls */
+  const renderGroupHeader = (group) => {
+    const isCollapsed = collapsedGroups.has(group.group_name);
+    const isEditing = editingGroupName === group.group_name;
+
+    return (
+      <div
+        key={`gh-${group.group_name}`}
+        className={`policy-group-header ${isCollapsed ? 'collapsed' : ''}`}
+        onClick={() => toggleGroup(group.group_name)}
+      >
+        <span className="policy-group-arrow">{isCollapsed ? '\u25B6' : '\u25BC'}</span>
+        {isEditing ? (
+          <input
+            className="policy-group-name-input"
+            value={newGroupNameValue}
+            onChange={(e) => setNewGroupNameValue(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') commitGroupRename(); if (e.key === 'Escape') setEditingGroupName(null); }}
+            onBlur={commitGroupRename}
+            onClick={(e) => e.stopPropagation()}
+            autoFocus
+          />
+        ) : (
+          <span className="policy-group-name">{group.group_name}</span>
+        )}
+        <span className="policy-group-count">({group.policies.length} {group.policies.length === 1 ? 'rule' : 'rules'})</span>
+        {group.reasoning && (
+          <span className="policy-group-reasoning" title={group.reasoning}>
+            {group.reasoning.length > 60 ? group.reasoning.slice(0, 57) + '...' : group.reasoning}
+          </span>
+        )}
+        <span className="policy-group-actions" onClick={(e) => e.stopPropagation()}>
+          {!isEditing && (
+            <button
+              className="btn-icon"
+              onClick={() => startGroupRename(group.group_name)}
+              title="Rename group"
+              style={{ fontSize: 11, padding: '0 4px' }}
+            >
+              Rename
+            </button>
+          )}
+          <button
+            className="btn-icon"
+            onClick={() => dissolveGroup(group.group_name)}
+            title="Dissolve group (move rules to Ungrouped)"
+            style={{ fontSize: 11, padding: '0 4px' }}
+          >
+            Dissolve
+          </button>
+        </span>
+      </div>
+    );
+  };
+
+  /** Select the appropriate table renderer for the current view */
+  const renderCurrentViewTable = () => {
+    if (isCisco) return renderCiscoTable();
+    if (isCheckpoint) return renderCheckpointTable();
+    if (isSonicwall) return renderSonicwallTable();
+    if (isHuawei) return renderHuaweiTable();
+    if (isFortigate) return renderFortigateTable();
+    if (isSrx) return renderSrxTable();
+    return renderPanosTable();
+  };
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
       {/* Filter bar */}
@@ -1299,14 +1472,89 @@ export default function PolicyTable({
         <span style={{ fontSize: '11px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
           {displayPolicies.length} of {policies.length}
         </span>
+        {/* Group controls */}
+        {onGroupWithAI && (
+          <button
+            className="btn btn-secondary btn-sm"
+            onClick={onGroupWithAI}
+            disabled={groupingInProgress || policies.length === 0}
+            title="Use AI to organize rules into logical groups"
+            style={{ background: hasGroups ? 'var(--accent)' : undefined, color: hasGroups ? '#fff' : undefined }}
+          >
+            {groupingInProgress ? 'Grouping...' : hasGroups ? `Grouped (${displayGroups.length})` : 'Auto-Group'}
+          </button>
+        )}
+        {hasGroups && (
+          <button
+            className="btn btn-secondary btn-sm"
+            onClick={clearAllGroups}
+            title="Remove all groups"
+            style={{ fontSize: 11 }}
+          >
+            Clear Groups
+          </button>
+        )}
         <button className="btn btn-secondary btn-sm" onClick={onAddRule}>
           {isCisco ? '+ Add ACE' : (isSrx || isFortigate || isSonicwall || isHuawei) ? '+ Add Policy' : '+ Add Rule'}
         </button>
       </div>
 
-      {/* Table */}
+      {/* Table — grouped or flat */}
       <div className="policy-table-container">
-        {isCisco ? renderCiscoTable() : isCheckpoint ? renderCheckpointTable() : isSonicwall ? renderSonicwallTable() : isHuawei ? renderHuaweiTable() : isFortigate ? renderFortigateTable() : isSrx ? renderSrxTable() : renderPanosTable()}
+        {hasGroups && displayGroups.length > 0 ? (
+          /* Grouped rendering: collapsible sections */
+          displayGroups.map((group) => (
+            <div key={group.group_name} className="policy-group-section">
+              {renderGroupHeader(group)}
+              {!collapsedGroups.has(group.group_name) && (
+                <GroupedTableSlice
+                  policies={policies}
+                  displayPolicies={group.policies}
+                  viewMode={viewMode}
+                  platformView={platformView}
+                  isSrx={isSrx}
+                  isFortigate={isFortigate}
+                  isCisco={isCisco}
+                  isCheckpoint={isCheckpoint}
+                  isSonicwall={isSonicwall}
+                  isHuawei={isHuawei}
+                  hasIdentityPolicies={hasIdentityPolicies}
+                  selectedRule={selectedRule}
+                  selectedRuleKeys={selectedRuleKeys}
+                  onSelectRule={onSelectRule}
+                  onToggleRuleSelect={onToggleRuleSelect}
+                  onUpdateRule={onUpdateRule}
+                  onDeleteRule={onDeleteRule}
+                  warningsByRule={warningsByRule}
+                  getRuleStatus={getRuleStatus}
+                  getWarningStatus={getWarningStatus}
+                  statusLabels={statusLabels}
+                  warningTooltips={warningTooltips}
+                  renderCellValues={renderCellValues}
+                  renderEditableCell={renderEditableCell}
+                  renderProfileCell={renderProfileCell}
+                  renderSrxSourceDest={renderSrxSourceDest}
+                  renderSrxAction={renderSrxAction}
+                  renderSrxApps={renderSrxApps}
+                  renderSrxSubscriptions={renderSrxSubscriptions}
+                  renderFortigateAction={renderFortigateAction}
+                  renderFortigateProfiles={renderFortigateProfiles}
+                  renderFortigateNat={renderFortigateNat}
+                  renderFortigateStatus={renderFortigateStatus}
+                  handleSort={handleSort}
+                  sortIndicator={sortIndicator}
+                  makeKey={makeKey}
+                  handleRowClick={handleRowClick}
+                  getRealIndex={getRealIndex}
+                  renderRowCheckbox={renderRowCheckbox}
+                />
+              )}
+            </div>
+          ))
+        ) : (
+          /* Flat rendering (no groups) */
+          renderCurrentViewTable()
+        )}
 
         {displayPolicies.length === 0 && (
           <div className="empty-state">
@@ -1315,5 +1563,116 @@ export default function PolicyTable({
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * GroupedTableSlice — renders a subset of policies using the appropriate vendor view.
+ * Avoids duplicating render logic by rendering a minimal table for each group's policies.
+ */
+function GroupedTableSlice({
+  policies,
+  displayPolicies,
+  isSrx, isFortigate, isCisco, isCheckpoint, isSonicwall, isHuawei,
+  hasIdentityPolicies,
+  selectedRule, selectedRuleKeys,
+  onSelectRule, onToggleRuleSelect, onUpdateRule, onDeleteRule,
+  warningsByRule,
+  getRuleStatus, getWarningStatus, statusLabels, warningTooltips,
+  renderCellValues, renderEditableCell, renderProfileCell,
+  renderSrxSourceDest, renderSrxAction, renderSrxApps, renderSrxSubscriptions,
+  renderFortigateAction, renderFortigateProfiles, renderFortigateNat, renderFortigateStatus,
+  handleSort, sortIndicator, makeKey, handleRowClick, getRealIndex, renderRowCheckbox,
+}) {
+  // Render a simple table body with the group's policies, using the appropriate view
+  const renderRow = (policy) => {
+    const status = getRuleStatus(policy);
+    const warnStatus = getWarningStatus(policy);
+    const isSelected = selectedRule?.name === policy.name && selectedRule?._rule_index === policy._rule_index;
+    const realIndex = getRealIndex(policy);
+    const rowClass = `${isSelected ? 'selected' : ''} ${selectedRuleKeys.has(makeKey(policy)) ? 'bulk-selected' : ''} ${policy.disabled ? 'disabled-rule' : ''} ${policy._implicit ? 'implicit-rule' : ''}`;
+
+    if (isSrx) {
+      return (
+        <tr
+          key={`${policy.name}-${policy._rule_index}`}
+          className={rowClass}
+          onClick={(e) => handleRowClick(policy, isSelected, e)}
+          style={{ cursor: 'pointer' }}
+        >
+          {renderRowCheckbox(policy)}
+          <td><div className="srx-seq">{policy._rule_index}</div></td>
+          <td>
+            <div>
+              {policy._implicit && <span className="cell-chip implicit-chip">Implicit</span>}
+              {renderEditableCell(policy, 'name', <span style={{ fontWeight: 500 }}>{policy.name}</span>)}
+            </div>
+            <div style={{ marginTop: 4 }}>
+              <span className={`status-label status-${status}`}>{statusLabels[status]}</span>
+              {warnStatus !== 'clean' && <span className={`status-dot ${warnStatus}`} data-tooltip={warningTooltips[warnStatus]} style={{ marginLeft: 4 }} />}
+            </div>
+          </td>
+          <td>{renderSrxSourceDest(policy, 'src')}</td>
+          <td>{renderSrxSourceDest(policy, 'dst')}</td>
+          <td>{renderSrxApps(policy)}</td>
+          {hasIdentityPolicies && <td>{renderCellValues(policy.source_users || [])}</td>}
+          <td>{renderSrxAction(policy)}</td>
+          <td>{renderSrxSubscriptions(policy)}</td>
+          <td style={{ textAlign: 'center' }}>
+            <button className="btn-icon btn-icon-danger" onClick={(e) => { e.stopPropagation(); onDeleteRule(realIndex); }} title="Delete policy">x</button>
+          </td>
+        </tr>
+      );
+    }
+
+    // Default / PAN-OS row for all other views in grouped mode
+    return (
+      <tr
+        key={`${policy.name}-${policy._rule_index}`}
+        className={rowClass}
+        onClick={(e) => handleRowClick(policy, isSelected, e)}
+        style={{ cursor: 'pointer' }}
+      >
+        {renderRowCheckbox(policy)}
+        <td>{policy._rule_index}</td>
+        <td>
+          {policy._implicit && <span className="cell-chip implicit-chip">Implicit</span>}
+          {renderEditableCell(policy, 'name', policy.name)}
+        </td>
+        {hasIdentityPolicies && <td>{renderCellValues(policy.source_users || [])}</td>}
+        <td>{renderEditableCell(policy, 'src_zones', renderCellValues(policy.src_zones))}</td>
+        <td>{renderEditableCell(policy, 'dst_zones', renderCellValues(policy.dst_zones))}</td>
+        <td>{renderEditableCell(policy, 'src_addresses', renderCellValues(policy.src_addresses))}</td>
+        <td>{renderEditableCell(policy, 'dst_addresses', renderCellValues(policy.dst_addresses))}</td>
+        <td>{renderEditableCell(policy, 'applications', renderCellValues(policy.applications))}</td>
+        <td>{renderEditableCell(policy, 'services', renderCellValues(policy.services))}</td>
+        <td>
+          <span className={`action-label action-${policy.action}`}>{policy.action}</span>
+        </td>
+        <td>{renderProfileCell(policy)}</td>
+        <td style={{ textAlign: 'center' }}>
+          <button className="btn-icon btn-icon-danger" onClick={(e) => { e.stopPropagation(); onDeleteRule(realIndex); }} title="Delete">x</button>
+        </td>
+      </tr>
+    );
+  };
+
+  if (isSrx) {
+    const srxColCount = (hasIdentityPolicies ? 9 : 8) + 1;
+    return (
+      <table className="policy-table srx-table" style={{ marginBottom: 0 }}>
+        <tbody>
+          {displayPolicies.map(renderRow)}
+        </tbody>
+      </table>
+    );
+  }
+
+  return (
+    <table className="policy-table" style={{ marginBottom: 0 }}>
+      <tbody>
+        {displayPolicies.map(renderRow)}
+      </tbody>
+    </table>
   );
 }

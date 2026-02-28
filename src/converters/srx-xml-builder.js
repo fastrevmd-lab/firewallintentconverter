@@ -81,7 +81,7 @@ export function buildSrxXml(config, interfaceMappings = {}, targetContext = null
   buildUtmXml(utmProfiles, lines);
 
   // Policies
-  buildPoliciesXml(config.security_policies, lines, warnings, { utmPolicyMap, idpPolicyMap, secIntelEnabled }, config.application_groups, sourceVendor);
+  buildPoliciesXml(config.security_policies, lines, warnings, { utmPolicyMap, idpPolicyMap, secIntelEnabled }, config.application_groups, sourceVendor, config._rule_groups);
 
   // NAT
   buildNatXml(config.nat_rules, lines, warnings);
@@ -295,10 +295,20 @@ function buildUserIdentificationXml(policies, lines) {
 // Security Policies XML Builder
 // ---------------------------------------------------------------------------
 
-function buildPoliciesXml(policies, lines, warnings, profileMaps = {}, appGroups = [], sourceVendor = '') {
+function buildPoliciesXml(policies, lines, warnings, profileMaps = {}, appGroups = [], sourceVendor = '', ruleGroups = []) {
   if (!policies || policies.length === 0) return;
 
   const { utmPolicyMap = {}, idpPolicyMap = {}, secIntelEnabled = false } = profileMaps;
+
+  // Build rule-index→group map for group comment insertion
+  const groupByIndex = {};
+  if (ruleGroups && ruleGroups.length > 0) {
+    for (const g of ruleGroups) {
+      for (const idx of (g.rule_indices || [])) {
+        groupByIndex[idx] = g.group_name;
+      }
+    }
+  }
 
   // Group policies by zone pair
   const zonePairs = {};
@@ -322,7 +332,15 @@ function buildPoliciesXml(policies, lines, warnings, profileMaps = {}, appGroups
     lines.push(`        <from-zone-name>${escapeXml(sanitizeJunosName(pair.from))}</from-zone-name>`);
     lines.push(`        <to-zone-name>${escapeXml(sanitizeJunosName(pair.to))}</to-zone-name>`);
 
+    let currentGroup = null;
     for (const policy of pair.policies) {
+      // Emit XML comment for group boundaries
+      const pIdx = policies.indexOf(policy);
+      const ruleGroup = groupByIndex[pIdx] || policy._group || null;
+      if (ruleGroup && ruleGroup !== currentGroup) {
+        lines.push(`        <!-- ===== Group: ${escapeXml(ruleGroup)} ===== -->`);
+        currentGroup = ruleGroup;
+      }
       const name = sanitizeJunosName(policy.name);
 
       // Clean EDL addresses from match criteria

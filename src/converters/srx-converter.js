@@ -89,7 +89,7 @@ export function convertToSrxSetCommands(config, interfaceMappings = {}, targetCo
   commands.push(...secIntelCommands);
 
   convertSchedules(config.schedules, commands, warnings);
-  convertSecurityPolicies(config.security_policies, commands, warnings, summary, { utmPolicyMap, idpPolicyMap, secIntelEnabled }, config.application_groups, sourceVendor);
+  convertSecurityPolicies(config.security_policies, commands, warnings, summary, { utmPolicyMap, idpPolicyMap, secIntelEnabled }, config.application_groups, sourceVendor, config._rule_groups);
   convertNatRules(config.nat_rules, commands, warnings, summary);
   convertStaticRoutes(config.static_routes, commands, warnings, summary);
   convertBgpConfig(config.bgp_config, commands, warnings, summary);
@@ -975,7 +975,7 @@ function convertUserIdentification(policies, commands, warnings) {
 // Security Policy Converter
 // ---------------------------------------------------------------------------
 
-function convertSecurityPolicies(policies, commands, warnings, summary, profileMaps = {}, appGroups = [], sourceVendor = '') {
+function convertSecurityPolicies(policies, commands, warnings, summary, profileMaps = {}, appGroups = [], sourceVendor = '', ruleGroups = []) {
   if (!policies || policies.length === 0) return;
 
   const { utmPolicyMap = {}, idpPolicyMap = {}, secIntelEnabled = false } = profileMaps;
@@ -984,11 +984,31 @@ function convertSecurityPolicies(policies, commands, warnings, summary, profileM
   commands.push('# Security Policies');
   commands.push('# =============================================');
 
+  // Build rule-index→group map for group comment insertion
+  const groupByIndex = {};
+  if (ruleGroups && ruleGroups.length > 0) {
+    for (const g of ruleGroups) {
+      for (const idx of (g.rule_indices || [])) {
+        groupByIndex[idx] = g.group_name;
+      }
+    }
+  }
+  let currentGroup = null;
+
   // Collect deactivate commands for disabled rules (applied at the end)
   const deactivateCommands = [];
 
-  for (const policy of policies) {
+  for (let pIdx = 0; pIdx < policies.length; pIdx++) {
+    const policy = policies[pIdx];
     const policyName = sanitizeJunosName(policy.name);
+
+    // Emit group comment when entering a new group (JUNOS preserves /* */ comments)
+    const ruleGroup = groupByIndex[pIdx] || policy._group || null;
+    if (ruleGroup && ruleGroup !== currentGroup) {
+      commands.push('');
+      commands.push(`/* ===== Group: ${ruleGroup} ===== */`);
+      currentGroup = ruleGroup;
+    }
 
     if (policy._implicit) {
       commands.push(`# --- Implicit Rule: ${policy.name} ---`);

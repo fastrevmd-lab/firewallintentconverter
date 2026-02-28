@@ -72,6 +72,9 @@ function parseFlatSrx(tree, setCommands, warnings) {
   const { staticRoutes, routingContexts } = parseSrxStaticRoutes(tree, warnings);
   const bgpConfig = parseSrxBgpConfig(tree, warnings);
   const ospfConfig = parseSrxOspfConfig(tree, warnings);
+  const ospf3Config = parseSrxOspf3Config(tree, warnings);
+  const evpnConfig = parseSrxEvpnConfig(tree, warnings);
+  const vxlanConfig = parseSrxVxlanConfig(tree, warnings);
   const haConfig = parseSrxHaConfig(tree, warnings);
   const screenConfig = parseSrxScreenConfig(tree, zones, warnings);
 
@@ -141,6 +144,9 @@ function parseFlatSrx(tree, setCommands, warnings) {
     static_routes: staticRoutes,
     bgp_config: bgpConfig,
     ospf_config: ospfConfig,
+    ospf3_config: ospf3Config,
+    evpn_config: evpnConfig,
+    vxlan_config: vxlanConfig,
     target_context: null,
     transparent_mode: bridgeDomains.length > 0,
     bridge_domains: bridgeDomains,
@@ -163,6 +169,9 @@ function parseFlatSrx(tree, setCommands, warnings) {
       static_route_count: staticRoutes.length,
       bgp_instance_count: bgpConfig.length,
       ospf_instance_count: ospfConfig.length,
+      ospf3_instance_count: ospf3Config.length,
+      evpn_instance_count: evpnConfig.length,
+      vxlan_tunnel_count: vxlanConfig.length,
       ha_enabled: !!(haConfig && haConfig.enabled),
       multi_vsys: false,
     },
@@ -193,6 +202,9 @@ function parseMultiContextSrx(tree, setCommands, lsNode, lsNames, tenantNode, te
   const allStaticRoutes = [];
   const allBgpConfig = [];
   const allOspfConfig = [];
+  const allOspf3Config = [];
+  const allEvpnConfig = [];
+  const allVxlanConfig = [];
   const allVpnTunnels = [];
   const allScreenConfig = [];
   const allSyslogConfig = [];
@@ -241,6 +253,9 @@ function parseMultiContextSrx(tree, setCommands, lsNode, lsNames, tenantNode, te
     allStaticRoutes.push(...parsed.staticRoutes);
     allBgpConfig.push(...parsed.bgpConfig);
     allOspfConfig.push(...parsed.ospfConfig);
+    allOspf3Config.push(...parsed.ospf3Config);
+    allEvpnConfig.push(...parsed.evpnConfig);
+    allVxlanConfig.push(...parsed.vxlanConfig);
     allVpnTunnels.push(...parsed.vpnTunnels);
     allScreenConfig.push(...parsed.screenConfig);
     allSyslogConfig.push(...parsed.syslogConfig);
@@ -284,6 +299,9 @@ function parseMultiContextSrx(tree, setCommands, lsNode, lsNames, tenantNode, te
     allStaticRoutes.push(...parsed.staticRoutes);
     allBgpConfig.push(...parsed.bgpConfig);
     allOspfConfig.push(...parsed.ospfConfig);
+    allOspf3Config.push(...parsed.ospf3Config);
+    allEvpnConfig.push(...parsed.evpnConfig);
+    allVxlanConfig.push(...parsed.vxlanConfig);
     allVpnTunnels.push(...parsed.vpnTunnels);
     allScreenConfig.push(...parsed.screenConfig);
     allSyslogConfig.push(...parsed.syslogConfig);
@@ -360,6 +378,9 @@ function parseMultiContextSrx(tree, setCommands, lsNode, lsNames, tenantNode, te
     static_routes: allStaticRoutes,
     bgp_config: allBgpConfig,
     ospf_config: allOspfConfig,
+    ospf3_config: allOspf3Config,
+    evpn_config: allEvpnConfig,
+    vxlan_config: allVxlanConfig,
     target_context: null,
     transparent_mode: allBridgeDomains.length > 0,
     bridge_domains: allBridgeDomains,
@@ -382,6 +403,9 @@ function parseMultiContextSrx(tree, setCommands, lsNode, lsNames, tenantNode, te
       static_route_count: allStaticRoutes.length,
       bgp_instance_count: allBgpConfig.length,
       ospf_instance_count: allOspfConfig.length,
+      ospf3_instance_count: allOspf3Config.length,
+      evpn_instance_count: allEvpnConfig.length,
+      vxlan_tunnel_count: allVxlanConfig.length,
       ha_enabled: !!(haConfig && haConfig.enabled),
       multi_vsys: true,
     },
@@ -410,6 +434,9 @@ function parseContextSubTree(subTree, setCommands, ctxLabel, ctxName, warnings) 
   const { staticRoutes } = parseSrxStaticRoutes(subTree, warnings);
   const bgpConfig = parseSrxBgpConfig(subTree, warnings);
   const ospfConfig = parseSrxOspfConfig(subTree, warnings);
+  const ospf3Config = parseSrxOspf3Config(subTree, warnings);
+  const evpnConfig = parseSrxEvpnConfig(subTree, warnings);
+  const vxlanConfig = parseSrxVxlanConfig(subTree, warnings);
   const vpnTunnels = parseSrxVpnConfig(subTree, warnings);
   const screenConfig = parseSrxScreenConfig(subTree, zones, warnings);
   const syslogConfig = parseSrxSyslogConfig(subTree, warnings);
@@ -422,7 +449,7 @@ function parseContextSubTree(subTree, setCommands, ctxLabel, ctxName, warnings) 
   return {
     zones, addressObjects, addressGroups, serviceObjects, serviceGroups,
     policies, natRules, applications, schedules, staticRoutes,
-    bgpConfig, ospfConfig,
+    bgpConfig, ospfConfig, ospf3Config, evpnConfig, vxlanConfig,
     vpnTunnels, screenConfig, syslogConfig, dhcpConfig, qosConfig,
     interfaces, bridgeDomains, l2Interfaces,
   };
@@ -1669,6 +1696,288 @@ function parseOspfAuth(ifData) {
     return { type: 'simple', key: extractStringValue(authNode['simple-password']) };
   }
   return null;
+}
+
+// ---------------------------------------------------------------------------
+// OSPFv3 (IPv6 OSPF) Configuration
+// ---------------------------------------------------------------------------
+
+/**
+ * Parses OSPFv3 configuration from the SRX config tree.
+ * SRX uses `set protocols ospf3` as a separate stanza from `set protocols ospf`.
+ */
+function parseSrxOspf3Config(tree, warnings) {
+  const ospf3Configs = [];
+
+  // Global OSPFv3
+  const globalOspf3 = parseOspf3FromSubTree(tree, '', warnings);
+  if (globalOspf3) ospf3Configs.push(globalOspf3);
+
+  // Per-routing-instance OSPFv3
+  const instances = tree?.['routing-instances'];
+  if (instances && typeof instances === 'object') {
+    for (const [instName, instData] of Object.entries(instances)) {
+      if (instName.startsWith('_') || typeof instData !== 'object') continue;
+      const instOspf3 = parseOspf3FromSubTree(instData, instName, warnings);
+      if (instOspf3) ospf3Configs.push(instOspf3);
+    }
+  }
+
+  return ospf3Configs;
+}
+
+function parseOspf3FromSubTree(tree, instance, warnings) {
+  const ospf3Node = tree?.protocols?.ospf3;
+  if (!ospf3Node || typeof ospf3Node !== 'object') return null;
+
+  const routingOpts = tree?.['routing-options'];
+  const routerId = routingOpts?.['router-id']
+    ? extractStringValue(routingOpts['router-id'])
+    : '';
+
+  const refBw = ospf3Node['reference-bandwidth']
+    ? extractStringValue(ospf3Node['reference-bandwidth'])
+    : null;
+
+  // Parse areas
+  const areas = [];
+  const areaNode = ospf3Node.area;
+  if (areaNode && typeof areaNode === 'object') {
+    for (const [areaId, areaData] of Object.entries(areaNode)) {
+      if (areaId.startsWith('_') || typeof areaData !== 'object') continue;
+      areas.push(parseOspf3Area(areaId, areaData));
+    }
+  }
+
+  // Parse redistribution from export policies
+  const redistribute = [];
+  const exportPolicy = ospf3Node.export;
+  if (exportPolicy) {
+    const policyOpts = tree?.['policy-options']?.['policy-statement'];
+    const exportList = typeof exportPolicy === 'string' ? [exportPolicy] :
+      (Array.isArray(exportPolicy) ? exportPolicy : Object.keys(exportPolicy).filter(k => !k.startsWith('_')));
+    for (const policyName of exportList) {
+      if (policyOpts?.[policyName]) {
+        const stmt = policyOpts[policyName];
+        const terms = stmt?.term;
+        if (terms && typeof terms === 'object') {
+          for (const [tName, tData] of Object.entries(terms)) {
+            if (tName.startsWith('_') || typeof tData !== 'object') continue;
+            const proto = tData?.from?.protocol;
+            if (proto) {
+              const protoName = extractStringValue(proto);
+              if (protoName && !redistribute.find(r => r.protocol === protoName)) {
+                const metricType = tData?.then?.['external']?.type
+                  ? extractStringValue(tData.then.external.type) : null;
+                redistribute.push({ protocol: protoName, policy: policyName, metric_type: metricType });
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  if (areas.length === 0) return null;
+
+  return {
+    instance,
+    router_id: routerId,
+    reference_bandwidth: refBw,
+    areas,
+    redistribute,
+  };
+}
+
+function parseOspf3Area(areaId, areaData) {
+  let areaType = 'normal';
+  if (areaData.stub !== undefined) {
+    areaType = areaData.stub?.['no-summaries'] !== undefined ? 'totally-stub' : 'stub';
+  } else if (areaData.nssa !== undefined) {
+    areaType = areaData.nssa?.['no-summaries'] !== undefined ? 'totally-nssa' : 'nssa';
+  }
+
+  const interfaces = [];
+  const ifaceNode = areaData.interface;
+  if (ifaceNode && typeof ifaceNode === 'object') {
+    for (const [ifName, ifData] of Object.entries(ifaceNode)) {
+      if (ifName.startsWith('_')) continue;
+      const ifObj = typeof ifData === 'object' ? ifData : {};
+      interfaces.push({
+        name: ifName,
+        cost: ifObj.metric ? parseInt(extractStringValue(ifObj.metric)) || null : null,
+        hello_interval: ifObj['hello-interval'] ? parseInt(extractStringValue(ifObj['hello-interval'])) || null : null,
+        dead_interval: ifObj['dead-interval'] ? parseInt(extractStringValue(ifObj['dead-interval'])) || null : null,
+        passive: ifObj.passive !== undefined,
+        network_type: ifObj['interface-type'] ? extractStringValue(ifObj['interface-type']) : null,
+        instance_id: ifObj['instance-id'] ? parseInt(extractStringValue(ifObj['instance-id'])) || null : null,
+      });
+    }
+  }
+
+  return { area_id: areaId, area_type: areaType, interfaces, networks: [] };
+}
+
+// ---------------------------------------------------------------------------
+// EVPN Configuration
+// ---------------------------------------------------------------------------
+
+/**
+ * Parses EVPN configuration from the SRX config tree.
+ * Reads: protocols > evpn, switch-options, vlans, routing-instances (mac-vrf).
+ */
+function parseSrxEvpnConfig(tree, warnings) {
+  const evpnConfigs = [];
+
+  // Global EVPN
+  const globalEvpn = parseEvpnFromSubTree(tree, '', warnings);
+  if (globalEvpn) evpnConfigs.push(globalEvpn);
+
+  // Per-routing-instance EVPN (mac-vrf)
+  const instances = tree?.['routing-instances'];
+  if (instances && typeof instances === 'object') {
+    for (const [instName, instData] of Object.entries(instances)) {
+      if (instName.startsWith('_') || typeof instData !== 'object') continue;
+      const instEvpn = parseEvpnFromSubTree(instData, instName, warnings);
+      if (instEvpn) evpnConfigs.push(instEvpn);
+    }
+  }
+
+  return evpnConfigs;
+}
+
+function parseEvpnFromSubTree(tree, instance, warnings) {
+  const evpnNode = tree?.protocols?.evpn;
+  const switchOpts = tree?.['switch-options'];
+  const vlansNode = tree?.vlans;
+
+  // Need at least evpn protocol or switch-options with vtep
+  if (!evpnNode && !switchOpts) return null;
+  if (!evpnNode) return null;
+
+  const encap = evpnNode.encapsulation
+    ? extractStringValue(evpnNode.encapsulation) : 'vxlan';
+  const mcastMode = evpnNode['multicast-mode']
+    ? extractStringValue(evpnNode['multicast-mode']) : null;
+
+  // Extended VNI list
+  const extVniList = [];
+  const extVniNode = evpnNode['extended-vni-list'];
+  if (extVniNode) {
+    const vniStr = extractStringValue(extVniNode);
+    if (vniStr) {
+      // Can be space-separated or single value
+      vniStr.split(/\s+/).forEach(v => {
+        const n = parseInt(v);
+        if (n) extVniList.push(n);
+      });
+    }
+  }
+
+  // Instance type from routing-instance
+  const instType = tree?.['instance-type']
+    ? extractStringValue(tree['instance-type']) : '';
+
+  // Switch-options: route-distinguisher, vrf-target, vtep-source-interface
+  const rd = switchOpts?.['route-distinguisher']
+    ? extractStringValue(switchOpts['route-distinguisher']) : '';
+  const vrfTarget = switchOpts?.['vrf-target']
+    ? extractStringValue(switchOpts['vrf-target']) : null;
+
+  // Parse route-targets from vrf-target or explicit vrf-import/vrf-export
+  const routeTargets = [];
+  if (vrfTarget) {
+    routeTargets.push({ target: vrfTarget, direction: 'both' });
+  }
+
+  // Parse VLANs with VxLAN VNI mappings
+  const vlans = [];
+  if (vlansNode && typeof vlansNode === 'object') {
+    for (const [vlanName, vlanData] of Object.entries(vlansNode)) {
+      if (vlanName.startsWith('_') || typeof vlanData !== 'object') continue;
+      const vxlanNode = vlanData.vxlan;
+      if (!vxlanNode) continue;
+      const vlanId = vlanData['vlan-id'] ? parseInt(extractStringValue(vlanData['vlan-id'])) || 0 : 0;
+      const vni = vxlanNode.vni ? parseInt(extractStringValue(vxlanNode.vni)) || 0 : 0;
+      if (vni) {
+        vlans.push({
+          name: vlanName,
+          vlan_id: vlanId,
+          vni,
+          ingress_node_replication: vxlanNode['ingress-node-replication'] !== undefined,
+        });
+      }
+    }
+  }
+
+  if (vlans.length === 0 && extVniList.length === 0) return null;
+
+  return {
+    instance,
+    instance_type: instType || 'mac-vrf',
+    encapsulation: encap,
+    multicast_mode: mcastMode,
+    extended_vni_list: extVniList,
+    route_distinguisher: rd,
+    route_targets: routeTargets,
+    vrf_target: vrfTarget,
+    vlans,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// VxLAN Configuration
+// ---------------------------------------------------------------------------
+
+/**
+ * Parses standalone VxLAN tunnel configuration from the SRX config tree.
+ * Reads: switch-options > vtep-source-interface, interfaces > vtep.
+ */
+function parseSrxVxlanConfig(tree, warnings) {
+  const vxlanConfigs = [];
+
+  const switchOpts = tree?.['switch-options'];
+  const vtepSource = switchOpts?.['vtep-source-interface']
+    ? extractStringValue(switchOpts['vtep-source-interface']) : '';
+
+  // Check for VTEP interface config
+  const vtepIf = tree?.interfaces?.vtep;
+  if (!vtepIf && !vtepSource) return vxlanConfigs;
+
+  // Collect VNIs from vlans that have vxlan config
+  const vnis = [];
+  const vlansNode = tree?.vlans;
+  if (vlansNode && typeof vlansNode === 'object') {
+    for (const [vlanName, vlanData] of Object.entries(vlansNode)) {
+      if (vlanName.startsWith('_') || typeof vlanData !== 'object') continue;
+      const vxlanNode = vlanData.vxlan;
+      if (!vxlanNode) continue;
+      const vni = vxlanNode.vni ? parseInt(extractStringValue(vxlanNode.vni)) || 0 : 0;
+      const vlanId = vlanData['vlan-id'] ? parseInt(extractStringValue(vlanData['vlan-id'])) || 0 : 0;
+      if (vni) {
+        vnis.push({
+          vni,
+          vlan_id: vlanId || null,
+          mcast_group: null,
+          ingress_replication: vxlanNode['ingress-node-replication'] !== undefined,
+          remote_vteps: [],
+        });
+      }
+    }
+  }
+
+  if (vtepSource || vnis.length > 0) {
+    vxlanConfigs.push({
+      name: 'vtep',
+      instance: '',
+      vtep_source_interface: vtepSource,
+      vnis,
+      udp_port: 4789,
+      source_interface: vtepSource,
+    });
+  }
+
+  return vxlanConfigs;
 }
 
 // ---------------------------------------------------------------------------

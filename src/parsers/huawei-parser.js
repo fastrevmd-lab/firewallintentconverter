@@ -1172,6 +1172,68 @@ function huaweiWildcardToCidr(wildcard) {
 }
 
 // ---------------------------------------------------------------------------
+// OSPFv3 (IPv6 OSPF) Configuration
+// ---------------------------------------------------------------------------
+
+function parseHuaweiOspf3Config(sections, warnings) {
+  const ospf3Configs = [];
+
+  for (const sec of sections) {
+    const match = sec.header.match(/^ospfv3\s+(\d+)/i);
+    if (!match) continue;
+
+    const processId = parseInt(match[1]) || 0;
+    const headerRidMatch = sec.header.match(/router-id\s+(\S+)/i);
+    let routerId = headerRidMatch ? headerRidMatch[1] : '';
+    const areaMap = {};
+    const redistribute = [];
+    let currentArea = null;
+
+    for (const line of sec.lines) {
+      const trimmed = line.trim();
+
+      if (trimmed.startsWith('router-id ')) {
+        routerId = trimmed.slice(10).trim();
+      } else if (/^area\s+(\S+)/.test(trimmed)) {
+        const areaMatch = trimmed.match(/^area\s+(\S+)/);
+        currentArea = areaMatch[1];
+        if (!areaMap[currentArea]) {
+          areaMap[currentArea] = { area_id: currentArea, area_type: 'normal', interfaces: [], networks: [] };
+        }
+        if (/\bstub\b/.test(trimmed)) {
+          areaMap[currentArea].area_type = /\bno-summary\b/.test(trimmed) ? 'totally-stub' : 'stub';
+        } else if (/\bnssa\b/.test(trimmed)) {
+          areaMap[currentArea].area_type = /\bno-summary\b/.test(trimmed) ? 'totally-nssa' : 'nssa';
+        }
+      } else if (trimmed === 'stub' && currentArea) {
+        areaMap[currentArea].area_type = 'stub';
+      } else if (trimmed === 'stub no-summary' && currentArea) {
+        areaMap[currentArea].area_type = 'totally-stub';
+      } else if (trimmed === 'nssa' && currentArea) {
+        areaMap[currentArea].area_type = 'nssa';
+      } else if (trimmed === 'nssa no-summary' && currentArea) {
+        areaMap[currentArea].area_type = 'totally-nssa';
+      } else if (trimmed.startsWith('import-route ')) {
+        const tokens = trimmed.split(/\s+/);
+        redistribute.push({ protocol: tokens[1], policy: '', metric_type: null });
+      }
+    }
+
+    if (Object.keys(areaMap).length > 0) {
+      ospf3Configs.push({
+        instance: '',
+        router_id: routerId,
+        reference_bandwidth: null,
+        areas: Object.values(areaMap),
+        redistribute,
+      });
+    }
+  }
+
+  return ospf3Configs;
+}
+
+// ---------------------------------------------------------------------------
 // Time-Range / Schedule Parser
 // ---------------------------------------------------------------------------
 
@@ -1523,6 +1585,7 @@ export function parseHuaweiConfig(configText) {
   const staticRoutes = parseStaticRoutes(allLines, warnings);
   const bgpConfig = parseHuaweiBgpConfig(sections, warnings);
   const ospfConfig = parseHuaweiOspfConfig(sections, warnings);
+  const ospf3Config = parseHuaweiOspf3Config(sections, warnings);
   const schedules = parseTimeRanges(sections, warnings);
   const securityProfiles = parseSecurityProfiles(sections, warnings);
   const vpnTunnels = parseVpnConfig(sections, warnings);
@@ -1591,6 +1654,9 @@ export function parseHuaweiConfig(configText) {
     static_routes: staticRoutes,
     bgp_config: bgpConfig,
     ospf_config: ospfConfig,
+    ospf3_config: ospf3Config,
+    evpn_config: [],
+    vxlan_config: [],
     target_context: null,
     transparent_mode: false,
     bridge_domains: [],
@@ -1618,6 +1684,9 @@ export function parseHuaweiConfig(configText) {
       static_route_count: staticRoutes.length,
       bgp_instance_count: bgpConfig.length,
       ospf_instance_count: ospfConfig.length,
+      ospf3_instance_count: ospf3Config.length,
+      evpn_instance_count: 0,
+      vxlan_tunnel_count: 0,
       ha_enabled: !!(haConfig && haConfig.enabled),
       multi_vsys: false,
     },

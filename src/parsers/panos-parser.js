@@ -115,6 +115,7 @@ export function parsePanosConfig(configText) {
   const allPbfRules = [];
   const allBgpConfig = [];
   const allOspfConfig = [];
+  const allOspf3Config = [];
   const routingContexts = [];
 
   // Parse HA configuration (device-level, not per-vsys)
@@ -219,8 +220,10 @@ export function parsePanosConfig(configText) {
     const virtualRouters = vrResult.virtualRouters || vrResult;
     const vrBgpConfigs = vrResult.bgpConfigs || [];
     const vrOspfConfigs = vrResult.ospfConfigs || [];
+    const vrOspf3Configs = vrResult.ospf3Configs || [];
     allBgpConfig.push(...vrBgpConfigs);
     allOspfConfig.push(...vrOspfConfigs);
+    allOspf3Config.push(...vrOspf3Configs);
     routingContexts.push({
       name: vsysName,
       type: 'vsys',
@@ -314,6 +317,9 @@ export function parsePanosConfig(configText) {
     static_routes: staticRoutes,
     bgp_config: allBgpConfig,
     ospf_config: allOspfConfig,
+    ospf3_config: allOspf3Config,
+    evpn_config: [],
+    vxlan_config: [],
     target_context: null,
     metadata: {
       source_vendor: 'panos',
@@ -330,6 +336,9 @@ export function parsePanosConfig(configText) {
       static_route_count: staticRoutes.length,
       bgp_instance_count: allBgpConfig.length,
       ospf_instance_count: allOspfConfig.length,
+      ospf3_instance_count: allOspf3Config.length,
+      evpn_instance_count: 0,
+      vxlan_tunnel_count: 0,
       vpn_tunnel_count: vpnTunnels.length,
       syslog_server_count: syslogConfig.length,
       dhcp_config_count: dhcpConfig.length,
@@ -616,6 +625,7 @@ function parseVirtualRouters(config, warnings) {
 
   const bgpConfigs = [];
   const ospfConfigs = [];
+  const ospf3Configs = [];
 
   const deviceEntries = extractEntries(devices);
   for (const device of deviceEntries) {
@@ -633,13 +643,15 @@ function parseVirtualRouters(config, warnings) {
       if (bgp) bgpConfigs.push(bgp);
       const ospf = parseVrOspfConfig(vr, name);
       if (ospf) ospfConfigs.push(ospf);
+      const ospf3 = parseVrOspf3Config(vr, name);
+      if (ospf3) ospf3Configs.push(ospf3);
 
       return { name, interfaces, static_routes: staticRoutes };
     });
-    return { virtualRouters, bgpConfigs, ospfConfigs };
+    return { virtualRouters, bgpConfigs, ospfConfigs, ospf3Configs };
   }
 
-  return { virtualRouters: [], bgpConfigs: [], ospfConfigs: [] };
+  return { virtualRouters: [], bgpConfigs: [], ospfConfigs: [], ospf3Configs: [] };
 }
 
 function parseVrStaticRoutes(vrEntry) {
@@ -815,6 +827,78 @@ function parseVrOspfConfig(vrEntry, vrName) {
   // Parse redistribution
   const redistribute = [];
   const redistContainer = getNestedValue(ospfNode, 'export-rules');
+  if (redistContainer) {
+    const redistEntries = extractEntries(redistContainer);
+    for (const entry of redistEntries) {
+      const proto = entry['@_name'] || '';
+      if (proto) redistribute.push({ protocol: proto, policy: '', metric_type: null });
+    }
+  }
+
+  return {
+    instance: vrName === 'default' ? '' : vrName,
+    router_id: routerId,
+    reference_bandwidth: null,
+    areas,
+    redistribute,
+  };
+}
+
+/**
+ * Parses OSPFv3 configuration from a PAN-OS virtual-router entry.
+ * Path: virtual-router > entry > protocol > ospfv3
+ */
+function parseVrOspf3Config(vrEntry, vrName) {
+  const ospf3Node = getNestedValue(vrEntry, 'protocol.ospfv3');
+  if (!ospf3Node) return null;
+
+  const enabled = ospf3Node.enable === 'yes' || ospf3Node.enable === true;
+  if (!enabled) return null;
+
+  const routerId = ospf3Node['router-id'] ? String(ospf3Node['router-id']) : '';
+
+  const areas = [];
+  const areaContainer = getNestedValue(ospf3Node, 'area');
+  if (areaContainer) {
+    const areaEntries = extractEntries(areaContainer);
+    for (const area of areaEntries) {
+      const areaId = area['@_name'] || '0.0.0.0';
+
+      let areaType = 'normal';
+      if (area.type) {
+        if (area.type.stub !== undefined) {
+          areaType = area.type.stub?.['no-summary'] !== undefined ? 'totally-stub' : 'stub';
+        } else if (area.type.nssa !== undefined) {
+          areaType = area.type.nssa?.['no-summary'] !== undefined ? 'totally-nssa' : 'nssa';
+        }
+      }
+
+      const interfaces = [];
+      const ifContainer = getNestedValue(area, 'interface');
+      if (ifContainer) {
+        const ifEntries = extractEntries(ifContainer);
+        for (const iface of ifEntries) {
+          const ifName = iface['@_name'] || '';
+          interfaces.push({
+            name: ifName,
+            cost: iface.metric ? parseInt(String(iface.metric)) || null : null,
+            hello_interval: iface['hello-interval'] ? parseInt(String(iface['hello-interval'])) || null : null,
+            dead_interval: iface['dead-counts'] ? parseInt(String(iface['dead-counts'])) || null : null,
+            passive: iface.passive === 'yes' || iface.passive === true,
+            network_type: iface['link-type'] ? String(iface['link-type']) : null,
+            instance_id: iface['instance-id'] ? parseInt(String(iface['instance-id'])) || null : null,
+          });
+        }
+      }
+
+      areas.push({ area_id: areaId, area_type: areaType, interfaces, networks: [] });
+    }
+  }
+
+  if (areas.length === 0) return null;
+
+  const redistribute = [];
+  const redistContainer = getNestedValue(ospf3Node, 'export-rules');
   if (redistContainer) {
     const redistEntries = extractEntries(redistContainer);
     for (const entry of redistEntries) {

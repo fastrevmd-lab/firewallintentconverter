@@ -654,6 +654,9 @@ export default function App() {
       static_routes: [],
       bgp_config: [],
       ospf_config: [],
+      ospf3_config: [],
+      evpn_config: [],
+      vxlan_config: [],
       interfaces: [],
       routing_contexts: [],
       ha_config: { enabled: false },
@@ -1645,7 +1648,7 @@ export default function App() {
                     className={`center-tab-btn ${editTab === 'routing' ? 'active' : ''}`}
                     onClick={() => setEditTab('routing')}
                   >
-                    Intf/Routing ({intermediateConfig.interfaces?.length || 0}/{intermediateConfig.static_routes?.length || 0}{(intermediateConfig.bgp_config?.length > 0 || intermediateConfig.ospf_config?.length > 0) ? '/Dyn' : ''})
+                    Intf/Routing ({intermediateConfig.interfaces?.length || 0}/{intermediateConfig.static_routes?.length || 0}{(intermediateConfig.bgp_config?.length > 0 || intermediateConfig.ospf_config?.length > 0 || intermediateConfig.ospf3_config?.length > 0) ? '/Dyn' : ''}{intermediateConfig.evpn_config?.length > 0 ? '/EVPN' : ''})
                   </button>
                   <button
                     className={`center-tab-btn ${editTab === 'dhcp' ? 'active' : ''}`}
@@ -1865,6 +1868,9 @@ export default function App() {
                     onVwirePairsUpdate={(vwirePairs) => updateConfig(prev => ({ ...prev, vwire_pairs: vwirePairs }))}
                     bgpConfig={(mergeMode ? activeConfig : intermediateConfig)?.bgp_config || []}
                     ospfConfig={(mergeMode ? activeConfig : intermediateConfig)?.ospf_config || []}
+                    ospf3Config={(mergeMode ? activeConfig : intermediateConfig)?.ospf3_config || []}
+                    evpnConfig={(mergeMode ? activeConfig : intermediateConfig)?.evpn_config || []}
+                    vxlanConfig={(mergeMode ? activeConfig : intermediateConfig)?.vxlan_config || []}
                     onBgpConfigUpdate={(bgp) => updateConfig(prev => ({ ...prev, bgp_config: bgp }))}
                     onOspfConfigUpdate={(ospf) => updateConfig(prev => ({ ...prev, ospf_config: ospf }))}
                   />

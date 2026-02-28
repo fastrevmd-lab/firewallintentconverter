@@ -7,11 +7,13 @@
  */
 import React, { useState } from 'react';
 
-export default function RoutingEditor({ routingContexts, staticRoutes, onRoutesUpdate, interfaces, onInterfacesUpdate, bridgeDomains, l2Interfaces, vwirePairs, onBridgeDomainsUpdate, onL2InterfacesUpdate, onVwirePairsUpdate, bgpConfig, ospfConfig, onBgpConfigUpdate, onOspfConfigUpdate }) {
+export default function RoutingEditor({ routingContexts, staticRoutes, onRoutesUpdate, interfaces, onInterfacesUpdate, bridgeDomains, l2Interfaces, vwirePairs, onBridgeDomainsUpdate, onL2InterfacesUpdate, onVwirePairsUpdate, bgpConfig, ospfConfig, ospf3Config, evpnConfig, vxlanConfig, onBgpConfigUpdate, onOspfConfigUpdate }) {
   const [editingIndex, setEditingIndex] = useState(null);
   const [editingIfIndex, setEditingIfIndex] = useState(null);
   const [expandedBgpGroup, setExpandedBgpGroup] = useState(null);
   const [expandedOspfArea, setExpandedOspfArea] = useState(null);
+  const [expandedOspf3Area, setExpandedOspf3Area] = useState(null);
+  const [expandedEvpn, setExpandedEvpn] = useState(null);
 
   /* ---- Static route handlers ---- */
   const handleChange = (index, field, value) => {
@@ -553,6 +555,221 @@ export default function RoutingEditor({ routingContexts, staticRoutes, onRoutesU
                 <div style={{ marginTop: 6, fontSize: 11, color: '#64748b' }}>
                   Redistribute: <span style={{ color: '#94a3b8' }}>{ospf.redistribute.map(r => r.protocol).join(', ')}</span>
                 </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* OSPFv3 Configuration */}
+      {ospf3Config && ospf3Config.length > 0 && (
+        <div style={{ marginBottom: 16 }}>
+          <h3 style={{ fontSize: 14, marginBottom: 8, color: '#94a3b8' }}>
+            OSPFv3 (IPv6) Configuration
+            <span className="badge" style={{ marginLeft: 6, fontSize: 10, background: '#312e81', color: '#a5b4fc' }}>
+              {ospf3Config.reduce((sum, o) => sum + (o.areas?.length || 0), 0)} area{ospf3Config.reduce((sum, o) => sum + (o.areas?.length || 0), 0) !== 1 ? 's' : ''}
+            </span>
+          </h3>
+          {ospf3Config.map((ospf, oi) => (
+            <div key={oi} style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 6, padding: 12, marginBottom: 8 }}>
+              <div style={{ display: 'flex', gap: 16, alignItems: 'center', marginBottom: 8 }}>
+                <div style={{ fontSize: 12, color: '#64748b' }}>
+                  Router ID: <span style={{ color: '#e2e8f0', fontWeight: 600 }}>{ospf.router_id || '—'}</span>
+                </div>
+                {ospf.reference_bandwidth && (
+                  <div style={{ fontSize: 12, color: '#64748b' }}>
+                    Ref BW: <span style={{ color: '#e2e8f0' }}>{ospf.reference_bandwidth}</span>
+                  </div>
+                )}
+                {ospf.instance && (
+                  <div style={{ fontSize: 12, color: '#64748b' }}>
+                    Instance: <span style={{ color: '#e2e8f0' }}>{ospf.instance}</span>
+                  </div>
+                )}
+              </div>
+              {(ospf.areas || []).map((area, ai) => {
+                const areaKey = `${oi}-${ai}`;
+                const isExpanded = expandedOspf3Area === areaKey;
+                const ifaceCount = (area.interfaces?.length || 0) + (area.networks?.length || 0);
+                return (
+                  <div key={ai} style={{ marginBottom: 6 }}>
+                    <div
+                      style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', padding: '4px 0' }}
+                      onClick={() => setExpandedOspf3Area(isExpanded ? null : areaKey)}
+                    >
+                      <span style={{ fontSize: 10, color: '#64748b' }}>{isExpanded ? '▼' : '▶'}</span>
+                      <span style={{ fontSize: 12, color: '#e2e8f0', fontWeight: 500 }}>Area {area.area_id}</span>
+                      <span className="badge" style={{ fontSize: 10, background: area.area_type === 'normal' ? '#312e81' : '#7c2d12', color: area.area_type === 'normal' ? '#a5b4fc' : '#fdba74' }}>
+                        {area.area_type}
+                      </span>
+                      <span style={{ fontSize: 11, color: '#64748b' }}>{ifaceCount} interface{ifaceCount !== 1 ? 's' : ''}</span>
+                    </div>
+                    {isExpanded && (
+                      <>
+                        {(area.interfaces || []).length > 0 && (
+                          <table className="routing-table" style={{ marginLeft: 16, marginTop: 4 }}>
+                            <thead>
+                              <tr>
+                                <th>Interface</th><th>Cost</th><th>Hello</th><th>Dead</th><th>Passive</th><th>Instance ID</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {area.interfaces.map((iface, ii) => (
+                                <tr key={ii}>
+                                  <td style={{ fontFamily: 'monospace', fontSize: 11 }}>{iface.name}</td>
+                                  <td>{iface.cost ?? '—'}</td>
+                                  <td>{iface.hello_interval ?? '—'}</td>
+                                  <td>{iface.dead_interval ?? '—'}</td>
+                                  <td>
+                                    {iface.passive && (
+                                      <span className="badge" style={{ fontSize: 9, background: '#312e81', color: '#a5b4fc' }}>Passive</span>
+                                    )}
+                                  </td>
+                                  <td>{iface.instance_id ?? '—'}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        )}
+                        {(area.networks || []).length > 0 && (
+                          <div style={{ marginLeft: 16, marginTop: 4, fontSize: 11, color: '#64748b' }}>
+                            Networks: <span style={{ color: '#94a3b8' }}>{area.networks.map(n => n.prefix).join(', ')}</span>
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                );
+              })}
+              {ospf.redistribute && ospf.redistribute.length > 0 && (
+                <div style={{ marginTop: 6, fontSize: 11, color: '#64748b' }}>
+                  Redistribute: <span style={{ color: '#94a3b8' }}>{ospf.redistribute.map(r => r.protocol).join(', ')}</span>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* EVPN Configuration */}
+      {evpnConfig && evpnConfig.length > 0 && (
+        <div style={{ marginBottom: 16 }}>
+          <h3 style={{ fontSize: 14, marginBottom: 8, color: '#94a3b8' }}>
+            EVPN / VxLAN Fabric
+            <span className="badge" style={{ marginLeft: 6, fontSize: 10, background: '#4a1d6a', color: '#d8b4fe' }}>
+              {evpnConfig.length} instance{evpnConfig.length !== 1 ? 's' : ''}
+            </span>
+          </h3>
+          {evpnConfig.map((evpn, ei) => {
+            const evpnKey = `evpn-${ei}`;
+            const isExpanded = expandedEvpn === evpnKey;
+            return (
+              <div key={ei} style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 6, padding: 12, marginBottom: 8 }}>
+                <div
+                  style={{ display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer' }}
+                  onClick={() => setExpandedEvpn(isExpanded ? null : evpnKey)}
+                >
+                  <span style={{ fontSize: 10, color: '#64748b' }}>{isExpanded ? '▼' : '▶'}</span>
+                  <span style={{ fontSize: 12, color: '#e2e8f0', fontWeight: 500 }}>
+                    {evpn.instance || 'Global'}
+                  </span>
+                  {evpn.instance_type && (
+                    <span className="badge" style={{ fontSize: 10, background: '#4a1d6a', color: '#d8b4fe' }}>{evpn.instance_type}</span>
+                  )}
+                  <span className="badge" style={{ fontSize: 10, background: '#1e3a5f', color: '#93c5fd' }}>
+                    {evpn.encapsulation || 'vxlan'}
+                  </span>
+                  {evpn.vlans && <span style={{ fontSize: 11, color: '#64748b' }}>{evpn.vlans.length} VLAN{evpn.vlans.length !== 1 ? 's' : ''}</span>}
+                </div>
+                {isExpanded && (
+                  <div style={{ marginTop: 8 }}>
+                    <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 8 }}>
+                      {evpn.route_distinguisher && (
+                        <div style={{ fontSize: 11, color: '#64748b' }}>RD: <span style={{ color: '#e2e8f0', fontFamily: 'monospace' }}>{evpn.route_distinguisher}</span></div>
+                      )}
+                      {evpn.vrf_target && (
+                        <div style={{ fontSize: 11, color: '#64748b' }}>VRF Target: <span style={{ color: '#e2e8f0', fontFamily: 'monospace' }}>{evpn.vrf_target}</span></div>
+                      )}
+                      {evpn.multicast_mode && (
+                        <div style={{ fontSize: 11, color: '#64748b' }}>Multicast: <span style={{ color: '#e2e8f0' }}>{evpn.multicast_mode}</span></div>
+                      )}
+                    </div>
+                    {evpn.route_targets && evpn.route_targets.length > 0 && (
+                      <div style={{ fontSize: 11, color: '#64748b', marginBottom: 6 }}>
+                        Route Targets: {evpn.route_targets.map((rt, ri) => (
+                          <span key={ri} className="badge" style={{ fontSize: 9, marginLeft: 4, background: '#1e3a5f', color: '#93c5fd' }}>
+                            {rt.target} ({rt.direction})
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    {evpn.vlans && evpn.vlans.length > 0 && (
+                      <table className="routing-table" style={{ marginTop: 4 }}>
+                        <thead>
+                          <tr>
+                            <th>VLAN Name</th><th>VLAN ID</th><th>VNI</th><th>Replication</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {evpn.vlans.map((vlan, vi) => (
+                            <tr key={vi}>
+                              <td style={{ fontFamily: 'monospace', fontSize: 11 }}>{vlan.name}</td>
+                              <td>{vlan.vlan_id}</td>
+                              <td>{vlan.vni}</td>
+                              <td>{vlan.ingress_node_replication ? 'Ingress' : '—'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* VxLAN Tunnels (standalone, non-EVPN) */}
+      {vxlanConfig && vxlanConfig.length > 0 && (
+        <div style={{ marginBottom: 16 }}>
+          <h3 style={{ fontSize: 14, marginBottom: 8, color: '#94a3b8' }}>
+            VxLAN Tunnels
+            <span className="badge" style={{ marginLeft: 6, fontSize: 10, background: '#4a1d6a', color: '#d8b4fe' }}>
+              {vxlanConfig.length} tunnel{vxlanConfig.length !== 1 ? 's' : ''}
+            </span>
+          </h3>
+          {vxlanConfig.map((tunnel, ti) => (
+            <div key={ti} style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 6, padding: 12, marginBottom: 8 }}>
+              <div style={{ display: 'flex', gap: 16, alignItems: 'center', marginBottom: 6 }}>
+                <span style={{ fontSize: 12, color: '#e2e8f0', fontWeight: 500 }}>{tunnel.name || `Tunnel ${ti + 1}`}</span>
+                {tunnel.vtep_source_interface && (
+                  <div style={{ fontSize: 11, color: '#64748b' }}>
+                    VTEP Source: <span style={{ color: '#e2e8f0', fontFamily: 'monospace' }}>{tunnel.vtep_source_interface}</span>
+                  </div>
+                )}
+                {tunnel.udp_port && tunnel.udp_port !== 4789 && (
+                  <div style={{ fontSize: 11, color: '#fbbf24' }}>Port: {tunnel.udp_port}</div>
+                )}
+              </div>
+              {tunnel.vnis && tunnel.vnis.length > 0 && (
+                <table className="routing-table">
+                  <thead>
+                    <tr>
+                      <th>VNI</th><th>VLAN ID</th><th>Mcast Group</th><th>Remote VTEPs</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {tunnel.vnis.map((vni, vi) => (
+                      <tr key={vi}>
+                        <td style={{ fontFamily: 'monospace', fontSize: 11 }}>{vni.vni}</td>
+                        <td>{vni.vlan_id || '—'}</td>
+                        <td>{vni.mcast_group || '—'}</td>
+                        <td style={{ fontSize: 11 }}>{vni.remote_vteps?.length > 0 ? vni.remote_vteps.join(', ') : '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               )}
             </div>
           ))}

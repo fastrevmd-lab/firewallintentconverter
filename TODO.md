@@ -127,10 +127,21 @@
   - RoutingEditor UI: BGP section (peer groups, neighbors, networks) + OSPF section (areas, interfaces)
   - Check Point + SonicWall: empty defaults (no dynamic routing in policy exports)
   - Sample configs: BGP/OSPF added to PAN-OS, FortiGate, SRX, Cisco ASA, Huawei samples
-- [ ] **EVPN/VxLAN** — Deferred to future revision:
-  - EVPN: VXLAN tunnel endpoints (VTEPs), route targets, route distinguishers, MAC-VRF instances
-  - VxLAN: VTEP interfaces, VNI mappings, underlay routing integration
-  - SRX output: `set protocols evpn`, `set interfaces vtep`, `set switch-options`
+- [x] **OSPFv3 (IPv6 OSPF)** — Parse and convert OSPFv3 from 5 vendors:
+  - Separate `ospf3_config[]` schema (mirrors OSPF, no MD5 auth, adds `instance_id`)
+  - SRX: `set protocols ospf3`, FortiGate: `config router ospf6`, Cisco ASA: `ipv6 router ospf` + interface-level
+  - PAN-OS: `<ospfv3>` XML in virtual-router, Huawei: `ospfv3` section headers
+  - Check Point + SonicWall: stubs only (no native OSPFv3 in policy exports)
+  - RoutingEditor UI: OSPFv3 section (indigo badge, Instance ID column, no Auth)
+- [x] **EVPN/VxLAN** — Core EVPN-VxLAN parsing and conversion:
+  - `evpn_config[]` schema: instance-type, encapsulation, multicast-mode, VNI list, RD, RT, VRF target, VLAN-VNI mappings
+  - `vxlan_config[]` schema: standalone VxLAN tunnels (VTEP source, VNIs, remote VTEPs, mcast groups)
+  - SRX parser: full EVPN (`protocols evpn`, `switch-options`, `vlans` with `vxlan vni`)
+  - FortiGate: `config system vxlan` (VNI, remote-ip, dstport)
+  - Cisco ASA: `nve` blocks (source-interface, member vni, mcast-group)
+  - SRX converter: `set protocols evpn`, `set switch-options`, `set vlans <name> vxlan vni`
+  - SRX XML builder: `<evpn>`, `<switch-options>`, `<vlans>` top-level, per-instance `mac-vrf`
+  - RoutingEditor UI: EVPN section (RD/RT/VRF target, VLAN-VNI table), VxLAN tunnels section
 - [x] **User-ID / identity-based policies** — Parse and convert user/group identity references in security policies:
   - `source_users` field on intermediate schema, extracted from all 7 vendors
   - PAN-OS: `<source-user>` extraction (DOMAIN\user, group references, special values)
@@ -160,7 +171,7 @@
 - **Policy-Based Forwarding** — PAN-OS PBF rules now parsed and displayed in dedicated tab; SRX filter-based forwarding generation not yet automated
 - **NetFlow / Telemetry** — sFlow, streaming telemetry not converted
 - **Management Access** — Admin users, SNMP communities, SSH/API access not converted
-- **Dynamic Routing** — BGP and OSPF supported; EVPN/VxLAN deferred; OSPFv3 (IPv6) not yet supported
+- **Dynamic Routing** — BGP, OSPF, OSPFv3, EVPN/VxLAN supported across applicable vendors
 - **User Identity** — User-ID / FSSO / IDFW parsed and converted to SRX `source-identity` — requires manual JIMS server configuration
 - **Virtual-Wire** — SRX has no native vwire; mapped to bridge-domain with TODO comments for interface assignment
 - **MNHA** — Only 2-node configurations supported

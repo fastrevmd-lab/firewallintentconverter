@@ -557,6 +557,28 @@ export const SAMPLE_CONFIGS = {
                 </entry>
               </area>
             </ospf>
+            <ospfv3>
+              <enable>yes</enable>
+              <router-id>10.0.1.1</router-id>
+              <area>
+                <entry name="0.0.0.0">
+                  <interface>
+                    <entry name="ethernet1/1">
+                      <metric>10</metric>
+                    </entry>
+                    <entry name="loopback.1">
+                      <passive>yes</passive>
+                    </entry>
+                  </interface>
+                </entry>
+                <entry name="0.0.0.3">
+                  <type><nssa/></type>
+                  <interface>
+                    <entry name="ethernet1/3"/>
+                  </interface>
+                </entry>
+              </area>
+            </ospfv3>
           </protocol>
         </entry>
         </virtual-router>
@@ -3139,6 +3161,25 @@ set protocols ospf area 0.0.0.0 interface lo0.0 passive
 set protocols ospf area 0.0.0.1 stub
 set protocols ospf area 0.0.0.1 interface ge-0/0/2.0
 
+set protocols ospf3 area 0.0.0.0 interface ge-0/0/0.0
+set protocols ospf3 area 0.0.0.0 interface ge-0/0/1.0
+set protocols ospf3 area 0.0.0.0 interface lo0.0 passive
+set protocols ospf3 area 0.0.0.2 nssa
+set protocols ospf3 area 0.0.0.2 interface ge-0/0/3.0
+
+set protocols evpn encapsulation vxlan
+set protocols evpn multicast-mode ingress-replication
+set protocols evpn extended-vni-list 5001
+set protocols evpn extended-vni-list 5002
+set switch-options vtep-source-interface lo0.0
+set switch-options route-distinguisher 10.0.0.1:1
+set switch-options vrf-target target:65001:1
+set vlans VLAN100 vlan-id 100
+set vlans VLAN100 vxlan vni 5001
+set vlans VLAN100 vxlan ingress-node-replication
+set vlans VLAN200 vlan-id 200
+set vlans VLAN200 vxlan vni 5002
+
 set system syslog host 10.0.0.100 any any
 set system syslog host 10.0.0.101 any any
 set system syslog host 10.0.0.101 transport protocol tcp
@@ -3674,6 +3715,44 @@ config router ospf
     config redistribute "static"
         set status enable
     next
+end
+
+config router ospf6
+    set router-id 10.1.1.1
+    config area
+        edit 0.0.0.0
+        next
+        edit 0.0.0.2
+            set type nssa
+        next
+    end
+    config ospf6-interface
+        edit "internal1-ospf6"
+            set interface "internal1"
+            set area-id 0.0.0.0
+        next
+        edit "internal2-ospf6"
+            set interface "internal2"
+            set area-id 0.0.0.2
+            set cost 15
+        next
+    end
+end
+
+config system vxlan
+    edit "vxlan1"
+        set vni 5001
+        set interface "port1"
+        set dstport 4789
+        config remote-ip
+            edit 1
+                set ip 10.10.10.2
+            next
+            edit 2
+                set ip 10.10.10.3
+            next
+        end
+    next
 end`,
   },
 
@@ -3853,6 +3932,22 @@ router ospf 1
  network 10.1.2.0 0.0.0.255 area 0
  network 172.16.1.0 0.0.0.255 area 1
  redistribute static subroutine
+!
+ipv6 router ospf 1
+ router-id 10.1.1.1
+ area 0 nssa
+!
+interface GigabitEthernet1/1
+ ipv6 ospf 1 area 0
+ ipv6 ospf cost 10
+!
+interface GigabitEthernet1/2
+ ipv6 ospf 1 area 0
+!
+nve 1
+ source-interface loopback0
+ member vni 5001 mcast-group 239.1.1.1
+ member vni 5002
 !`,
   },
 
@@ -4489,6 +4584,12 @@ ospf 1 router-id 10.1.1.254
  area 0.0.0.1
   stub
   network 172.16.1.0 0.0.0.255
+ import-route static
+#
+ospfv3 1 router-id 10.1.1.254
+ area 0.0.0.0
+ area 0.0.0.2
+  nssa
  import-route static
 #`,
   },

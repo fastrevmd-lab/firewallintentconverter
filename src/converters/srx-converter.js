@@ -94,6 +94,9 @@ export function convertToSrxSetCommands(config, interfaceMappings = {}, targetCo
   convertStaticRoutes(config.static_routes, commands, warnings, summary);
   convertBgpConfig(config.bgp_config, commands, warnings, summary);
   convertOspfConfig(config.ospf_config, commands, warnings, summary);
+  convertOspf3Config(config.ospf3_config, commands, warnings, summary);
+  convertEvpnConfig(config.evpn_config, commands, warnings, summary);
+  convertVxlanConfig(config.vxlan_config, commands, warnings, summary);
   convertHaConfig(config.ha_config, commands, warnings, summary);
   convertScreenConfig(config.screen_config, commands, warnings, summary);
   convertVpnTunnels(config.vpn_tunnels, commands, warnings, summary);
@@ -1608,6 +1611,231 @@ function convertOspfConfig(ospfConfig, commands, warnings, summary) {
       commands.push(`${prefix}policy-options policy-statement ${stmtName} term 1 then accept`);
       commands.push(`${prefix}protocols ospf export ${stmtName}`);
     }
+  }
+
+  commands.push('');
+}
+
+// ---------------------------------------------------------------------------
+// OSPFv3 Configuration
+// ---------------------------------------------------------------------------
+
+function convertOspf3Config(ospf3Config, commands, warnings, summary) {
+  if (!ospf3Config || ospf3Config.length === 0) return;
+
+  commands.push('# =============================================');
+  commands.push('# OSPFv3 (IPv6 OSPF) Configuration');
+  commands.push('# =============================================');
+
+  for (const ospf of ospf3Config) {
+    const prefix = ospf.instance
+      ? `set routing-instances ${sanitizeJunosName(ospf.instance)} `
+      : 'set ';
+
+    if (ospf.router_id) {
+      commands.push(`${prefix}routing-options router-id ${ospf.router_id}`);
+    }
+
+    if (ospf.reference_bandwidth) {
+      commands.push(`${prefix}protocols ospf3 reference-bandwidth ${ospf.reference_bandwidth}`);
+    }
+
+    for (const area of ospf.areas || []) {
+      const areaId = area.area_id;
+
+      if (area.area_type === 'stub') {
+        commands.push(`${prefix}protocols ospf3 area ${areaId} stub`);
+      } else if (area.area_type === 'totally-stub') {
+        commands.push(`${prefix}protocols ospf3 area ${areaId} stub no-summaries`);
+      } else if (area.area_type === 'nssa') {
+        commands.push(`${prefix}protocols ospf3 area ${areaId} nssa`);
+      } else if (area.area_type === 'totally-nssa') {
+        commands.push(`${prefix}protocols ospf3 area ${areaId} nssa no-summaries`);
+      }
+
+      for (const iface of area.interfaces || []) {
+        const ifBase = `${prefix}protocols ospf3 area ${areaId} interface ${iface.name}`;
+        commands.push(ifBase);
+
+        if (iface.cost != null) {
+          commands.push(`${ifBase} metric ${iface.cost}`);
+        }
+        if (iface.hello_interval != null) {
+          commands.push(`${ifBase} hello-interval ${iface.hello_interval}`);
+        }
+        if (iface.dead_interval != null) {
+          commands.push(`${ifBase} dead-interval ${iface.dead_interval}`);
+        }
+        if (iface.passive) {
+          commands.push(`${ifBase} passive`);
+        }
+        if (iface.network_type) {
+          commands.push(`${ifBase} interface-type ${iface.network_type}`);
+        }
+        if (iface.instance_id != null) {
+          commands.push(`${ifBase} instance-id ${iface.instance_id}`);
+        }
+
+        summary.ospf3_interfaces_converted = (summary.ospf3_interfaces_converted || 0) + 1;
+      }
+
+      for (const net of area.networks || []) {
+        warnings.push(createWarning(
+          'info',
+          `OSPFv3 network statement ${net.prefix} in area ${areaId} — SRX uses per-interface OSPFv3 config. Add the appropriate interface to area ${areaId} manually.`,
+          net.prefix,
+          'ospf3_network_to_interface'
+        ));
+      }
+
+      summary.ospf3_areas_converted = (summary.ospf3_areas_converted || 0) + 1;
+    }
+
+    for (const redist of ospf.redistribute || []) {
+      const stmtName = `OSPF3-REDIST-${redist.protocol.toUpperCase()}`;
+      commands.push(`${prefix}policy-options policy-statement ${stmtName} term 1 from protocol ${redist.protocol}`);
+      if (redist.metric_type) {
+        commands.push(`${prefix}policy-options policy-statement ${stmtName} term 1 then external type ${redist.metric_type}`);
+      }
+      commands.push(`${prefix}policy-options policy-statement ${stmtName} term 1 then accept`);
+      commands.push(`${prefix}protocols ospf3 export ${stmtName}`);
+    }
+  }
+
+  commands.push('');
+}
+
+// ---------------------------------------------------------------------------
+// EVPN Configuration
+// ---------------------------------------------------------------------------
+
+function convertEvpnConfig(evpnConfig, commands, warnings, summary) {
+  if (!evpnConfig || evpnConfig.length === 0) return;
+
+  commands.push('# =============================================');
+  commands.push('# EVPN / VxLAN Fabric Configuration');
+  commands.push('# =============================================');
+
+  for (const evpn of evpnConfig) {
+    const prefix = evpn.instance
+      ? `set routing-instances ${sanitizeJunosName(evpn.instance)} `
+      : 'set ';
+
+    // Instance type for routing-instances (mac-vrf, virtual-switch)
+    if (evpn.instance && evpn.instance_type) {
+      commands.push(`${prefix}instance-type ${evpn.instance_type}`);
+    }
+
+    // EVPN protocol settings
+    commands.push(`${prefix}protocols evpn encapsulation ${evpn.encapsulation || 'vxlan'}`);
+
+    if (evpn.multicast_mode) {
+      commands.push(`${prefix}protocols evpn multicast-mode ${evpn.multicast_mode}`);
+    }
+
+    if (evpn.extended_vni_list && evpn.extended_vni_list.length > 0) {
+      for (const vni of evpn.extended_vni_list) {
+        commands.push(`${prefix}protocols evpn extended-vni-list ${vni}`);
+      }
+    }
+
+    // Switch-options (global or per-instance)
+    if (evpn.route_distinguisher) {
+      const swPrefix = evpn.instance ? prefix : 'set ';
+      commands.push(`${swPrefix}switch-options vtep-source-interface ${evpn.vtep_source_interface || 'lo0.0'}`);
+      commands.push(`${swPrefix}switch-options route-distinguisher ${evpn.route_distinguisher}`);
+    }
+
+    if (evpn.vrf_target) {
+      const swPrefix = evpn.instance ? prefix : 'set ';
+      commands.push(`${swPrefix}switch-options vrf-target ${evpn.vrf_target}`);
+    }
+
+    // Route targets (explicit import/export)
+    for (const rt of evpn.route_targets || []) {
+      if (rt.direction === 'import' || rt.direction === 'both') {
+        commands.push(`${prefix}vrf-import ${rt.target}`);
+      }
+      if (rt.direction === 'export' || rt.direction === 'both') {
+        commands.push(`${prefix}vrf-export ${rt.target}`);
+      }
+    }
+
+    // VLANs with VxLAN VNI mappings
+    for (const vlan of evpn.vlans || []) {
+      const vlanName = sanitizeJunosName(vlan.name);
+      commands.push(`set vlans ${vlanName} vlan-id ${vlan.vlan_id}`);
+      commands.push(`set vlans ${vlanName} vxlan vni ${vlan.vni}`);
+      if (vlan.ingress_node_replication) {
+        commands.push(`set vlans ${vlanName} vxlan ingress-node-replication`);
+      }
+      summary.evpn_vlans_converted = (summary.evpn_vlans_converted || 0) + 1;
+    }
+
+    summary.evpn_instances_converted = (summary.evpn_instances_converted || 0) + 1;
+  }
+
+  commands.push('');
+}
+
+// ---------------------------------------------------------------------------
+// VxLAN Configuration (standalone, non-EVPN)
+// ---------------------------------------------------------------------------
+
+function convertVxlanConfig(vxlanConfig, commands, warnings, summary) {
+  if (!vxlanConfig || vxlanConfig.length === 0) return;
+
+  commands.push('# =============================================');
+  commands.push('# VxLAN Tunnel Configuration');
+  commands.push('# =============================================');
+  commands.push('# Note: SRX typically uses EVPN for VxLAN. These are standalone VxLAN tunnels.');
+
+  for (const tunnel of vxlanConfig) {
+    const prefix = tunnel.instance
+      ? `set routing-instances ${sanitizeJunosName(tunnel.instance)} `
+      : 'set ';
+
+    // VTEP source interface
+    if (tunnel.vtep_source_interface || tunnel.source_interface) {
+      commands.push(`${prefix}switch-options vtep-source-interface ${tunnel.vtep_source_interface || tunnel.source_interface}`);
+    }
+
+    // VNI entries
+    for (const vni of tunnel.vnis || []) {
+      const vniId = vni.vni;
+      commands.push(`# VxLAN VNI ${vniId}${tunnel.name ? ` (source: ${tunnel.name})` : ''}`);
+
+      if (vni.vlan_id) {
+        commands.push(`set vlans VXLAN-${vniId} vlan-id ${vni.vlan_id}`);
+        commands.push(`set vlans VXLAN-${vniId} vxlan vni ${vniId}`);
+      }
+
+      if (vni.ingress_replication) {
+        commands.push(`set vlans VXLAN-${vniId} vxlan ingress-node-replication`);
+      }
+
+      // Static remote VTEPs (flood list)
+      for (const vtep of vni.remote_vteps || []) {
+        warnings.push(createWarning(
+          'info',
+          `VxLAN VNI ${vniId} has static remote VTEP ${vtep}. SRX EVPN uses BGP for VTEP discovery — consider migrating to EVPN.`,
+          tunnel.name || `VNI-${vniId}`,
+          'vxlan_static_vtep'
+        ));
+      }
+    }
+
+    // UDP port
+    if (tunnel.udp_port && tunnel.udp_port !== 4789) {
+      warnings.push(createWarning(
+        'info',
+        `VxLAN tunnel ${tunnel.name || ''} uses non-standard UDP port ${tunnel.udp_port} (default: 4789). SRX uses standard port 4789.`,
+        tunnel.name || 'vxlan',
+        'vxlan_nonstandard_port'
+      ));
+    }
+
+    summary.vxlan_tunnels_converted = (summary.vxlan_tunnels_converted || 0) + 1;
   }
 
   commands.push('');

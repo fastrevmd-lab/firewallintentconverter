@@ -1039,6 +1039,9 @@ function buildRoutingXml(config, lines) {
   const routes = config.static_routes || [];
   const bgpConfigs = config.bgp_config || [];
   const ospfConfigs = config.ospf_config || [];
+  const ospf3Configs = config.ospf3_config || [];
+  const evpnConfigs = config.evpn_config || [];
+  const vxlanConfigs = config.vxlan_config || [];
 
   const globalRoutes = routes.filter(r => !r.vrf);
   const vrfGroups = {};
@@ -1047,12 +1050,14 @@ function buildRoutingXml(config, lines) {
     vrfGroups[r.vrf].push(r);
   }
 
-  // Find global BGP/OSPF (instance === '')
+  // Find global BGP/OSPF/OSPFv3/EVPN (instance === '')
   const globalBgp = bgpConfigs.find(b => !b.instance);
   const globalOspf = ospfConfigs.find(o => !o.instance);
+  const globalOspf3 = ospf3Configs.find(o => !o.instance);
+  const globalEvpn = evpnConfigs.find(e => !e.instance);
 
   const hasGlobalRoutingOpts = globalRoutes.length > 0 || globalBgp;
-  const hasGlobalProtocols = globalBgp || globalOspf;
+  const hasGlobalProtocols = globalBgp || globalOspf || globalOspf3 || globalEvpn;
 
   // Global routing-options (static routes + BGP AS/router-id)
   if (hasGlobalRoutingOpts) {
@@ -1184,19 +1189,116 @@ function buildRoutingXml(config, lines) {
       lines.push('    </ospf>');
     }
 
+    // OSPFv3
+    if (globalOspf3) {
+      lines.push('    <ospf3>');
+      if (globalOspf3.reference_bandwidth) {
+        lines.push(`      <reference-bandwidth>${escapeXml(String(globalOspf3.reference_bandwidth))}</reference-bandwidth>`);
+      }
+      for (const area of globalOspf3.areas || []) {
+        lines.push('      <area>');
+        lines.push(`        <name>${escapeXml(area.area_id)}</name>`);
+        if (area.area_type === 'stub' || area.area_type === 'totally-stub') {
+          lines.push('        <stub>');
+          if (area.area_type === 'totally-stub') lines.push('          <no-summaries/>');
+          lines.push('        </stub>');
+        } else if (area.area_type === 'nssa' || area.area_type === 'totally-nssa') {
+          lines.push('        <nssa>');
+          if (area.area_type === 'totally-nssa') lines.push('          <no-summaries/>');
+          lines.push('        </nssa>');
+        }
+        for (const iface of area.interfaces || []) {
+          lines.push('        <interface>');
+          lines.push(`          <name>${escapeXml(iface.name)}</name>`);
+          if (iface.cost != null) lines.push(`          <metric>${iface.cost}</metric>`);
+          if (iface.hello_interval != null) lines.push(`          <hello-interval>${iface.hello_interval}</hello-interval>`);
+          if (iface.dead_interval != null) lines.push(`          <dead-interval>${iface.dead_interval}</dead-interval>`);
+          if (iface.passive) lines.push('          <passive/>');
+          if (iface.network_type) lines.push(`          <interface-type>${escapeXml(iface.network_type)}</interface-type>`);
+          if (iface.instance_id != null) lines.push(`          <instance-id>${iface.instance_id}</instance-id>`);
+          lines.push('        </interface>');
+        }
+        lines.push('      </area>');
+      }
+      for (const redist of globalOspf3.redistribute || []) {
+        const stmtName = `OSPF3-REDIST-${redist.protocol.toUpperCase()}`;
+        lines.push(`      <export>${escapeXml(stmtName)}</export>`);
+      }
+      lines.push('    </ospf3>');
+    }
+
+    // EVPN
+    if (globalEvpn) {
+      lines.push('    <evpn>');
+      lines.push(`      <encapsulation>${escapeXml(globalEvpn.encapsulation || 'vxlan')}</encapsulation>`);
+      if (globalEvpn.multicast_mode) {
+        lines.push(`      <multicast-mode>${escapeXml(globalEvpn.multicast_mode)}</multicast-mode>`);
+      }
+      if (globalEvpn.extended_vni_list && globalEvpn.extended_vni_list.length > 0) {
+        for (const vni of globalEvpn.extended_vni_list) {
+          lines.push(`      <extended-vni-list>${vni}</extended-vni-list>`);
+        }
+      }
+      lines.push('    </evpn>');
+    }
+
     lines.push('  </protocols>');
   }
 
-  // Routing instances (VRFs — static routes + per-instance BGP/OSPF)
+  // Switch-options (for EVPN/VxLAN — vtep-source-interface, route-distinguisher, vrf-target)
+  if (globalEvpn && globalEvpn.route_distinguisher) {
+    lines.push('  <switch-options>');
+    lines.push(`    <vtep-source-interface>${escapeXml(globalEvpn.vtep_source_interface || 'lo0.0')}</vtep-source-interface>`);
+    lines.push(`    <route-distinguisher>`);
+    lines.push(`      <rd-type>${escapeXml(globalEvpn.route_distinguisher)}</rd-type>`);
+    lines.push(`    </route-distinguisher>`);
+    if (globalEvpn.vrf_target) {
+      lines.push(`    <vrf-target>`);
+      lines.push(`      <community>${escapeXml(globalEvpn.vrf_target)}</community>`);
+      lines.push(`    </vrf-target>`);
+    }
+    lines.push('  </switch-options>');
+  }
+
+  // VLANs (for EVPN VxLAN VNI mappings)
+  const allVlans = [
+    ...(globalEvpn?.vlans || []),
+    ...evpnConfigs.filter(e => e.instance).flatMap(e => e.vlans || []),
+  ];
+  if (allVlans.length > 0) {
+    lines.push('  <vlans>');
+    for (const vlan of allVlans) {
+      const vlanName = sanitizeJunosName(vlan.name);
+      lines.push(`    <vlan>`);
+      lines.push(`      <name>${escapeXml(vlanName)}</name>`);
+      lines.push(`      <vlan-id>${vlan.vlan_id}</vlan-id>`);
+      lines.push('      <vxlan>');
+      lines.push(`        <vni>${vlan.vni}</vni>`);
+      if (vlan.ingress_node_replication) {
+        lines.push('        <ingress-node-replication/>');
+      }
+      lines.push('      </vxlan>');
+      lines.push('    </vlan>');
+    }
+    lines.push('  </vlans>');
+  }
+
+  // Routing instances (VRFs — static routes + per-instance BGP/OSPF/OSPFv3/EVPN)
   const instBgpMap = {};
   const instOspfMap = {};
+  const instOspf3Map = {};
+  const instEvpnMap = {};
   for (const b of bgpConfigs.filter(b => b.instance)) instBgpMap[b.instance] = b;
   for (const o of ospfConfigs.filter(o => o.instance)) instOspfMap[o.instance] = o;
+  for (const o of ospf3Configs.filter(o => o.instance)) instOspf3Map[o.instance] = o;
+  for (const e of evpnConfigs.filter(e => e.instance)) instEvpnMap[e.instance] = e;
 
   const allInstNames = new Set([
     ...Object.keys(vrfGroups),
     ...Object.keys(instBgpMap),
     ...Object.keys(instOspfMap),
+    ...Object.keys(instOspf3Map),
+    ...Object.keys(instEvpnMap),
   ]);
 
   if (allInstNames.size > 0) {
@@ -1206,10 +1308,13 @@ function buildRoutingXml(config, lines) {
       const instRoutes = vrfGroups[instName] || [];
       const instBgp = instBgpMap[instName];
       const instOspf = instOspfMap[instName];
+      const instOspf3 = instOspf3Map[instName];
+      const instEvpn = instEvpnMap[instName];
 
       lines.push('    <instance>');
       lines.push(`      <name>${escapeXml(name)}</name>`);
-      lines.push('      <instance-type>virtual-router</instance-type>');
+      const instType = instEvpn?.instance_type || 'virtual-router';
+      lines.push(`      <instance-type>${escapeXml(instType)}</instance-type>`);
 
       // Routing-options (static + BGP AS/router-id)
       if (instRoutes.length > 0 || instBgp) {
@@ -1239,8 +1344,8 @@ function buildRoutingXml(config, lines) {
         lines.push('      </routing-options>');
       }
 
-      // Protocols (BGP + OSPF)
-      if (instBgp || instOspf) {
+      // Protocols (BGP + OSPF + OSPFv3 + EVPN)
+      if (instBgp || instOspf || instOspf3 || instEvpn) {
         lines.push('      <protocols>');
         if (instBgp) {
           lines.push('        <bgp>');
@@ -1274,6 +1379,31 @@ function buildRoutingXml(config, lines) {
             lines.push('          </area>');
           }
           lines.push('        </ospf>');
+        }
+        if (instOspf3) {
+          lines.push('        <ospf3>');
+          for (const area of instOspf3.areas || []) {
+            lines.push('          <area>');
+            lines.push(`            <name>${escapeXml(area.area_id)}</name>`);
+            for (const iface of area.interfaces || []) {
+              lines.push('            <interface>');
+              lines.push(`              <name>${escapeXml(iface.name)}</name>`);
+              if (iface.cost != null) lines.push(`              <metric>${iface.cost}</metric>`);
+              if (iface.passive) lines.push('              <passive/>');
+              if (iface.instance_id != null) lines.push(`              <instance-id>${iface.instance_id}</instance-id>`);
+              lines.push('            </interface>');
+            }
+            lines.push('          </area>');
+          }
+          lines.push('        </ospf3>');
+        }
+        if (instEvpn) {
+          lines.push('        <evpn>');
+          lines.push(`          <encapsulation>${escapeXml(instEvpn.encapsulation || 'vxlan')}</encapsulation>`);
+          if (instEvpn.multicast_mode) {
+            lines.push(`          <multicast-mode>${escapeXml(instEvpn.multicast_mode)}</multicast-mode>`);
+          }
+          lines.push('        </evpn>');
         }
         lines.push('      </protocols>');
       }

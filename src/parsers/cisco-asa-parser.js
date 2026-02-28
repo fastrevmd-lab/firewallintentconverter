@@ -51,6 +51,8 @@ export function parseCiscoAsaConfig(configText) {
   const staticRoutes = parseCiscoStaticRoutes(lines, warnings);
   const bgpConfig = parseAsaBgpConfig(lines, warnings);
   const ospfConfig = parseAsaOspfConfig(lines, warnings);
+  const ospf3Config = parseAsaOspf3Config(lines, warnings);
+  const vxlanConfig = parseAsaVxlanConfig(lines, warnings);
   const routingContexts = detectCiscoContexts(lines, warnings);
   const haConfig = parseCiscoHaConfig(lines, warnings);
   const screenConfig = parseCiscoScreenConfig(lines, warnings);
@@ -130,6 +132,9 @@ export function parseCiscoAsaConfig(configText) {
     static_routes: staticRoutes,
     bgp_config: bgpConfig,
     ospf_config: ospfConfig,
+    ospf3_config: ospf3Config,
+    evpn_config: [],
+    vxlan_config: vxlanConfig,
     target_context: null,
     transparent_mode: transparentMode,
     bridge_domains: bridgeDomains,
@@ -157,6 +162,9 @@ export function parseCiscoAsaConfig(configText) {
       static_route_count: staticRoutes.length,
       bgp_instance_count: bgpConfig.length,
       ospf_instance_count: ospfConfig.length,
+      ospf3_instance_count: ospf3Config.length,
+      evpn_instance_count: 0,
+      vxlan_tunnel_count: vxlanConfig.length,
       ha_enabled: !!(haConfig && haConfig.enabled),
       multi_vsys: routingContexts.length > 1,
     },
@@ -1528,6 +1536,199 @@ function wildcardToCidr(wildcard) {
     while (b > 0) { bits++; b = (b << 1) & 0xFF; }
   }
   return 32 - bits;
+}
+
+// ---------------------------------------------------------------------------
+// OSPFv3 (IPv6 OSPF) Configuration
+// ---------------------------------------------------------------------------
+
+function parseAsaOspf3Config(lines, warnings) {
+  const ospf3Configs = [];
+
+  // Pass 1: Find ipv6 router ospf <pid> blocks for process IDs + router-id
+  const processMap = {};
+  let inOspf3 = false;
+  let currentPid = 0;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+
+    const startMatch = trimmed.match(/^ipv6 router ospf\s+(\d+)/);
+    if (startMatch) {
+      currentPid = parseInt(startMatch[1]) || 0;
+      processMap[currentPid] = { router_id: '', areas: {}, redistribute: [] };
+      inOspf3 = true;
+      continue;
+    }
+
+    if (inOspf3 && (trimmed.startsWith('!') || (trimmed.startsWith('ipv6 router ') && !trimmed.startsWith('ipv6 router ospf')))) {
+      inOspf3 = false;
+      continue;
+    }
+
+    if (!inOspf3) continue;
+
+    if (trimmed.startsWith('router-id ')) {
+      processMap[currentPid].router_id = trimmed.slice(10).trim();
+    } else if (trimmed.startsWith('area ')) {
+      const tokens = tokenize(trimmed);
+      const areaId = tokens[1];
+      if (!processMap[currentPid].areas[areaId]) {
+        processMap[currentPid].areas[areaId] = { area_id: areaId, area_type: 'normal', interfaces: [], networks: [] };
+      }
+      if (tokens[2] === 'stub') {
+        processMap[currentPid].areas[areaId].area_type = tokens[3] === 'no-summary' ? 'totally-stub' : 'stub';
+      } else if (tokens[2] === 'nssa') {
+        processMap[currentPid].areas[areaId].area_type = tokens[3] === 'no-summary' ? 'totally-nssa' : 'nssa';
+      }
+    } else if (trimmed.startsWith('redistribute ')) {
+      const tokens = tokenize(trimmed);
+      processMap[currentPid].redistribute.push({ protocol: tokens[1], policy: '', metric_type: null });
+    }
+  }
+
+  // Handle EOF without !
+  if (inOspf3) inOspf3 = false;
+
+  // Pass 2: Scan interface blocks for ipv6 ospf <pid> area <area> + cost
+  // Pre-collect cost per interface (cost and area lines can appear in any order)
+  const ifaceCostMap = {};
+  const ifaceAreaMap = [];
+  {
+    let curIf = '';
+    for (const line of lines) {
+      const trimmed = line.trim();
+      const ifMatch = trimmed.match(/^interface\s+(\S+)/);
+      if (ifMatch) { curIf = ifMatch[1]; continue; }
+      if (trimmed === '!') { curIf = ''; continue; }
+      if (!curIf) continue;
+      const costMatch = trimmed.match(/^ipv6 ospf cost\s+(\d+)/);
+      if (costMatch) ifaceCostMap[curIf] = parseInt(costMatch[1]) || null;
+      const ospfIfMatch = trimmed.match(/^ipv6 ospf\s+(\d+)\s+area\s+(\S+)/);
+      if (ospfIfMatch) ifaceAreaMap.push({ iface: curIf, pid: parseInt(ospfIfMatch[1]) || 0, areaId: ospfIfMatch[2] });
+    }
+  }
+
+  for (const { iface, pid, areaId } of ifaceAreaMap) {
+    if (processMap[pid]) {
+      if (!processMap[pid].areas[areaId]) {
+        processMap[pid].areas[areaId] = { area_id: areaId, area_type: 'normal', interfaces: [], networks: [] };
+      }
+      processMap[pid].areas[areaId].interfaces.push({
+        name: iface,
+        cost: ifaceCostMap[iface] || null,
+        hello_interval: null,
+        dead_interval: null,
+        passive: false,
+        network_type: null,
+        instance_id: null,
+      });
+    }
+  }
+
+  // Build results
+  for (const [, proc] of Object.entries(processMap)) {
+    const areas = Object.values(proc.areas);
+    if (areas.length > 0) {
+      ospf3Configs.push({
+        instance: '',
+        router_id: proc.router_id,
+        reference_bandwidth: null,
+        areas,
+        redistribute: proc.redistribute,
+      });
+    }
+  }
+
+  return ospf3Configs;
+}
+
+// ---------------------------------------------------------------------------
+// VxLAN Configuration (NVE/VTEP)
+// ---------------------------------------------------------------------------
+
+function parseAsaVxlanConfig(lines, warnings) {
+  const tunnels = [];
+  let inNve = false;
+  let nveId = '';
+  let sourceIface = '';
+  const vnis = [];
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+
+    const nveMatch = trimmed.match(/^nve\s+(\d+)/);
+    if (nveMatch) {
+      // Save previous NVE if any
+      if (inNve && vnis.length > 0) {
+        tunnels.push({
+          name: `nve${nveId}`,
+          instance: '',
+          vtep_source_interface: sourceIface,
+          vnis: [...vnis],
+          udp_port: 4789,
+          source_interface: sourceIface,
+        });
+      }
+      nveId = nveMatch[1];
+      sourceIface = '';
+      vnis.length = 0;
+      inNve = true;
+      continue;
+    }
+
+    if (inNve && trimmed === '!') {
+      if (vnis.length > 0) {
+        tunnels.push({
+          name: `nve${nveId}`,
+          instance: '',
+          vtep_source_interface: sourceIface,
+          vnis: [...vnis],
+          udp_port: 4789,
+          source_interface: sourceIface,
+        });
+      }
+      inNve = false;
+      nveId = '';
+      sourceIface = '';
+      vnis.length = 0;
+      continue;
+    }
+
+    if (!inNve) continue;
+
+    const srcMatch = trimmed.match(/^source-interface\s+(\S+)/);
+    if (srcMatch) {
+      sourceIface = srcMatch[1];
+    }
+
+    const vniMatch = trimmed.match(/^member vni\s+(\d+)/);
+    if (vniMatch) {
+      const vni = parseInt(vniMatch[1]) || 0;
+      const mcastMatch = trimmed.match(/mcast-group\s+(\S+)/);
+      vnis.push({
+        vni,
+        vlan_id: null,
+        mcast_group: mcastMatch ? mcastMatch[1] : null,
+        ingress_replication: false,
+        remote_vteps: [],
+      });
+    }
+  }
+
+  // Handle EOF
+  if (inNve && vnis.length > 0) {
+    tunnels.push({
+      name: `nve${nveId}`,
+      instance: '',
+      vtep_source_interface: sourceIface,
+      vnis: [...vnis],
+      udp_port: 4789,
+      source_interface: sourceIface,
+    });
+  }
+
+  return tunnels;
 }
 
 // ---------------------------------------------------------------------------

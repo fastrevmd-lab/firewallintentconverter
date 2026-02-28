@@ -61,6 +61,8 @@ export function parseFortigateConfig(configText) {
   const staticRoutes = parseStaticRoutes(tree, warnings);
   const bgpConfig = parseFortiBgpConfig(tree, warnings);
   const ospfConfig = parseFortiOspfConfig(tree, warnings);
+  const ospf3Config = parseFortiOspf6Config(tree, warnings);
+  const vxlanConfig = parseFortiVxlanConfig(tree, warnings);
   const haConfig = parseHaConfig(tree, warnings);
   const screenConfig = parseScreenConfig(tree, warnings);
 
@@ -238,6 +240,9 @@ export function parseFortigateConfig(configText) {
     static_routes: staticRoutes,
     bgp_config: bgpConfig,
     ospf_config: ospfConfig,
+    ospf3_config: ospf3Config,
+    evpn_config: [],
+    vxlan_config: vxlanConfig,
     target_context: null,
     // FortiGate-specific extras (for the FortiGate view)
     _fortigate: {
@@ -262,6 +267,9 @@ export function parseFortigateConfig(configText) {
       static_route_count: staticRoutes.length,
       bgp_instance_count: bgpConfig.length,
       ospf_instance_count: ospfConfig.length,
+      ospf3_instance_count: ospf3Config.length,
+      evpn_instance_count: 0,
+      vxlan_tunnel_count: vxlanConfig.length,
       ha_enabled: !!(haConfig && haConfig.enabled),
       multi_vsys: routingContexts.length > 1,
     },
@@ -523,6 +531,157 @@ function parseFortiOspfConfig(tree, warnings) {
     areas,
     redistribute,
   }];
+}
+
+// ---------------------------------------------------------------------------
+// OSPFv3 (IPv6 OSPF) Configuration
+// ---------------------------------------------------------------------------
+
+function parseFortiOspf6Config(tree, warnings) {
+  const ospf6Section = tree['router ospf6'];
+  if (!ospf6Section || typeof ospf6Section !== 'object') return [];
+
+  const routerId = getString(ospf6Section['router-id']) || '';
+
+  // Parse areas
+  const areas = [];
+  const areaSection = ospf6Section['area'];
+  if (areaSection && typeof areaSection === 'object') {
+    for (const [id, entry] of Object.entries(areaSection)) {
+      if (typeof entry !== 'object' || entry === null) continue;
+      const areaId = getString(entry['id']) || id;
+      let areaType = 'normal';
+      const typeVal = getString(entry['type']);
+      if (typeVal === 'stub') areaType = getString(entry['no-summary']) === 'enable' ? 'totally-stub' : 'stub';
+      else if (typeVal === 'nssa') areaType = getString(entry['no-summary']) === 'enable' ? 'totally-nssa' : 'nssa';
+      areas.push({ area_id: areaId, area_type: areaType, interfaces: [], networks: [] });
+    }
+  }
+
+  // Parse OSPFv3 interfaces
+  const ospfIfSection = ospf6Section['ospf6-interface'];
+  if (ospfIfSection && typeof ospfIfSection === 'object') {
+    for (const [id, entry] of Object.entries(ospfIfSection)) {
+      if (typeof entry !== 'object' || entry === null) continue;
+      const ifName = getString(entry['interface']) || id;
+      const areaRef = getString(entry['area-id']) || '0.0.0.0';
+      const iface = {
+        name: ifName,
+        cost: entry['cost'] ? parseInt(getString(entry['cost'])) || null : null,
+        hello_interval: entry['hello-interval'] ? parseInt(getString(entry['hello-interval'])) || null : null,
+        dead_interval: entry['dead-interval'] ? parseInt(getString(entry['dead-interval'])) || null : null,
+        passive: false,
+        network_type: getString(entry['network-type']) || null,
+        instance_id: entry['instance-id'] ? parseInt(getString(entry['instance-id'])) || null : null,
+      };
+
+      let area = areas.find(a => a.area_id === areaRef);
+      if (!area) {
+        area = { area_id: areaRef, area_type: 'normal', interfaces: [], networks: [] };
+        areas.push(area);
+      }
+      area.interfaces.push(iface);
+    }
+  }
+
+  // Parse passive interfaces
+  const passiveSection = ospf6Section['passive-interface'];
+  if (passiveSection && typeof passiveSection === 'object') {
+    for (const [id, entry] of Object.entries(passiveSection)) {
+      if (typeof entry !== 'object' || entry === null) continue;
+      const ifName = getString(entry['name']) || id;
+      for (const area of areas) {
+        for (const iface of area.interfaces) {
+          if (iface.name === ifName) iface.passive = true;
+        }
+      }
+    }
+  }
+
+  if (areas.length === 0) return [];
+
+  // Parse redistribution
+  const redistribute = [];
+  const redistSection = ospf6Section['redistribute'];
+  if (redistSection && typeof redistSection === 'object') {
+    for (const [proto, entry] of Object.entries(redistSection)) {
+      if (typeof entry !== 'object' || entry === null) continue;
+      if (getString(entry['status']) === 'enable') {
+        redistribute.push({ protocol: proto, policy: getString(entry['routemap']) || '', metric_type: null });
+      }
+    }
+  }
+  // Flattened keys: 'redistribute "static"', etc.
+  for (const key of Object.keys(ospf6Section)) {
+    const redistMatch = key.match(/^redistribute\s+"?(\w+)"?$/);
+    if (redistMatch) {
+      const entry = ospf6Section[key];
+      if (typeof entry === 'object' && entry !== null && getString(entry['status']) === 'enable') {
+        const proto = redistMatch[1];
+        redistribute.push({ protocol: proto, policy: getString(entry['routemap']) || '', metric_type: null });
+      }
+    }
+  }
+
+  return [{
+    instance: '',
+    router_id: routerId,
+    reference_bandwidth: null,
+    areas,
+    redistribute,
+  }];
+}
+
+// ---------------------------------------------------------------------------
+// VxLAN Configuration
+// ---------------------------------------------------------------------------
+
+function parseFortiVxlanConfig(tree, warnings) {
+  const vxlanSection = tree['system vxlan'];
+  if (!vxlanSection || typeof vxlanSection !== 'object') return [];
+
+  const tunnels = [];
+  for (const [name, entry] of Object.entries(vxlanSection)) {
+    if (typeof entry !== 'object' || entry === null) continue;
+
+    const vni = entry['vni'] ? parseInt(getString(entry['vni'])) || null : null;
+    const iface = getString(entry['interface']) || '';
+    const dstport = entry['dstport'] ? parseInt(getString(entry['dstport'])) || 4789 : 4789;
+
+    // Remote IPs
+    const remoteVteps = [];
+    const remoteIpSection = entry['remote-ip'];
+    if (remoteIpSection && typeof remoteIpSection === 'object') {
+      for (const [, ripEntry] of Object.entries(remoteIpSection)) {
+        if (typeof ripEntry === 'object' && ripEntry !== null) {
+          const ip = getString(ripEntry['ip']) || '';
+          if (ip) remoteVteps.push(ip);
+        }
+      }
+    }
+
+    // Multicast group
+    const mcastGroup = getString(entry['multicast-ttl']) ? null : null;
+
+    if (vni) {
+      tunnels.push({
+        name: getString(entry['name']) || name,
+        instance: '',
+        vtep_source_interface: iface,
+        vnis: [{
+          vni,
+          vlan_id: null,
+          mcast_group: mcastGroup,
+          ingress_replication: remoteVteps.length > 0,
+          remote_vteps: remoteVteps,
+        }],
+        udp_port: dstport,
+        source_interface: iface,
+      });
+    }
+  }
+
+  return tunnels;
 }
 
 // ---------------------------------------------------------------------------

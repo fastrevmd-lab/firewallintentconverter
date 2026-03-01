@@ -23,7 +23,7 @@
  *   end
  */
 
-import { createWarning } from './parser-utils.js';
+import { createWarning, detectIpVersion } from './parser-utils.js';
 
 // ---------------------------------------------------------------------------
 // Main Parser Entry Point
@@ -1358,10 +1358,16 @@ function parseInterfaces(tree, warnings) {
 
   for (const [name, entry] of Object.entries(ifaceSection)) {
     if (typeof entry !== 'object') continue;
+    // Extract IPv6 address from FortiGate ipv6 block
+    const ipv6Block = entry['ipv6'];
+    const ipv6 = (ipv6Block && typeof ipv6Block === 'object')
+      ? getString(ipv6Block['ip6-address']) || ''
+      : '';
     interfaces.push({
       name,
       alias: getString(entry['alias']) || '',
       ip: getString(entry['ip']) || '',
+      ipv6,
       type: getString(entry['type']) || 'physical',
       vdom: getString(entry['vdom']) || 'root',
       zone: '', // will be filled by zone data
@@ -1486,6 +1492,11 @@ function parseAddressObjects(tree, warnings) {
       description: getString(entry['comment']) || getString(entry['comments']) || '',
       tags: ensureArray(entry['tags'] || entry['tag']),
     });
+  }
+
+  // Auto-tag ip_version on all address objects
+  for (const obj of objects) {
+    obj.ip_version = detectIpVersion(obj.value);
   }
 
   return objects;

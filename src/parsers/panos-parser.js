@@ -29,6 +29,7 @@ import {
   getNestedValue,
   createWarning,
   detectVendor,
+  detectIpVersion,
 } from './parser-utils.js';
 
 // ---------------------------------------------------------------------------
@@ -974,7 +975,7 @@ function parseAddressObjects(vsys, warnings) {
   if (!addressContainer) return [];
 
   const entries = extractEntries(addressContainer);
-  return entries.map((entry) => {
+  const objects = entries.map((entry) => {
     const name = entry['@_name'] || 'unnamed-address';
     const tags = extractMembers(entry.tag);
     let type = 'unknown';
@@ -1008,6 +1009,13 @@ function parseAddressObjects(vsys, warnings) {
 
     return { name, type, value, description: entry.description || '', tags };
   });
+
+  // Auto-tag ip_version on all address objects
+  for (const obj of objects) {
+    obj.ip_version = detectIpVersion(obj.value);
+  }
+
+  return objects;
 }
 
 // ---------------------------------------------------------------------------
@@ -2521,9 +2529,12 @@ function parseInterfaceConfig(config, zones, warnings) {
         if (topIps) {
           const ipEntries = extractEntries(topIps);
           const ip = ipEntries.length > 0 ? (ipEntries[0]['@_name'] || '') : '';
+          const ipv6Node = getNestedValue(l3, 'ipv6.address');
+          const ipv6 = ipv6Node ? (extractEntries(ipv6Node)[0]?.['@_name'] || '') : '';
           interfaces.push({
             name: ifName,
             ip,
+            ipv6,
             zone: ifToZone[ifName] || '',
             vlan: '',
             type: typeName,
@@ -2542,10 +2553,13 @@ function parseInterfaceConfig(config, zones, warnings) {
             const fullName = unitName || ifName;
             const unitIps = getNestedValue(unit, 'ip');
             const ip = unitIps ? (extractEntries(unitIps)[0]?.['@_name'] || '') : '';
+            const unitIpv6 = getNestedValue(unit, 'ipv6.address');
+            const ipv6 = unitIpv6 ? (extractEntries(unitIpv6)[0]?.['@_name'] || '') : '';
             const tag = unit.tag || '';
             interfaces.push({
               name: fullName,
               ip,
+              ipv6,
               zone: ifToZone[fullName] || '',
               vlan: String(tag),
               type: typeName,
@@ -2561,6 +2575,7 @@ function parseInterfaceConfig(config, zones, warnings) {
           interfaces.push({
             name: ifName,
             ip: '',
+            ipv6: '',
             zone: ifToZone[ifName] || '',
             vlan: '',
             type: typeName,
@@ -2576,6 +2591,7 @@ function parseInterfaceConfig(config, zones, warnings) {
         interfaces.push({
           name: ifName,
           ip,
+          ipv6: '',
           zone: ifToZone[ifName] || '',
           vlan: '',
           type: typeName,

@@ -20,6 +20,21 @@
 
 import { sanitizeJunosName, mapAppToJunos, mapProfileToSrx, createWarning, isPredefEquivalent, JUNOS_PREDEFINED_APPS } from '../parsers/parser-utils.js';
 
+/**
+ * Returns the correct ANY address for NAT rules based on whether the rule
+ * contains IPv6 addresses. Uses '::/0' for IPv6, '0.0.0.0/0' for IPv4.
+ */
+function natAnyAddress(rule) {
+  const allAddrs = [
+    ...(rule.src_addresses || []),
+    ...(rule.dst_addresses || []),
+    ...(rule.translated_src?.addresses || []),
+    ...(rule.translated_src?.address ? [rule.translated_src.address] : []),
+    ...(rule.translated_dst?.address ? [rule.translated_dst.address] : []),
+  ];
+  return allAddrs.some(a => a && typeof a === 'string' && a.includes(':')) ? '::/0' : '0.0.0.0/0';
+}
+
 // ---------------------------------------------------------------------------
 // Main Converter Entry Point
 // ---------------------------------------------------------------------------
@@ -69,6 +84,7 @@ export function convertToSrxSetCommands(config, interfaceMappings = {}, targetCo
   // Generate commands in Junos hierarchy order
   convertSystemConfig(config.system_config, commands, warnings, summary);
   convertZones(config.zones, commands, warnings, summary, interfaceMappings);
+  convertInterfaceAddresses(config.interfaces, commands, warnings, summary, interfaceMappings);
   convertAddressObjects(config.address_objects, commands, warnings, summary);
   convertAddressGroups(config.address_groups, commands, warnings, summary);
   convertServiceObjects(config.service_objects, commands, warnings, summary);
@@ -319,6 +335,40 @@ function mapInterfaceName(panosIface, interfaceMappings = {}) {
 
   // If it doesn't match any known format, return as-is
   return panosIface;
+}
+
+// ---------------------------------------------------------------------------
+// Interface Address Converter (IPv4 + IPv6)
+// ---------------------------------------------------------------------------
+
+function convertInterfaceAddresses(interfaces, commands, warnings, summary, interfaceMappings = {}) {
+  if (!interfaces || interfaces.length === 0) return;
+
+  const hasAddresses = interfaces.some(i => i.ip || i.ipv6);
+  if (!hasAddresses) return;
+
+  commands.push('# =============================================');
+  commands.push('# Interface Addresses');
+  commands.push('# =============================================');
+
+  for (const iface of interfaces) {
+    if (!iface.ip && !iface.ipv6) continue;
+
+    const srxName = mapInterfaceName(iface.name || '', interfaceMappings);
+    const [base, unit = '0'] = srxName.split('.');
+
+    if (iface.ip) {
+      commands.push(`set interfaces ${base} unit ${unit} family inet address ${iface.ip}`);
+    }
+    if (iface.ipv6) {
+      commands.push(`set interfaces ${base} unit ${unit} family inet6 address ${iface.ipv6}`);
+    }
+    if (iface.description) {
+      commands.push(`set interfaces ${base} unit ${unit} description "${iface.description}"`);
+    }
+  }
+
+  commands.push('');
 }
 
 // ---------------------------------------------------------------------------
@@ -1284,16 +1334,17 @@ function convertNatRules(natRules, commands, warnings, summary) {
         const rulePath = `${ruleSetPath} rule ${ruleName}`;
 
         // Match criteria
-        for (const addr of (rule.src_addresses || ['0.0.0.0/0'])) {
+        const anyAddr = natAnyAddress(rule);
+        for (const addr of (rule.src_addresses || [anyAddr])) {
           if (addr === 'any') {
-            commands.push(`set ${rulePath} match source-address 0.0.0.0/0`);
+            commands.push(`set ${rulePath} match source-address ${anyAddr}`);
           } else {
             commands.push(`set ${rulePath} match source-address ${addr}`);
           }
         }
-        for (const addr of (rule.dst_addresses || ['0.0.0.0/0'])) {
+        for (const addr of (rule.dst_addresses || [anyAddr])) {
           if (addr === 'any') {
-            commands.push(`set ${rulePath} match destination-address 0.0.0.0/0`);
+            commands.push(`set ${rulePath} match destination-address ${anyAddr}`);
           } else {
             commands.push(`set ${rulePath} match destination-address ${addr}`);
           }
@@ -1342,9 +1393,10 @@ function convertNatRules(natRules, commands, warnings, summary) {
         const rulePath = `${ruleSetPath} rule ${ruleName}`;
 
         // Match
-        for (const addr of (rule.dst_addresses || ['0.0.0.0/0'])) {
+        const dnatAny = natAnyAddress(rule);
+        for (const addr of (rule.dst_addresses || [dnatAny])) {
           if (addr === 'any') {
-            commands.push(`set ${rulePath} match destination-address 0.0.0.0/0`);
+            commands.push(`set ${rulePath} match destination-address ${dnatAny}`);
           } else {
             commands.push(`set ${rulePath} match destination-address ${addr}`);
           }

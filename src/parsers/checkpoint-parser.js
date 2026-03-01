@@ -22,7 +22,7 @@
  *   3. JSON + Gaia clish text separated by "--- GAIA CLISH ---"
  */
 
-import { createWarning, sanitizeJunosName, safeJsonParse } from './parser-utils.js';
+import { createWarning, sanitizeJunosName, safeJsonParse, detectIpVersion } from './parser-utils.js';
 
 // ---------------------------------------------------------------------------
 // Main Parser Entry Point
@@ -629,6 +629,11 @@ function parseAddressObjects(uidMap, warnings) {
         `FQDN/dns-domain "${name}" → SRX dns-name requires SRX 12.1+ and DNS resolution at commit time`,
         'Verify SRX version supports dns-name, or replace with static IP'));
     }
+  }
+
+  // Auto-tag ip_version on all address objects
+  for (const obj of addressObjects) {
+    obj.ip_version = detectIpVersion(obj.value);
   }
 
   return addressObjects;
@@ -1391,15 +1396,26 @@ function parseGaiaClish(gaiaText, warnings) {
     );
     if (ifaceMatch) {
       const [, name, ip, maskLen] = ifaceMatch;
-      if (!ifaceMap[name]) ifaceMap[name] = { name, ip: '', zone: '', vlan: '', description: '', status: 'up' };
+      if (!ifaceMap[name]) ifaceMap[name] = { name, ip: '', ipv6: '', zone: '', vlan: '', description: '', status: 'up' };
       ifaceMap[name].ip = `${ip}/${maskLen}`;
+      continue;
+    }
+
+    // IPv6 address: set interface <name> ipv6-address <addr> mask-length <len>
+    const iface6Match = line.match(
+      /^set\s+interface\s+(\S+)\s+ipv6-address\s+(\S+)\s+mask-length\s+(\d+)/
+    );
+    if (iface6Match) {
+      const [, name, ip6, maskLen] = iface6Match;
+      if (!ifaceMap[name]) ifaceMap[name] = { name, ip: '', ipv6: '', zone: '', vlan: '', description: '', status: 'up' };
+      ifaceMap[name].ipv6 = `${ip6}/${maskLen}`;
       continue;
     }
 
     const stateMatch = line.match(/^set\s+interface\s+(\S+)\s+state\s+(on|off)/);
     if (stateMatch) {
       const [, name, state] = stateMatch;
-      if (!ifaceMap[name]) ifaceMap[name] = { name, ip: '', zone: '', vlan: '', description: '', status: 'up' };
+      if (!ifaceMap[name]) ifaceMap[name] = { name, ip: '', ipv6: '', zone: '', vlan: '', description: '', status: 'up' };
       ifaceMap[name].status = state === 'on' ? 'up' : 'shutdown';
       continue;
     }
@@ -1407,7 +1423,7 @@ function parseGaiaClish(gaiaText, warnings) {
     const commentMatch = line.match(/^set\s+interface\s+(\S+)\s+comments?\s+"?([^"]*)"?/);
     if (commentMatch) {
       const [, name, comment] = commentMatch;
-      if (!ifaceMap[name]) ifaceMap[name] = { name, ip: '', zone: '', vlan: '', description: '', status: 'up' };
+      if (!ifaceMap[name]) ifaceMap[name] = { name, ip: '', ipv6: '', zone: '', vlan: '', description: '', status: 'up' };
       ifaceMap[name].description = comment;
       continue;
     }
@@ -1416,7 +1432,7 @@ function parseGaiaClish(gaiaText, warnings) {
     const vlanMatch = line.match(/^set\s+interface\s+(\S+)\.(\d+)\s+/);
     if (vlanMatch) {
       const fullName = `${vlanMatch[1]}.${vlanMatch[2]}`;
-      if (!ifaceMap[fullName]) ifaceMap[fullName] = { name: fullName, ip: '', zone: '', vlan: vlanMatch[2], description: '', status: 'up' };
+      if (!ifaceMap[fullName]) ifaceMap[fullName] = { name: fullName, ip: '', ipv6: '', zone: '', vlan: vlanMatch[2], description: '', status: 'up' };
       // Re-parse for IP if present
       const vlanIpMatch = line.match(
         /^set\s+interface\s+\S+\s+ipv4-address\s+(\S+)\s+mask-length\s+(\d+)/
@@ -1476,7 +1492,7 @@ function parseGaiaClish(gaiaText, warnings) {
 
   // Convert ifaceMap to array (only interfaces with IP addresses)
   for (const [name, iface] of Object.entries(ifaceMap)) {
-    if (iface.ip) {
+    if (iface.ip || iface.ipv6) {
       interfaces.push(iface);
     }
   }

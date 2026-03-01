@@ -105,6 +105,19 @@ export function createWarning(severity, element, message, suggestion = '') {
 }
 
 /**
+ * Detects the IP version of an address string.
+ *
+ * @param {string} value - Address string (e.g. "10.0.0.1/24" or "2001:db8::1/64")
+ * @returns {'v4'|'v6'|null} - IP version or null if undetermined
+ */
+export function detectIpVersion(value) {
+  if (!value || typeof value !== 'string') return null;
+  if (value.includes(':')) return 'v6';
+  if (/^\d+\.\d+\.\d+\.\d+/.test(value)) return 'v4';
+  return null;
+}
+
+/**
  * Sanitizes a name for use in Junos configuration.
  * SRX names must be alphanumeric plus hyphens, underscores, and periods.
  * Max length is 63 characters.

@@ -13,6 +13,21 @@
 import { sanitizeJunosName, mapAppToJunos, mapProfileToSrx, createWarning, isPredefEquivalent } from '../parsers/parser-utils.js';
 
 /**
+ * Returns the correct ANY address for NAT rules based on whether the rule
+ * contains IPv6 addresses.
+ */
+function natAnyAddress(rule) {
+  const allAddrs = [
+    ...(rule.src_addresses || []),
+    ...(rule.dst_addresses || []),
+    ...(rule.translated_src?.addresses || []),
+    ...(rule.translated_src?.address ? [rule.translated_src.address] : []),
+    ...(rule.translated_dst?.address ? [rule.translated_dst.address] : []),
+  ];
+  return allAddrs.some(a => a && typeof a === 'string' && a.includes(':')) ? '::/0' : '0.0.0.0/0';
+}
+
+/**
  * Builds a Junos XML configuration from the intermediate config.
  *
  * @param {Object} config - Intermediate JSON config
@@ -67,6 +82,9 @@ export function buildSrxXml(config, interfaceMappings = {}, targetContext = null
 
   // System configuration (Day-0)
   buildSystemConfigXml(config.system_config, lines, indent);
+
+  // Interface addresses (IPv4 + IPv6)
+  buildInterfaceAddressesXml(config.interfaces, lines, interfaceMappings, indent);
 
   // Security section
   lines.push(`${indent}<security>`);
@@ -468,12 +486,13 @@ function buildNatXml(natRules, lines, warnings) {
         const ruleName = sanitizeJunosName(rule.name);
         lines.push('          <rule>');
         lines.push(`            <name>${escapeXml(ruleName)}</name>`);
+        const anyAddr = natAnyAddress(rule);
         lines.push('            <src-nat-rule-match>');
-        for (const addr of (rule.src_addresses || ['0.0.0.0/0'])) {
-          lines.push(`              <source-address>${escapeXml(addr === 'any' ? '0.0.0.0/0' : addr)}</source-address>`);
+        for (const addr of (rule.src_addresses || [anyAddr])) {
+          lines.push(`              <source-address>${escapeXml(addr === 'any' ? anyAddr : addr)}</source-address>`);
         }
-        for (const addr of (rule.dst_addresses || ['0.0.0.0/0'])) {
-          lines.push(`              <destination-address>${escapeXml(addr === 'any' ? '0.0.0.0/0' : addr)}</destination-address>`);
+        for (const addr of (rule.dst_addresses || [anyAddr])) {
+          lines.push(`              <destination-address>${escapeXml(addr === 'any' ? anyAddr : addr)}</destination-address>`);
         }
         lines.push('            </src-nat-rule-match>');
         lines.push('            <then>');
@@ -533,9 +552,10 @@ function buildNatXml(natRules, lines, warnings) {
         const ruleName = sanitizeJunosName(rule.name);
         lines.push('          <rule>');
         lines.push(`            <name>${escapeXml(ruleName)}</name>`);
+        const dnatAny = natAnyAddress(rule);
         lines.push('            <dest-nat-rule-match>');
-        for (const addr of (rule.dst_addresses || ['0.0.0.0/0'])) {
-          lines.push(`              <destination-address>${escapeXml(addr === 'any' ? '0.0.0.0/0' : addr)}</destination-address>`);
+        for (const addr of (rule.dst_addresses || [dnatAny])) {
+          lines.push(`              <destination-address>${escapeXml(addr === 'any' ? dnatAny : addr)}</destination-address>`);
         }
         if (rule.match_port) {
           lines.push(`              <destination-port>${escapeXml(rule.match_port)}</destination-port>`);
@@ -1886,6 +1906,62 @@ function buildQosXml(qosConfig, lines) {
 // ---------------------------------------------------------------------------
 // System Configuration (Day-0)
 // ---------------------------------------------------------------------------
+
+function buildInterfaceAddressesXml(interfaces, lines, interfaceMappings = {}, indent = '  ') {
+  if (!interfaces || interfaces.length === 0) return;
+
+  const withAddrs = interfaces.filter(i => i.ip || i.ipv6);
+  if (withAddrs.length === 0) return;
+
+  lines.push(`${indent}<!-- Interface Addresses -->`);
+  lines.push(`${indent}<interfaces>`);
+
+  for (const iface of withAddrs) {
+    // Map source interface name to SRX name
+    let srxName = iface.name || '';
+    if (interfaceMappings[srxName]) {
+      srxName = interfaceMappings[srxName];
+      if (!srxName.includes('.')) srxName += '.0';
+    } else {
+      const base = srxName.split('.')[0];
+      const unit = srxName.includes('.') ? srxName.split('.')[1] : null;
+      if (interfaceMappings[base]) {
+        srxName = `${interfaceMappings[base].split('.')[0]}.${unit || '0'}`;
+      }
+    }
+
+    const [baseName, unitNum = '0'] = srxName.split('.');
+    lines.push(`${indent}  <interface>`);
+    lines.push(`${indent}    <name>${escapeXml(baseName)}</name>`);
+    lines.push(`${indent}    <unit>`);
+    lines.push(`${indent}      <name>${escapeXml(unitNum)}</name>`);
+    if (iface.description) {
+      lines.push(`${indent}      <description>${escapeXml(iface.description)}</description>`);
+    }
+    if (iface.ip) {
+      lines.push(`${indent}      <family>`);
+      lines.push(`${indent}        <inet>`);
+      lines.push(`${indent}          <address><name>${escapeXml(iface.ip)}</name></address>`);
+      lines.push(`${indent}        </inet>`);
+      if (iface.ipv6) {
+        lines.push(`${indent}        <inet6>`);
+        lines.push(`${indent}          <address><name>${escapeXml(iface.ipv6)}</name></address>`);
+        lines.push(`${indent}        </inet6>`);
+      }
+      lines.push(`${indent}      </family>`);
+    } else if (iface.ipv6) {
+      lines.push(`${indent}      <family>`);
+      lines.push(`${indent}        <inet6>`);
+      lines.push(`${indent}          <address><name>${escapeXml(iface.ipv6)}</name></address>`);
+      lines.push(`${indent}        </inet6>`);
+      lines.push(`${indent}      </family>`);
+    }
+    lines.push(`${indent}    </unit>`);
+    lines.push(`${indent}  </interface>`);
+  }
+
+  lines.push(`${indent}</interfaces>`);
+}
 
 function buildSystemConfigXml(systemConfig, lines, indent = '  ') {
   if (!systemConfig) return;

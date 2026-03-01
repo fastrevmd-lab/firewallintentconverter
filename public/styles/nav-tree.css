@@ -1,0 +1,187 @@
+/* =============================================================
+   Nav Tree — Left sidebar navigation
+   ============================================================= */
+
+/* --- Sidebar Header --- */
+.sidebar-header {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-color);
+  height: 36px;
+  flex-shrink: 0;
+}
+
+.sidebar-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+}
+
+.sidebar-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: var(--radius);
+  transition: all 0.15s ease;
+}
+
+.sidebar-toggle:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+/* --- Nav Tree --- */
+.nav-tree {
+  list-style: none;
+  padding: 8px 0;
+  flex: 1;
+  overflow-y: auto;
+}
+
+/* --- Nav Group --- */
+.nav-group {
+  margin-bottom: 2px;
+}
+
+.nav-group-header {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  padding: 6px 12px;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+  user-select: none;
+  border: none;
+  background: none;
+  width: 100%;
+  transition: background 0.1s ease;
+}
+
+.nav-group-header:hover {
+  background: var(--bg-hover);
+}
+
+.nav-group-header .arrow {
+  font-size: 8px;
+  transition: transform 0.15s ease;
+  margin-right: 6px;
+  display: inline-flex;
+}
+
+.nav-group.collapsed .nav-group-header .arrow {
+  transform: rotate(-90deg);
+}
+
+.nav-group-header .group-icon {
+  width: 16px;
+  height: 16px;
+  margin-right: 8px;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* --- Nav Group Items --- */
+.nav-group-items {
+  padding-left: 0;
+  list-style: none;
+}
+
+.nav-group.collapsed .nav-group-items {
+  display: none;
+}
+
+/* --- Nav Item --- */
+.nav-item {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  padding: 5px 12px 5px 36px;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-secondary);
+  border-left: 2px solid transparent;
+  transition: all 0.1s ease;
+  user-select: none;
+}
+
+.nav-item:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.nav-item.active {
+  border-left-color: var(--accent);
+  color: var(--text-primary);
+  background: var(--bg-elevated);
+}
+
+.nav-item .nav-icon {
+  width: 16px;
+  height: 16px;
+  margin-right: 8px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.nav-item .nav-badge {
+  margin-left: auto;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 10px;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.nav-item .nav-badge.warn {
+  color: var(--warning);
+}
+
+/* --- Collapsed Sidebar State --- */
+.app-sidebar.collapsed .nav-tree .nav-group-header span:not(.group-icon) {
+  display: none;
+}
+
+.app-sidebar.collapsed .nav-tree .nav-group-header .arrow {
+  display: none;
+}
+
+.app-sidebar.collapsed .nav-tree .nav-item span {
+  display: none;
+}
+
+.app-sidebar.collapsed .nav-tree .nav-item {
+  padding: 8px 0;
+  justify-content: center;
+}
+
+.app-sidebar.collapsed .nav-tree .nav-item .nav-icon {
+  margin: 0;
+}
+
+.app-sidebar.collapsed .nav-tree .nav-item .nav-badge {
+  display: none;
+}
+
+.app-sidebar.collapsed .sidebar-title {
+  display: none;
+}

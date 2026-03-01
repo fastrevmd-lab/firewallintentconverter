@@ -697,8 +697,21 @@ async function callOpenAI(settings, userPrompt, systemPrompt) {
   return data.choices?.[0]?.message?.content || 'No response from OpenAI.';
 }
 
+function validateBaseUrl(url) {
+  try {
+    const parsed = new URL(url);
+    if (!['http:', 'https:'].includes(parsed.protocol)) {
+      throw new Error('Base URL must use HTTP or HTTPS protocol.');
+    }
+    return parsed.href.replace(/\/+$/, '');
+  } catch (e) {
+    if (e.message.includes('HTTP')) throw e;
+    throw new Error('Invalid base URL: ' + url);
+  }
+}
+
 async function callOllama(settings, userPrompt, systemPrompt) {
-  const baseUrl = settings.baseUrl || 'http://localhost:11434';
+  const baseUrl = validateBaseUrl(settings.baseUrl || 'http://localhost:11434');
 
   const messages = [];
   if (systemPrompt) messages.push({ role: 'system', content: systemPrompt });
@@ -726,7 +739,7 @@ async function callOllama(settings, userPrompt, systemPrompt) {
 }
 
 async function callLMStudio(settings, userPrompt, systemPrompt) {
-  const baseUrl = settings.baseUrl || 'http://localhost:1234';
+  const baseUrl = validateBaseUrl(settings.baseUrl || 'http://localhost:1234');
 
   const messages = [];
   if (systemPrompt) messages.push({ role: 'system', content: systemPrompt });
@@ -755,6 +768,7 @@ async function callCustom(settings, userPrompt, systemPrompt) {
   if (!settings.baseUrl) {
     throw new Error('Custom endpoint URL not configured. Open Settings to set the base URL.');
   }
+  const baseUrl = validateBaseUrl(settings.baseUrl);
 
   const messages = [];
   if (systemPrompt) messages.push({ role: 'system', content: systemPrompt });
@@ -765,7 +779,7 @@ async function callCustom(settings, userPrompt, systemPrompt) {
     headers['Authorization'] = `Bearer ${settings.apiKey}`;
   }
 
-  const response = await fetch(`${settings.baseUrl}/v1/chat/completions`, {
+  const response = await fetch(`${baseUrl}/v1/chat/completions`, {
     method: 'POST',
     headers,
     body: JSON.stringify({
@@ -856,7 +870,7 @@ async function callOpenAIChat(settings, messages, systemPrompt) {
 }
 
 async function callOllamaChat(settings, messages, systemPrompt) {
-  const baseUrl = settings.baseUrl || 'http://localhost:11434';
+  const baseUrl = validateBaseUrl(settings.baseUrl || 'http://localhost:11434');
 
   const allMessages = [];
   if (systemPrompt) allMessages.push({ role: 'system', content: systemPrompt });
@@ -882,7 +896,7 @@ async function callOllamaChat(settings, messages, systemPrompt) {
 }
 
 async function callLMStudioChat(settings, messages, systemPrompt) {
-  const baseUrl = settings.baseUrl || 'http://localhost:1234';
+  const baseUrl = validateBaseUrl(settings.baseUrl || 'http://localhost:1234');
 
   const allMessages = [];
   if (systemPrompt) allMessages.push({ role: 'system', content: systemPrompt });
@@ -911,6 +925,7 @@ async function callCustomChat(settings, messages, systemPrompt) {
   if (!settings.baseUrl) {
     throw new Error('Custom endpoint URL not configured.');
   }
+  const baseUrl = validateBaseUrl(settings.baseUrl);
 
   const allMessages = [];
   if (systemPrompt) allMessages.push({ role: 'system', content: systemPrompt });
@@ -921,7 +936,7 @@ async function callCustomChat(settings, messages, systemPrompt) {
     headers['Authorization'] = `Bearer ${settings.apiKey}`;
   }
 
-  const response = await fetch(`${settings.baseUrl}/v1/chat/completions`, {
+  const response = await fetch(`${baseUrl}/v1/chat/completions`, {
     method: 'POST',
     headers,
     body: JSON.stringify({
@@ -1373,8 +1388,9 @@ export async function translatePolicies(intermediateConfig, targetModel, srxLice
     const response = await _callLLM(user, system, MAX_TOKENS);
     const responseEstimate = Math.round(response.length / 4);
     totalResponseTokens = responseEstimate;
-    console.log('[translate] Raw LLM response length:', response.length, 'chars');
-    console.log('[translate] Response preview:', response.slice(0, 500));
+    if (import.meta.env.DEV) {
+      console.log('[translate] Raw LLM response length:', response.length, 'chars');
+    }
     report({ phase: 'parsing_response', detail: `Parsing LLM response (~${responseEstimate.toLocaleString()} tokens)`, chunk: 1, totalChunks: 1, promptTokens: promptEstimate, responseTokens: responseEstimate });
     const result = parseTranslationResponse(response);
     applyDecryptionSafetyNet(result, intermediateConfig);
@@ -1413,8 +1429,9 @@ export async function translatePolicies(intermediateConfig, targetModel, srxLice
     const response = await _callLLM(chunkUser, system, MAX_TOKENS);
     const responseEstimate = Math.round(response.length / 4);
     totalResponseTokens += responseEstimate;
-    console.log(`[translate] Chunk ${ci + 1}/${chunks.length} response length:`, response.length, 'chars');
-    console.log(`[translate] Chunk ${ci + 1} preview:`, response.slice(0, 500));
+    if (import.meta.env.DEV) {
+      console.log(`[translate] Chunk ${ci + 1}/${chunks.length} response length:`, response.length, 'chars');
+    }
 
     report({ phase: 'parsing_response', detail: `Parsing chunk ${ci + 1}/${chunks.length} response`, chunk: ci + 1, totalChunks: chunks.length, promptTokens: totalPromptTokens, responseTokens: totalResponseTokens });
     const translated = parseTranslationResponse(response);

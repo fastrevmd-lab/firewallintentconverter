@@ -143,9 +143,17 @@ export default function ReviewChatPanel({
     return parts;
   };
 
-  /** Apply a suggestion to a rule */
+  /** Apply a suggestion to a rule — validate field against allowlist */
+  const VALID_SUGGESTION_FIELDS = new Set([
+    'name', 'action', 'description', 'src_zones', 'dst_zones',
+    'src_addresses', 'dst_addresses', 'source_users', 'applications',
+    'services', 'log_start', 'log_end', 'disabled', 'profile_group',
+    'security_profiles', 'tags', 'schedule', 'negate_source', 'negate_destination',
+  ]);
+
   const handleAcceptSuggestion = (suggestion) => {
     if (!intermediateConfig || !onUpdateRule) return;
+    if (!VALID_SUGGESTION_FIELDS.has(suggestion.field)) return;
     const policies = intermediateConfig.security_policies || [];
     const index = policies.findIndex(r => r.name === suggestion.rule_name);
     if (index < 0) return;

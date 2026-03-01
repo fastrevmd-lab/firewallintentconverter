@@ -20,7 +20,7 @@ export default function useUndoRedo() {
   // -----------------------------------------------------------------------
   const pushSnapshot = useCallback(() => {
     if (!configState.intermediateConfig) return;
-    const snapshot = JSON.parse(JSON.stringify(configState.intermediateConfig));
+    const snapshot = structuredClone(configState.intermediateConfig);
     undoDispatch({ type: 'PUSH', snapshot });
   }, [configState.intermediateConfig, undoDispatch]);
 
@@ -32,7 +32,7 @@ export default function useUndoRedo() {
 
     // Save current state to future
     const currentSnapshot = configState.intermediateConfig
-      ? JSON.parse(JSON.stringify(configState.intermediateConfig))
+      ? structuredClone(configState.intermediateConfig)
       : null;
 
     // Pop from past
@@ -58,7 +58,7 @@ export default function useUndoRedo() {
 
     // Save current state to past
     const currentSnapshot = configState.intermediateConfig
-      ? JSON.parse(JSON.stringify(configState.intermediateConfig))
+      ? structuredClone(configState.intermediateConfig)
       : null;
 
     // Pop from future

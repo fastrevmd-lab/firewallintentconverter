@@ -336,6 +336,7 @@ export default function ConfigInput({
             <textarea
               className="config-textarea"
               value={configText}
+              maxLength={10 * 1024 * 1024}
               onChange={(e) => onConfigChange(e.target.value)}
               placeholder={selectedVendor === 'srx_healthcheck'
                 ? "Paste your Junos SRX configuration here for a best practice audit...\n\nThe audit will assess:\n\u2022 PCI DSS v4.0 compliance\n\u2022 NIST SP 800-41r1 compliance\n\u2022 CIS Juniper OS Benchmark\n\u2022 Logging completeness\n\u2022 Security profile coverage\n\u2022 Rule hygiene & optimization"

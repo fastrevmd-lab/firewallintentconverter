@@ -125,11 +125,11 @@ export default function useLLM() {
     uiDispatch({ type: 'SET_FIELD', field: 'groupingInProgress', value: true });
     try {
       const groups = await groupPolicies(policies, (progress) => {
-        console.log('[group]', progress.phase, progress.detail);
+        if (import.meta.env.DEV) console.log('[group]', progress.phase);
       });
       configDispatch({ type: 'SET_RULE_GROUPS', groups });
     } catch (err) {
-      console.error('[group] Error:', err);
+      if (import.meta.env.DEV) console.error('[group] Error:', err.message);
       uiDispatch({ type: 'SET_FIELD', field: 'error', value: `Grouping failed: ${err.message}` });
     } finally {
       uiDispatch({ type: 'SET_FIELD', field: 'groupingInProgress', value: false });

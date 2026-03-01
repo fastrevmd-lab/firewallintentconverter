@@ -1818,6 +1818,26 @@ html, body, #root {
   border-color: rgba(52, 211, 153, 0.4);
 }
 
+.sanitize-review-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  background: rgba(52, 211, 153, 0.08);
+  border: 1px solid rgba(52, 211, 153, 0.3);
+  border-radius: var(--radius);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--success);
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.sanitize-review-btn:hover {
+  background: rgba(52, 211, 153, 0.15);
+  border-color: rgba(52, 211, 153, 0.5);
+}
+
 .sanitize-stats {
   font-size: 10px;
   opacity: 0.8;

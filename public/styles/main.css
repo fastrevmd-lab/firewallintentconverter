@@ -631,7 +631,6 @@ html, body, #root {
   line-height: 1.6;
   color: var(--text-primary);
   overflow: auto;
-  max-height: 25vh;
   white-space: pre;
   tab-size: 2;
 }
@@ -728,6 +727,7 @@ html, body, #root {
   grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
   gap: 8px;
   margin-bottom: 12px;
+  flex-shrink: 0;
 }
 
 .summary-card {

@@ -190,7 +190,7 @@ Click **Convert to SRX** to generate the output. Switch between **Set Commands**
 - **Profile group expansion** — PAN-OS profile group references are automatically resolved into individual security profiles
 
 ### Interactive Editing
-- **Tabbed center panel** — Switch between Security Policies/Rules, Security Zones, Address Book/Objects (with Addresses, Groups, Services, Applications, Security Profiles, and Schedules sub-tabs), NAT, Routing, and VPN editors
+- **IDE-style 4-panel layout** — Left sidebar navigation tree with collapsible groups (Import, Sanitized Objects, Security, Objects, Network, System, Output), resizable center panel, collapsible right inspector, bottom status bar. 39 keyboard shortcuts including Ctrl+P command palette, Ctrl+Z/Y undo/redo, Ctrl+B panel toggles
 - **Inline table editing** — Double-click any cell in the policy table to edit directly
 - **Right panel rule details** — Full editable form for the selected rule: action, zones, addresses, applications, services, logging, security profiles, tags, description
 - **Schedule editor** — View, edit, add, and delete schedules from the Objects > Schedules tab. Each schedule shows its type (recurring/onetime), days, time range, and which rules reference it
@@ -260,7 +260,6 @@ Click **Convert to SRX** to generate the output. Switch between **Set Commands**
 The following features are **not converted** by this tool and must be configured manually on the target SRX:
 
 - **AAA / Authentication** — RADIUS, TACACS+, LDAP server configuration and authentication policies
-- **Dynamic Routing Protocols** — BGP, OSPF, EVPN, VxLAN (only static routes are converted; planned for Rev8)
 - **User-ID / Identity Policies** — Parsed from all vendors (PAN-OS User-ID, FortiGate FSSO, Cisco IDFW, Check Point Access Role, SonicWall user/group, Huawei source-user) and converted to SRX `source-identity` match conditions with JIMS placeholder config. Requires manual JIMS server setup on the SRX.
 - **SSL/TLS Decryption** — PAN-OS decryption rules are parsed, displayed in the SSL B&I tab, and used during LLM translation to set `_srx_decrypt` on matching security rules. However, full SRX SSL Proxy config generation (certificate management, PKI, proxy profiles) is not yet automated
 - **Policy-Based Forwarding** — PAN-OS PBF rules are parsed and displayed in the PBF tab but not converted to SRX filter-based forwarding
@@ -275,7 +274,7 @@ See [TODO.md](TODO.md) for the full roadmap and planned features.
 firewall-intent-converter/
 ├── vite.config.js                # Vite config (React, publicDir: 'static', relative base)
 ├── package.json
-├── TODO.md                       # Roadmap & TODO (Rev1–Rev8+)
+├── TODO.md                       # Roadmap & TODO (Rev1–Rev13)
 ├── index.html                    # Entry HTML
 ├── static/                       # Static assets served as-is (Vite publicDir)
 │   ├── logo.png                  # Application logo
@@ -312,35 +311,76 @@ firewall-intent-converter/
 │       ├── llm-client.js         # LLM client helpers
 │       └── question-engine.js    # Interview question logic
 ├── public/                       # React frontend (transpiled by Vite)
-│   ├── main.jsx                  # React entry point
-│   ├── app.jsx                   # Root component — layout, state, routing
+│   ├── main.jsx                  # React entry point — wraps App in 5 context providers
+│   ├── app.jsx                   # Layout shell (~450 lines) — keyboard shortcuts, modals, greenfield/merge handlers
 │   ├── styles/
-│   │   └── main.css              # All styles (dark theme, components, layout)
+│   │   ├── main.css              # Component styles (dark theme, tables, modals, editors)
+│   │   ├── layout.css            # 4-panel IDE layout (flex-based shell, resize handles, responsive)
+│   │   ├── nav-tree.css          # Left sidebar navigation tree
+│   │   ├── command-palette.css   # Command palette overlay
+│   │   └── status-bar.css        # Bottom status bar
+│   ├── contexts/                 # React Context providers (useReducer-based state management)
+│   │   ├── ConfigContext.jsx     # Core data model — intermediate config, vendors, sanitization, rules
+│   │   ├── UIContext.jsx         # Visual state — tabs, modals, loading, panel dimensions
+│   │   ├── ConversionContext.jsx # Output state — SRX output, warnings, summary
+│   │   ├── MergeContext.jsx      # Multi-firewall merge — config slots, cross-LS links
+│   │   └── UndoContext.jsx       # History stack — undo/redo with 50-deep snapshots
+│   ├── hooks/                    # Custom React hooks (extracted handler logic)
+│   │   ├── useConfig.js          # Parse, sanitize, CRUD rules, update config sections
+│   │   ├── useConversion.js      # Convert to SRX, merge convert
+│   │   ├── useLLM.js             # LLM translate, group, bulk operations
+│   │   ├── useProject.js         # Save/load project files
+│   │   ├── useUndoRedo.js        # Undo, redo, push snapshot
+│   │   ├── useResizablePanel.js  # Drag-to-resize panels with localStorage persistence
+│   │   └── useKeyboardShortcuts.js # 39 keyboard shortcuts with centralized registry
 │   ├── components/
-│   │   ├── ConfigInput.jsx       # Left panel — paste/upload config, parse/sanitize, greenfield start
-│   │   ├── PolicyTable.jsx       # Center panel — sortable/filterable/editable rule table
-│   │   ├── ZoneEditor.jsx        # Center panel tab — zone editing
-│   │   ├── ObjectEditor.jsx      # Center panel tab — address/service object editing
-│   │   ├── NATEditor.jsx         # Center panel tab — NAT rule editing
-│   │   ├── RoutingEditor.jsx     # Center panel tab — static route + routing context editing
-│   │   ├── VPNEditor.jsx         # Center panel tab — VPN/IPsec tunnel editing
-│   │   ├── GreenfieldChat.jsx    # Center panel — LLM-guided greenfield config builder
-│   │   ├── InterviewPanel.jsx    # Right panel — rule details, LLM review, accept
-│   │   ├── SRXOutput.jsx         # Bottom panel — SRX output display
-│   │   ├── WarningsPanel.jsx     # Bottom panel — conversion warnings + optimization suggestions
-│   │   ├── DiffPanel.jsx         # Bottom panel — source vs LLM-translated policy diff view
-│   │   ├── ModelSelector.jsx     # Modal — source/target hardware model picker + site identification
+│   │   ├── layout/               # IDE-style 4-panel layout components
+│   │   │   ├── TopBar.jsx        # Brand, stats badges, action buttons
+│   │   │   ├── LeftSidebar.jsx   # Collapsible sidebar wrapping NavTree
+│   │   │   ├── RightPanel.jsx    # Collapsible inspector with InterviewPanel
+│   │   │   ├── StatusBar.jsx     # Bottom bar — model, rules, warnings, undo depth
+│   │   │   ├── ContentRouter.jsx # Maps editTab to 17 editor components
+│   │   │   ├── Breadcrumb.jsx    # Path display (e.g., Security > Policies)
+│   │   │   ├── ResizeHandle.jsx  # Drag handle for panel borders
+│   │   │   └── CommandPalette.jsx # Ctrl+P fuzzy search overlay
+│   │   ├── nav/                  # Navigation tree components
+│   │   │   ├── NavTree.jsx       # Hierarchical nav with collapsible groups and count badges
+│   │   │   └── NavTreeItem.jsx   # Single nav item with badge
+│   │   ├── shared/               # Reusable UI components
+│   │   │   ├── ConfirmModal.jsx  # Confirmation dialog with severity levels
+│   │   │   ├── ActionChip.jsx    # Color-coded permit/deny/reject chip
+│   │   │   ├── Badge.jsx         # Count/status badge
+│   │   │   └── Tooltip.jsx       # Hover tooltip
+│   │   ├── ConfigInput.jsx       # Import panel — paste/upload config, parse, greenfield start
+│   │   ├── PolicyTable.jsx       # Policy table — sortable/filterable/editable rules
+│   │   ├── InterviewPanel.jsx    # Rule details panel — inline editing, accept, LLM progress
+│   │   ├── ZoneEditor.jsx        # Zone editing
+│   │   ├── ObjectEditor.jsx      # Address/service object editing
+│   │   ├── NATEditor.jsx         # NAT rule editing
+│   │   ├── RoutingEditor.jsx     # Static routes, BGP, OSPF, EVPN/VxLAN editing
+│   │   ├── VPNEditor.jsx         # VPN/IPsec tunnel editing
+│   │   ├── GreenfieldChat.jsx    # LLM-guided greenfield config builder
+│   │   ├── SRXOutput.jsx         # SRX output display (set commands / XML)
+│   │   ├── WarningsPanel.jsx     # Conversion warnings + optimization suggestions
+│   │   ├── DiffPanel.jsx         # Source vs LLM-translated policy diff view
+│   │   ├── BulkActionBar.jsx     # Floating bar for multi-select rule operations
+│   │   ├── ModelSelector.jsx     # Modal — source/target hardware model picker
 │   │   ├── InterfaceMapper.jsx   # Modal — per-zone interface mapping
-│   │   ├── FeedbackModal.jsx     # Modal — feedback/suggestion submission via GitHub Issues
-│   │   ├── SaveProjectModal.jsx  # Modal — project naming before download (.fpic.json)
-│   │   ├── LLMSettings.jsx       # Modal — LLM provider config, MCP connection, system prompts
-│   │   └── sample-configs.jsx    # Built-in sample configs (PAN-OS, SRX, FortiGate, Cisco, Check Point, SonicWall, Huawei)
+│   │   ├── FeedbackModal.jsx     # Modal — feedback submission via GitHub Issues
+│   │   ├── SaveProjectModal.jsx  # Modal — project naming before download
+│   │   ├── ReportModal.jsx       # Modal — migration report generation
+│   │   ├── LLMSettings.jsx       # Modal — LLM provider config, MCP, system prompts
+│   │   ├── GuidedTour.jsx        # 6-step spotlight walkthrough for new users
+│   │   └── sample-configs.jsx    # Built-in sample configs (7 vendors)
 │   ├── utils/
+│   │   ├── engine.js             # Client-side parse/convert/sanitize API boundary
 │   │   ├── llm-client.js         # Browser-side LLM API client (multi-provider)
 │   │   ├── project-io.js         # Save/load project serialization, validation, migration
-│   │   └── srx-view-transforms.js # SRX display transforms + license tier data
+│   │   ├── srx-view-transforms.js # SRX display transforms + license tier data
+│   │   ├── safe-json.js          # Prototype-pollution-safe JSON parsing
+│   │   └── auto-split.js         # Multi-context auto-split and cross-LS detection
 │   └── data/
-│       ├── hardware-db.js        # PAN-OS, SRX, FortiGate, Cisco, Check Point, SonicWall + Huawei model database (current + EOS)
+│       ├── hardware-db.js        # 7-vendor model database (current + EOS)
 │       └── greenfield-templates.js # Pre-built greenfield templates (branch, datacenter, campus, cloud, blank)
 └── dist/                         # Production build output (generated, fully static)
 ```
@@ -380,6 +420,7 @@ MCP server configuration is stored in `localStorage` under the key `mcp-settings
 ## Tech Stack
 
 - **Frontend**: React 18, JSX (no TypeScript, no bundled CSS framework)
+- **State**: 5 React Contexts with `useReducer` + 7 custom hooks
 - **Parsing**: fast-xml-parser (runs in-browser)
 - **Build**: Vite 5 with `@vitejs/plugin-react`
 - **Styling**: Custom CSS with dark theme (CSS variables, no preprocessor)

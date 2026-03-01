@@ -196,6 +196,40 @@
 - [x] **Navbar Report button** — Appears alongside Interfaces button when config is parsed and target model selected. Opens ReportModal.
 - [x] **Rule group support** — Report displays policies grouped by LLM-generated rule groups when available, with ungrouped policies in a separate section.
 
+### Rev13 — IDE-Style GUI Redesign
+- [x] **Context architecture** — Decomposed monolithic `app.jsx` (2382 lines, ~50 useState calls) into 5 React Contexts with `useReducer`:
+  - `ConfigContext` — Core data model (intermediate config, source/target vendor, sanitization, rule groups, warning statuses)
+  - `UIContext` — Visual state (active tab, selected rule, modals, loading, panel dimensions, command palette)
+  - `ConversionContext` — Output state (SRX output, warnings, summary, format, target context)
+  - `MergeContext` — Multi-firewall merge mode (config slots, active slot, cross-LS links)
+  - `UndoContext` — History stack (max 50 snapshots of intermediate config, undo/redo)
+- [x] **Custom hooks** — 7 hooks extracting handler logic from app.jsx:
+  - `useConfig` — parse, sanitize, CRUD rules, update zones/NAT/VPN/HA/etc.
+  - `useConversion` — convert to SRX, merge convert
+  - `useLLM` — translate with LLM, group with AI, bulk accept/delete/toggle/move
+  - `useProject` — save/load project files
+  - `useUndoRedo` — undo, redo, push snapshot
+  - `useResizablePanel` — mouse drag resize with min/max constraints, localStorage persistence
+  - `useKeyboardShortcuts` — 39 keyboard shortcuts with centralized registry
+- [x] **IDE-style 4-panel layout** — Flex-based layout replacing CSS Grid:
+  - TopBar: brand, stats badges, action buttons
+  - Left sidebar: collapsible NavTree with icon-only mode (48px collapsed, 260px expanded)
+  - Center: breadcrumb + content router rendering all 17 editor views
+  - Right inspector: InterviewPanel with rule details, collapsible with visible re-expand tab
+  - Bottom status bar: source/target model, rule progress, warning count, undo depth
+- [x] **Navigation tree** — Hierarchical nav replacing 13 flat tabs:
+  - Import / Config, Sanitized Objects, Security (Policies, NAT, Zones, Screens), Objects, Network (Intf/Routing, VPN, DHCP), System (HA, QoS, Syslog), Output (SRX Config, Warnings, Diff)
+  - Inline SVG icons, count badges auto-updated from intermediate config
+  - Groups expand/collapse with arrow toggle
+- [x] **Sanitized Objects nav item** — Dedicated persistent view (second in left nav after Import) showing full sanitization mapping table with type badges, summary counts, and restore status. Only appears after parsing when sanitization produced results
+- [x] **Right inspector wired to InterviewPanel** — Full rule details on click: editable fields, zone dropdowns, security profiles, translation notes, accept button. Routes to correct update handler (translated vs source view)
+- [x] **Collapsible panels** — Left sidebar and right inspector both collapsible. Right panel shows 24px clickable tab strip when collapsed for re-expansion. Double-click resize handle to toggle
+- [x] **Command palette** — Ctrl+P overlay with fuzzy search across 21+ commands and dynamic zone commands
+- [x] **ContentRouter** — Maps `editTab` to all 17 editor components, bridging context data to existing prop-based components
+- [x] **Keyboard shortcuts** — 39 shortcuts including Ctrl+Z/Y undo/redo, Ctrl+P command palette, Ctrl+B/Shift+B panel toggles, Ctrl+1-4 nav, j/k/a/n rule navigation
+- [x] **Default to Import** — App opens on Import/Config view instead of empty Policies tab
+- [x] **app.jsx reduced from 2382 to ~450 lines** — Layout shell with context hooks, remaining greenfield/merge handlers, modal rendering
+
 ### Blocked — Waiting on Vendor APIs
 - [ ] **Push to SDC / SD On-Prem / Mist** — Direct deployment to Juniper management platforms. Requires HPE Juniper public REST APIs. UI placeholder already present ("Push via MCP" button)
 

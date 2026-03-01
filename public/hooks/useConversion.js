@@ -73,8 +73,8 @@ export default function useConversion() {
         format,
       });
 
-      // Reset warning statuses and switch to output tab
-      uiDispatch({ type: 'SET_FIELD', field: 'bottomTab', value: 'output' });
+      // Switch to Output > SRX Config in the nav tree
+      uiDispatch({ type: 'SET_FIELD', field: 'editTab', value: 'output' });
     } catch (err) {
       uiDispatch({ type: 'SET_FIELD', field: 'error', value: `Conversion error: ${err.message}` });
     } finally {
@@ -136,7 +136,7 @@ export default function useConversion() {
         format,
       });
 
-      uiDispatch({ type: 'SET_FIELD', field: 'bottomTab', value: 'output' });
+      uiDispatch({ type: 'SET_FIELD', field: 'editTab', value: 'output' });
     } catch (err) {
       uiDispatch({ type: 'SET_FIELD', field: 'error', value: `Merge conversion error: ${err.message}` });
     } finally {

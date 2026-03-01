@@ -97,7 +97,7 @@ export default function SRXOutput({ output, format, summary, isParsed, sanitizat
   const outputText = getOutputText();
 
   return (
-    <div>
+    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, padding: '0 12px 12px' }}>
       {/* Conversion summary */}
       {summary && (
         <div className="conversion-summary">
@@ -112,7 +112,7 @@ export default function SRXOutput({ output, format, summary, isParsed, sanitizat
       )}
 
       {/* Action buttons */}
-      <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
+      <div style={{ display: 'flex', gap: '8px', marginBottom: '8px', flexShrink: 0 }}>
         <button className="btn btn-secondary btn-sm" onClick={handleDownload}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
@@ -129,8 +129,8 @@ export default function SRXOutput({ output, format, summary, isParsed, sanitizat
         </span>
       </div>
 
-      {/* Output code block */}
-      <pre className="output-code">
+      {/* Output code block — fills remaining space */}
+      <pre className="output-code" style={{ flex: 1, minHeight: 0, overflow: 'auto', margin: 0 }}>
         {format === 'xml' ? (
           outputText
         ) : (

@@ -101,7 +101,7 @@ export default function ContentRouter({
   // --- Import / Config Input ---
   if (editTab === 'import') {
     return (
-      <div className="center-content" style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
+      <div className="center-content" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
         <ConfigInput
           configText={mergeMode ? (configSlots[activeSlotIndex]?.configText || '') : cfg.configText}
           onConfigChange={mergeMode
@@ -502,9 +502,9 @@ export default function ContentRouter({
   // --- Output / Warnings / Diff ---
   if (editTab === 'output') {
     return (
-      <div className="center-content" style={{ flex: 1, overflow: 'auto', display: 'flex', flexDirection: 'column' }}>
+      <div className="center-content" style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
         {srxOutput && (
-          <div style={{ display: 'flex', gap: 4, padding: '8px 12px', borderBottom: '1px solid var(--border-color)' }}>
+          <div style={{ display: 'flex', gap: 4, padding: '8px 12px', borderBottom: '1px solid var(--border-color)', flexShrink: 0 }}>
             <button className={`format-btn ${outputFormat === 'set' ? 'active' : ''}`} onClick={() => conversion.handleConvert('set')}>Set Commands</button>
             <button className={`format-btn ${outputFormat === 'xml' ? 'active' : ''}`} onClick={() => conversion.handleConvert('xml')}>XML</button>
           </div>

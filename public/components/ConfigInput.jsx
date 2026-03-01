@@ -146,7 +146,7 @@ export default function ConfigInput({
   };
 
   return (
-    <div className="panel config-input-panel" data-tour="config-input">
+    <div className="panel config-input-panel" data-tour="config-input" style={{ flex: 1, minHeight: 0 }}>
       <div className="panel-header">
         <h2>Source Configuration</h2>
         <select
@@ -207,7 +207,7 @@ export default function ConfigInput({
         </div>
       )}
 
-      <div className="panel-body" style={{ display: 'flex', flexDirection: 'column' }}>
+      <div className="panel-body" style={{ display: 'flex', flexDirection: 'column', minHeight: 0 }}>
         {/* Model badges — shown after models are selected */}
         {isParsed && (sourceModel || targetModel) && (
           <div
@@ -312,6 +312,26 @@ export default function ConfigInput({
               </div>
             </div>
 
+            {/* Parse button */}
+            <button
+              className="btn btn-primary btn-block"
+              data-tour="parse-btn"
+              onClick={() => onParse(selectedVendor)}
+              disabled={isLoading || !configText.trim()}
+              style={{ marginBottom: 4 }}
+            >
+              {isLoading ? (
+                <>
+                  <span className="loading-spinner" style={{ width: 14, height: 14 }} />
+                  Parsing...
+                </>
+              ) : isParsed ? (
+                'Re-Parse Configuration'
+              ) : (
+                'Parse Configuration'
+              )}
+            </button>
+
             {/* Config textarea */}
             <textarea
               className="config-textarea"
@@ -336,26 +356,6 @@ export default function ConfigInput({
               spellCheck={false}
               style={{ flex: 1 }}
             />
-
-            {/* Parse button */}
-            <button
-              className="btn btn-primary btn-block"
-              data-tour="parse-btn"
-              onClick={() => onParse(selectedVendor)}
-              disabled={isLoading || !configText.trim()}
-              style={{ marginTop: 4 }}
-            >
-              {isLoading ? (
-                <>
-                  <span className="loading-spinner" style={{ width: 14, height: 14 }} />
-                  Parsing...
-                </>
-              ) : isParsed ? (
-                'Re-Parse Configuration'
-              ) : (
-                'Parse Configuration'
-              )}
-            </button>
 
           </>
         )}

@@ -46,6 +46,7 @@ import { safeJsonParse } from './utils/safe-json.js';
 import BulkActionBar from './components/BulkActionBar.jsx';
 import GuidedTour from './components/GuidedTour.jsx';
 import { parseConfig, convertConfig, mergeConvert, sanitizeConfig } from './utils/engine.js';
+import ReportModal from './components/ReportModal.jsx';
 
 export default function App() {
   // --- Config input state ---
@@ -102,6 +103,7 @@ export default function App() {
   const [bottomTab, setBottomTab] = useState('output');
   const [error, setError] = useState(null);
   const [showSaveModal, setShowSaveModal] = useState(false);
+  const [showReportModal, setShowReportModal] = useState(false);
   const [showLoadConfirm, setShowLoadConfirm] = useState(null);
   const projectFileInputRef = React.useRef(null);
 
@@ -1383,6 +1385,15 @@ export default function App() {
               Interfaces
             </button>
           )}
+          {intermediateConfig && targetModel && !isHealthCheckMode && (
+            <button
+              className="btn btn-secondary btn-sm"
+              onClick={() => setShowReportModal(true)}
+              title="Generate migration report"
+            >
+              Report
+            </button>
+          )}
           <button
             className="settings-btn"
             onClick={() => {
@@ -2250,6 +2261,18 @@ export default function App() {
           defaultName={generateProjectName(sourceVendor, sourceModel, siteName)}
           onSave={handleSaveProject}
           onClose={() => setShowSaveModal(false)}
+        />
+      )}
+
+      {/* Report Modal */}
+      {showReportModal && intermediateConfig && (
+        <ReportModal
+          data={{
+            sourceVendor, sourceModel, targetModel, siteName, siteGroup,
+            intermediateConfig, interfaceMappings, conversionSummary,
+            parseWarnings, convertWarnings, isSanitized, ruleGroups,
+          }}
+          onClose={() => setShowReportModal(false)}
         />
       )}
 

@@ -190,6 +190,12 @@
 - [x] **InterfaceMapper IPv6 display** — Shows `v6:` prefix with IPv6 address below interface name in mapping table
 - [x] **Dual-stack sample configs** — SRX, FortiGate, Cisco ASA, PAN-OS samples updated with IPv6 interface addresses
 
+### Rev12 — Migration Report Generation
+- [x] **`generateReportHtml()` utility** — Self-contained HTML report generator with 12 sections (executive summary, zones, interfaces, policies, NAT, address/service objects, routing, warnings, conversion stats). Dark theme with print-friendly `@media print` overrides. Collapsible sections. XSS-safe HTML escaping.
+- [x] **ReportModal component** — Modal with summary stats grid and "Generate & Download" button. Blob download as `.html` file.
+- [x] **Navbar Report button** — Appears alongside Interfaces button when config is parsed and target model selected. Opens ReportModal.
+- [x] **Rule group support** — Report displays policies grouped by LLM-generated rule groups when available, with ungrouped policies in a separate section.
+
 ### Blocked — Waiting on Vendor APIs
 - [ ] **Push to SDC / SD On-Prem / Mist** — Direct deployment to Juniper management platforms. Requires HPE Juniper public REST APIs. UI placeholder already present ("Push via MCP" button)
 

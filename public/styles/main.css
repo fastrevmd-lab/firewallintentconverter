@@ -360,6 +360,20 @@ html, body, #root {
   flex: 1;
 }
 
+/* Virtual scroll spacer rows — invisible, maintain scroll height */
+.policy-table .virtual-spacer td {
+  padding: 0 !important;
+  border: none !important;
+  background: transparent !important;
+  line-height: 0;
+}
+
+.policy-table .virtual-group-header-row td {
+  padding: 0 !important;
+  border: none !important;
+  background: transparent !important;
+}
+
 .policy-table {
   width: 100%;
   border-collapse: collapse;

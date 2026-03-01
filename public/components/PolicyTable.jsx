@@ -6,9 +6,13 @@
  * Shows review status labels (Disabled/Unreviewed/LLM Reviewed/Accepted).
  *
  * viewMode: 'panos' shows PAN-OS terminology, 'srx' shows SRX terminology.
+ *
+ * Uses useVirtualScroll for windowed rendering — only ~60-80 rows in the DOM
+ * at any time, regardless of total rule count.
  */
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { mapActionToSrx, buildApplicationServices } from '../utils/srx-view-transforms.js';
+import useVirtualScroll from '../hooks/useVirtualScroll.js';
 
 export default function PolicyTable({
   policies,
@@ -652,7 +656,7 @@ export default function PolicyTable({
     for (const p of pols) {
       const from = (p.src_zones || []).join(', ') || 'any';
       const to = (p.dst_zones || []).join(', ') || 'any';
-      const key = `${from} → ${to}`;
+      const key = `${from} \u2192 ${to}`;
       if (!groupMap[key]) {
         groupMap[key] = { key, from, to, policies: [] };
         groups.push(groupMap[key]);
@@ -662,203 +666,9 @@ export default function PolicyTable({
     return groups;
   };
 
-  /** Render the PAN-OS view table (original layout) */
-  const renderPanosTable = () => (
-    <table className="policy-table">
-      <thead>
-        <tr>
-          {renderHeaderCheckbox()}
-          <th onClick={() => handleSort('_rule_index')}>#{sortIndicator('_rule_index')}</th>
-          <th onClick={() => handleSort('name')}>Name{sortIndicator('name')}</th>
-          {hasIdentityPolicies && <th>Users</th>}
-          <th onClick={() => handleSort('src_zones')}>Src Zone{sortIndicator('src_zones')}</th>
-          <th onClick={() => handleSort('dst_zones')}>Dst Zone{sortIndicator('dst_zones')}</th>
-          <th onClick={() => handleSort('src_addresses')}>Source{sortIndicator('src_addresses')}</th>
-          <th onClick={() => handleSort('dst_addresses')}>Destination{sortIndicator('dst_addresses')}</th>
-          <th onClick={() => handleSort('applications')}>App / Service{sortIndicator('applications')}</th>
-          <th>Profiles</th>
-          <th onClick={() => handleSort('action')}>Action{sortIndicator('action')}</th>
-          <th>Log</th>
-          <th style={{ width: 36 }}></th>
-        </tr>
-      </thead>
-      <tbody>
-        {displayPolicies.map((policy) => {
-          const isSelected = selectedRule?.name === policy.name && selectedRule?._rule_index === policy._rule_index;
-          const realIndex = getRealIndex(policy);
-
-          return (
-            <tr
-              key={`${policy.name}-${policy._rule_index}`}
-              className={`${isSelected ? 'selected' : ''} ${selectedRuleKeys.has(makeKey(policy)) ? 'bulk-selected' : ''} ${policy.disabled ? 'disabled-rule' : ''} ${policy._implicit ? 'implicit-rule' : ''}`}
-              onClick={(e) => handleRowClick(policy, isSelected, e)}
-              style={{ cursor: 'pointer' }}
-            >
-              {renderRowCheckbox(policy)}
-              <td>{policy._rule_index}</td>
-              <td title={policy.name}>
-                {policy._implicit && <span className="cell-chip implicit-chip">Implicit</span>}
-                {renderEditableCell(policy, 'name', policy.name)}
-              </td>
-              {hasIdentityPolicies && <td>{renderCellValues(policy.source_users || [])}</td>}
-              <td>{renderEditableCell(policy, 'src_zones', renderCellValues(policy.src_zones))}</td>
-              <td>{renderEditableCell(policy, 'dst_zones', renderCellValues(policy.dst_zones))}</td>
-              <td>{renderEditableCell(policy, 'src_addresses', <>{policy.negate_source && <span className="cell-chip negate-chip">NOT</span>}{renderCellValues(policy.src_addresses)}</>)}</td>
-              <td>{renderEditableCell(policy, 'dst_addresses', <>{policy.negate_destination && <span className="cell-chip negate-chip">NOT</span>}{renderCellValues(policy.dst_addresses)}</>)}</td>
-              <td>{renderEditableCell(policy, 'applications', renderCellValues([...policy.applications, ...policy.services.filter(s => s !== 'application-default')]))}</td>
-              <td>{renderProfileCell(policy)}</td>
-              <td>
-                <span className={`action-${policy.action === 'allow' ? 'permit' : 'deny'}`}>
-                  {policy.action}
-                </span>
-              </td>
-              <td style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                {getDisplayLog(policy)}
-              </td>
-              <td>
-                <button
-                  className="btn-icon btn-icon-danger"
-                  onClick={(e) => { e.stopPropagation(); onDeleteRule(realIndex); }}
-                  title="Delete rule"
-                >
-                  x
-                </button>
-              </td>
-            </tr>
-          );
-        })}
-      </tbody>
-    </table>
-  );
-
-  /** Render the SRX Security Director-style table */
-  const renderSrxTable = () => {
-    const zonePairGroups = groupByZonePair(displayPolicies);
-    const srxColCount = (hasIdentityPolicies ? 9 : 8) + 1; // +1 for checkbox column
-
-    return (
-      <table className="policy-table srx-table">
-        <thead>
-          <tr>
-            {renderHeaderCheckbox()}
-            <th onClick={() => handleSort('_rule_index')} style={{ width: 52 }}>Seq{sortIndicator('_rule_index')}</th>
-            <th onClick={() => handleSort('name')}>Name{sortIndicator('name')}</th>
-            <th>Sources</th>
-            <th>Destinations</th>
-            <th onClick={() => handleSort('applications')}>Applications / Ports{sortIndicator('applications')}</th>
-            {hasIdentityPolicies && <th>Source Identity</th>}
-            <th onClick={() => handleSort('action')} style={{ width: 100 }}>Action{sortIndicator('action')}</th>
-            <th>Security Subscriptions</th>
-            <th style={{ width: 70 }}>Options</th>
-          </tr>
-        </thead>
-        <tbody>
-          {zonePairGroups.map((group) => (
-            <React.Fragment key={group.key}>
-              {/* Zone-pair group header */}
-              <tr className="srx-zone-group-row">
-                <td colSpan={srxColCount}>
-                  <div className="srx-zone-group-label">
-                    <span className="srx-zone-group-arrow">{'\u25BC'}</span>
-                    <span>ZONE</span>
-                    <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--accent)' }}>{group.from}</span>
-                    <span style={{ color: 'var(--text-muted)' }}>{'\u2192'}</span>
-                    <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--accent)' }}>{group.to}</span>
-                    <span className="srx-zone-group-count">({group.policies.length} {group.policies.length === 1 ? 'Rule' : 'Rules'})</span>
-                  </div>
-                </td>
-              </tr>
-              {/* Policies in this group */}
-              {group.policies.map((policy) => {
-                const status = getRuleStatus(policy);
-                const warnStatus = getWarningStatus(policy);
-                const isSelected = selectedRule?.name === policy.name && selectedRule?._rule_index === policy._rule_index;
-                const realIndex = getRealIndex(policy);
-
-                return (
-                  <tr
-                    key={`${policy.name}-${policy._rule_index}`}
-                    className={`${isSelected ? 'selected' : ''} ${selectedRuleKeys.has(makeKey(policy)) ? 'bulk-selected' : ''} ${policy.disabled ? 'disabled-rule' : ''} ${policy._implicit ? 'implicit-rule' : ''}`}
-                    onClick={(e) => handleRowClick(policy, isSelected, e)}
-                    style={{ cursor: 'pointer' }}
-                  >
-                    {renderRowCheckbox(policy)}
-                    <td>
-                      <div className="srx-seq">{policy._rule_index}</div>
-                    </td>
-                    <td>
-                      <div>
-                        {policy._implicit && <span className="cell-chip implicit-chip">Implicit</span>}
-                        {renderEditableCell(policy, 'name', (
-                          <span style={{ fontWeight: 500 }}>{policy.name}</span>
-                        ))}
-                      </div>
-                      <div style={{ marginTop: 4 }}>
-                        <span className={`status-label status-${status}`}>
-                          {statusLabels[status]}
-                        </span>
-                        {warnStatus !== 'clean' && (
-                          <span className={`status-dot ${warnStatus}`} data-tooltip={warningTooltips[warnStatus] || warnStatus} style={{ marginLeft: 4 }} />
-                        )}
-                      </div>
-                    </td>
-                    <td>
-                      <div
-                        className="editable-cell"
-                        onDoubleClick={(e) => {
-                          e.stopPropagation();
-                          startEdit(realIndex, 'src_addresses', policy.src_addresses);
-                        }}
-                        title="Double-click to edit addresses"
-                      >
-                        {renderSrxSourceDest(policy, 'src')}
-                      </div>
-                    </td>
-                    <td>
-                      <div
-                        className="editable-cell"
-                        onDoubleClick={(e) => {
-                          e.stopPropagation();
-                          startEdit(realIndex, 'dst_addresses', policy.dst_addresses);
-                        }}
-                        title="Double-click to edit addresses"
-                      >
-                        {renderSrxSourceDest(policy, 'dst')}
-                      </div>
-                    </td>
-                    <td>
-                      <div
-                        className="editable-cell"
-                        onDoubleClick={(e) => {
-                          e.stopPropagation();
-                          startEdit(realIndex, 'applications', policy.applications);
-                        }}
-                        title="Double-click to edit"
-                      >
-                        {renderSrxApps(policy)}
-                      </div>
-                    </td>
-                    {hasIdentityPolicies && <td>{renderCellValues(policy.source_users || [])}</td>}
-                    <td>{renderSrxAction(policy)}</td>
-                    <td>{renderSrxSubscriptions(policy)}</td>
-                    <td style={{ textAlign: 'center' }}>
-                      <button
-                        className="btn-icon btn-icon-danger"
-                        onClick={(e) => { e.stopPropagation(); onDeleteRule(realIndex); }}
-                        title="Delete policy"
-                      >
-                        x
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </React.Fragment>
-          ))}
-        </tbody>
-      </table>
-    );
-  };
+  // ---------------------------------------------------------------------------
+  // FortiGate helpers
+  // ---------------------------------------------------------------------------
 
   /** FortiGate action display */
   const renderFortigateAction = (policy) => {
@@ -919,310 +729,9 @@ export default function PolicyTable({
       : <span className="fg-status-enabled" title="Policy enabled">ON</span>;
   };
 
-  /** Render the FortiGate / FortiOS view table */
-  const renderFortigateTable = () => (
-    <table className="policy-table fg-table">
-      <thead>
-        <tr>
-          {renderHeaderCheckbox()}
-          <th onClick={() => handleSort('_rule_index')} style={{ width: 44 }}>Seq{sortIndicator('_rule_index')}</th>
-          <th onClick={() => handleSort('name')}>Name{sortIndicator('name')}</th>
-          <th onClick={() => handleSort('src_zones')}>From{sortIndicator('src_zones')}</th>
-          <th onClick={() => handleSort('dst_zones')}>To{sortIndicator('dst_zones')}</th>
-          <th onClick={() => handleSort('src_addresses')}>Source{sortIndicator('src_addresses')}</th>
-          <th onClick={() => handleSort('dst_addresses')}>Destination{sortIndicator('dst_addresses')}</th>
-          {hasIdentityPolicies && <th>Users</th>}
-          <th>Schedule</th>
-          <th onClick={() => handleSort('services')}>Service{sortIndicator('services')}</th>
-          <th onClick={() => handleSort('action')} style={{ width: 90 }}>Action{sortIndicator('action')}</th>
-          <th style={{ width: 52 }}>NAT</th>
-          <th>Security Profiles</th>
-          <th style={{ width: 40 }}>Log</th>
-          <th style={{ width: 36 }}></th>
-        </tr>
-      </thead>
-      <tbody>
-        {displayPolicies.map((policy) => {
-          const isSelected = selectedRule?.name === policy.name && selectedRule?._rule_index === policy._rule_index;
-          const realIndex = getRealIndex(policy);
-          const fg = policy._fortigate || {};
-
-          return (
-            <tr
-              key={`${policy.name}-${policy._rule_index}`}
-              className={`${isSelected ? 'selected' : ''} ${selectedRuleKeys.has(makeKey(policy)) ? 'bulk-selected' : ''} ${policy.disabled ? 'disabled-rule fg-disabled-row' : ''} ${policy._implicit ? 'implicit-rule' : ''}`}
-              onClick={(e) => handleRowClick(policy, isSelected, e)}
-              style={{ cursor: 'pointer' }}
-            >
-              {renderRowCheckbox(policy)}
-              <td>
-                <div className="fg-seq">
-                  {renderFortigateStatus(policy)}
-                  <span className="fg-seq-id">{fg.policyid || policy._rule_index}</span>
-                </div>
-              </td>
-              <td>
-                {policy._implicit && <span className="cell-chip implicit-chip">Implicit</span>}
-                {renderEditableCell(policy, 'name', (
-                  <span className="fg-name">{policy.name}</span>
-                ))}
-              </td>
-              <td>{renderEditableCell(policy, 'src_zones', renderCellValues(policy.src_zones))}</td>
-              <td>{renderEditableCell(policy, 'dst_zones', renderCellValues(policy.dst_zones))}</td>
-              <td>
-                {renderEditableCell(policy, 'src_addresses', (
-                  <>{policy.negate_source && <span className="cell-chip negate-chip">NOT</span>}{renderCellValues(policy.src_addresses)}</>
-                ))}
-              </td>
-              <td>
-                {renderEditableCell(policy, 'dst_addresses', (
-                  <>{policy.negate_destination && <span className="cell-chip negate-chip">NOT</span>}{renderCellValues(policy.dst_addresses)}</>
-                ))}
-              </td>
-              {hasIdentityPolicies && <td>{renderCellValues(policy.source_users || [])}</td>}
-              <td>
-                <span className="fg-schedule">{fg.schedule || 'always'}</span>
-              </td>
-              <td>{renderEditableCell(policy, 'services', renderCellValues(policy.services))}</td>
-              <td>{renderFortigateAction(policy)}</td>
-              <td>{renderFortigateNat(policy)}</td>
-              <td>{renderFortigateProfiles(policy)}</td>
-              <td style={{ fontSize: '11px', color: 'var(--text-muted)', textAlign: 'center' }}>
-                {policy.log_start && policy.log_end ? 'All' : policy.log_end ? 'UTM' : '-'}
-              </td>
-              <td>
-                <button
-                  className="btn-icon btn-icon-danger"
-                  onClick={(e) => { e.stopPropagation(); onDeleteRule(realIndex); }}
-                  title="Delete policy"
-                >
-                  x
-                </button>
-              </td>
-            </tr>
-          );
-        })}
-      </tbody>
-    </table>
-  );
-
-  /** Render Check Point SmartConsole-style table */
-  const renderCheckpointTable = () => (
-    <table className="policy-table cp-table">
-      <thead>
-        <tr>
-          {renderHeaderCheckbox()}
-          <th onClick={() => handleSort('_rule_index')} style={{ width: 44 }}>#{sortIndicator('_rule_index')}</th>
-          <th onClick={() => handleSort('name')}>Name{sortIndicator('name')}</th>
-          <th onClick={() => handleSort('src_addresses')}>Source{sortIndicator('src_addresses')}</th>
-          <th onClick={() => handleSort('dst_addresses')}>Destination{sortIndicator('dst_addresses')}</th>
-          {hasIdentityPolicies && <th>Users</th>}
-          <th onClick={() => handleSort('services')}>Services &amp; Apps{sortIndicator('services')}</th>
-          <th onClick={() => handleSort('action')} style={{ width: 80 }}>Action{sortIndicator('action')}</th>
-          <th>Track</th>
-          <th>Install On</th>
-          <th style={{ width: 36 }}></th>
-        </tr>
-      </thead>
-      <tbody>
-        {displayPolicies.map((policy) => {
-          const isSelected = selectedRule?.name === policy.name && selectedRule?._rule_index === policy._rule_index;
-          const realIndex = getRealIndex(policy);
-          const cp = policy._checkpoint || {};
-
-          return (
-            <tr
-              key={`${policy.name}-${policy._rule_index}`}
-              className={`${isSelected ? 'selected' : ''} ${selectedRuleKeys.has(makeKey(policy)) ? 'bulk-selected' : ''} ${policy.disabled ? 'disabled-rule' : ''} ${policy._implicit ? 'implicit-rule' : ''}`}
-              onClick={(e) => handleRowClick(policy, isSelected, e)}
-              style={{ cursor: 'pointer' }}
-            >
-              {renderRowCheckbox(policy)}
-              <td>{cp.ruleNumber || policy._rule_index}</td>
-              <td>
-                {policy._implicit && <span className="cell-chip implicit-chip">Implicit</span>}
-                {renderEditableCell(policy, 'name', policy.name)}
-                {cp.section && <span className="cell-chip" style={{ background: 'var(--bg-alt)', fontSize: '9px' }}>{cp.section}</span>}
-              </td>
-              <td>
-                {renderEditableCell(policy, 'src_addresses', (
-                  <>{policy.negate_source && <span className="cell-chip negate-chip">NOT</span>}{renderCellValues(policy.src_addresses)}</>
-                ))}
-              </td>
-              <td>
-                {renderEditableCell(policy, 'dst_addresses', (
-                  <>{policy.negate_destination && <span className="cell-chip negate-chip">NOT</span>}{renderCellValues(policy.dst_addresses)}</>
-                ))}
-              </td>
-              {hasIdentityPolicies && <td>{renderCellValues(policy.source_users || [])}</td>}
-              <td>{renderEditableCell(policy, 'services', renderCellValues(policy.services))}</td>
-              <td>
-                <span className={`action-${policy.action === 'allow' ? 'permit' : 'deny'}`}>
-                  {policy.action === 'allow' ? 'Accept' : 'Drop'}
-                </span>
-              </td>
-              <td style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                {policy.log_end ? 'Log' : 'None'}
-              </td>
-              <td style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
-                {(cp.installOn || []).join(', ') || 'Policy Targets'}
-              </td>
-              <td>
-                <button
-                  className="btn-icon btn-icon-danger"
-                  onClick={(e) => { e.stopPropagation(); onDeleteRule(realIndex); }}
-                  title="Delete rule"
-                >
-                  x
-                </button>
-              </td>
-            </tr>
-          );
-        })}
-      </tbody>
-    </table>
-  );
-
-  /** Render SonicWall-style table (zone-pair, similar to SRX but with priority + DPI columns) */
-  const renderSonicwallTable = () => (
-    <table className="policy-table sw-table">
-      <thead>
-        <tr>
-          {renderHeaderCheckbox()}
-          <th onClick={() => handleSort('_rule_index')} style={{ width: 50 }}>Pri{sortIndicator('_rule_index')}</th>
-          <th onClick={() => handleSort('name')}>Name{sortIndicator('name')}</th>
-          <th onClick={() => handleSort('src_zones')}>From{sortIndicator('src_zones')}</th>
-          <th onClick={() => handleSort('dst_zones')}>To{sortIndicator('dst_zones')}</th>
-          <th onClick={() => handleSort('src_addresses')}>Source{sortIndicator('src_addresses')}</th>
-          <th onClick={() => handleSort('dst_addresses')}>Destination{sortIndicator('dst_addresses')}</th>
-          {hasIdentityPolicies && <th>Users</th>}
-          <th onClick={() => handleSort('services')}>Service{sortIndicator('services')}</th>
-          <th onClick={() => handleSort('action')} style={{ width: 80 }}>Action{sortIndicator('action')}</th>
-          <th style={{ width: 40 }}>DPI</th>
-          <th style={{ width: 40 }}>Log</th>
-          <th style={{ width: 36 }}></th>
-        </tr>
-      </thead>
-      <tbody>
-        {displayPolicies.map((policy) => {
-          const isSelected = selectedRule?.name === policy.name && selectedRule?._rule_index === policy._rule_index;
-          const realIndex = getRealIndex(policy);
-          const sw = policy._sonicwall || {};
-
-          return (
-            <tr
-              key={`${policy.name}-${policy._rule_index}`}
-              className={`${isSelected ? 'selected' : ''} ${selectedRuleKeys.has(makeKey(policy)) ? 'bulk-selected' : ''} ${policy.disabled ? 'disabled-rule' : ''} ${policy._implicit ? 'implicit-rule' : ''}`}
-              onClick={(e) => handleRowClick(policy, isSelected, e)}
-              style={{ cursor: 'pointer' }}
-            >
-              {renderRowCheckbox(policy)}
-              <td>{sw.priority || policy._rule_index}</td>
-              <td>
-                {policy._implicit && <span className="cell-chip implicit-chip">Implicit</span>}
-                {renderEditableCell(policy, 'name', policy.name)}
-              </td>
-              <td>{renderEditableCell(policy, 'src_zones', renderCellValues(policy.src_zones))}</td>
-              <td>{renderEditableCell(policy, 'dst_zones', renderCellValues(policy.dst_zones))}</td>
-              <td>{renderEditableCell(policy, 'src_addresses', renderCellValues(policy.src_addresses))}</td>
-              <td>{renderEditableCell(policy, 'dst_addresses', renderCellValues(policy.dst_addresses))}</td>
-              {hasIdentityPolicies && <td>{renderCellValues(policy.source_users || [])}</td>}
-              <td>{renderEditableCell(policy, 'services', renderCellValues(policy.services))}</td>
-              <td>
-                <span className={`action-${policy.action === 'allow' ? 'permit' : 'deny'}`}>
-                  {policy.action === 'allow' ? 'Allow' : policy.action === 'deny' ? 'Deny' : policy.action}
-                </span>
-              </td>
-              <td style={{ textAlign: 'center', fontSize: '11px' }}>
-                {sw.dpi ? <span style={{ color: 'var(--accent)' }}>On</span> : <span style={{ opacity: 0.4 }}>-</span>}
-              </td>
-              <td style={{ textAlign: 'center', fontSize: '11px', color: 'var(--text-muted)' }}>
-                {policy.log_end ? 'Yes' : '-'}
-              </td>
-              <td>
-                <button
-                  className="btn-icon btn-icon-danger"
-                  onClick={(e) => { e.stopPropagation(); onDeleteRule(realIndex); }}
-                  title="Delete rule"
-                >
-                  x
-                </button>
-              </td>
-            </tr>
-          );
-        })}
-      </tbody>
-    </table>
-  );
-
-  /** Render Huawei USG-style table (zone-pair, named rules, profiles) */
-  const renderHuaweiTable = () => (
-    <table className="policy-table hw-table">
-      <thead>
-        <tr>
-          {renderHeaderCheckbox()}
-          <th onClick={() => handleSort('_rule_index')} style={{ width: 44 }}>#{sortIndicator('_rule_index')}</th>
-          <th onClick={() => handleSort('name')}>Rule Name{sortIndicator('name')}</th>
-          <th onClick={() => handleSort('src_zones')}>Src Zone{sortIndicator('src_zones')}</th>
-          <th onClick={() => handleSort('dst_zones')}>Dst Zone{sortIndicator('dst_zones')}</th>
-          <th onClick={() => handleSort('src_addresses')}>Source{sortIndicator('src_addresses')}</th>
-          <th onClick={() => handleSort('dst_addresses')}>Destination{sortIndicator('dst_addresses')}</th>
-          {hasIdentityPolicies && <th>Users</th>}
-          <th onClick={() => handleSort('services')}>Service{sortIndicator('services')}</th>
-          <th>Profiles</th>
-          <th onClick={() => handleSort('action')} style={{ width: 80 }}>Action{sortIndicator('action')}</th>
-          <th style={{ width: 40 }}>Log</th>
-          <th style={{ width: 36 }}></th>
-        </tr>
-      </thead>
-      <tbody>
-        {displayPolicies.map((policy) => {
-          const isSelected = selectedRule?.name === policy.name && selectedRule?._rule_index === policy._rule_index;
-          const realIndex = getRealIndex(policy);
-
-          return (
-            <tr
-              key={`${policy.name}-${policy._rule_index}`}
-              className={`${isSelected ? 'selected' : ''} ${selectedRuleKeys.has(makeKey(policy)) ? 'bulk-selected' : ''} ${policy.disabled ? 'disabled-rule' : ''} ${policy._implicit ? 'implicit-rule' : ''}`}
-              onClick={(e) => handleRowClick(policy, isSelected, e)}
-              style={{ cursor: 'pointer' }}
-            >
-              {renderRowCheckbox(policy)}
-              <td>{policy._rule_index}</td>
-              <td>
-                {policy._implicit && <span className="cell-chip implicit-chip">Implicit</span>}
-                {renderEditableCell(policy, 'name', policy.name)}
-              </td>
-              <td>{renderEditableCell(policy, 'src_zones', renderCellValues(policy.src_zones))}</td>
-              <td>{renderEditableCell(policy, 'dst_zones', renderCellValues(policy.dst_zones))}</td>
-              <td>{renderEditableCell(policy, 'src_addresses', renderCellValues(policy.src_addresses))}</td>
-              <td>{renderEditableCell(policy, 'dst_addresses', renderCellValues(policy.dst_addresses))}</td>
-              {hasIdentityPolicies && <td>{renderCellValues(policy.source_users || [])}</td>}
-              <td>{renderEditableCell(policy, 'services', renderCellValues(policy.services))}</td>
-              <td>{renderProfileCell(policy)}</td>
-              <td>
-                <span className={`action-${policy.action === 'allow' ? 'permit' : 'deny'}`}>
-                  {policy.action === 'allow' ? 'Permit' : 'Deny'}
-                </span>
-              </td>
-              <td style={{ textAlign: 'center', fontSize: '11px', color: 'var(--text-muted)' }}>
-                {policy.log_end ? 'Yes' : '-'}
-              </td>
-              <td>
-                <button
-                  className="btn-icon btn-icon-danger"
-                  onClick={(e) => { e.stopPropagation(); onDeleteRule(realIndex); }}
-                  title="Delete rule"
-                >
-                  x
-                </button>
-              </td>
-            </tr>
-          );
-        })}
-      </tbody>
-    </table>
-  );
+  // ---------------------------------------------------------------------------
+  // Cisco helpers
+  // ---------------------------------------------------------------------------
 
   /** Cisco ASDM/FMC action display */
   const renderCiscoAction = (policy) => {
@@ -1281,106 +790,485 @@ export default function PolicyTable({
     return <span className="cisco-hitcount">-</span>;
   };
 
-  /** Render the Cisco ASDM-style table */
-  const renderCiscoTable = () => (
-    <table className="policy-table cisco-table">
-      <thead>
-        <tr>
-          {renderHeaderCheckbox()}
-          <th onClick={() => handleSort('_rule_index')} style={{ width: 50 }}>#ACE{sortIndicator('_rule_index')}</th>
-          <th onClick={() => handleSort('action')} style={{ width: 80 }}>Action{sortIndicator('action')}</th>
-          <th onClick={() => handleSort('name')}>Name / Remark{sortIndicator('name')}</th>
-          <th>Protocol</th>
-          <th onClick={() => handleSort('src_addresses')}>Source{sortIndicator('src_addresses')}</th>
-          <th onClick={() => handleSort('dst_addresses')}>Destination{sortIndicator('dst_addresses')}</th>
-          {hasIdentityPolicies && <th>Users</th>}
-          <th>Service / Port</th>
-          <th style={{ width: 52 }}>Log</th>
-          <th style={{ width: 50 }}>Hits</th>
-          <th style={{ width: 36 }}></th>
-        </tr>
-      </thead>
-      <tbody>
-        {displayPolicies.map((policy) => {
-          const isSelected = selectedRule?.name === policy.name && selectedRule?._rule_index === policy._rule_index;
-          const realIndex = getRealIndex(policy);
-          const cisco = policy._cisco || {};
+  // =========================================================================
+  // HEADER RENDERERS — one per vendor view
+  // =========================================================================
 
-          return (
-            <tr
-              key={`${policy.name}-${policy._rule_index}`}
-              className={`${isSelected ? 'selected' : ''} ${selectedRuleKeys.has(makeKey(policy)) ? 'bulk-selected' : ''} ${policy.disabled ? 'disabled-rule cisco-inactive-row' : ''} ${policy._implicit ? 'implicit-rule' : ''}`}
-              onClick={(e) => handleRowClick(policy, isSelected, e)}
-              style={{ cursor: 'pointer' }}
-            >
-              {renderRowCheckbox(policy)}
-              <td>
-                <div className="cisco-ace-num">
-                  {policy._rule_index}
-                  {policy.disabled && <span className="cisco-inactive-badge">X</span>}
-                </div>
-              </td>
-              <td>{renderCiscoAction(policy)}</td>
-              <td>
-                <div className="cisco-name-cell">
-                  {policy._implicit && <span className="cell-chip implicit-chip">Implicit</span>}
-                  {renderEditableCell(policy, 'name', (
-                    <span className="cisco-rule-name">{policy.name}</span>
-                  ))}
-                  {cisco.aclName && (
-                    <span className="cisco-acl-badge" title={`ACL: ${cisco.aclName}`}>{cisco.aclName}</span>
-                  )}
-                  {renderCiscoSecLevel(policy)}
-                </div>
-              </td>
-              <td>{renderCiscoProtocol(policy)}</td>
-              <td>
-                {renderEditableCell(policy, 'src_addresses', (
-                  <div className="cisco-addr-cell">
-                    {(policy.src_zones || []).length > 0 && (
-                      <span className="cisco-iface-label" title={`Interface: ${policy.src_zones.join(', ')}`}>
-                        {policy.src_zones.join(', ')}
-                      </span>
-                    )}
-                    {policy.negate_source && <span className="cell-chip negate-chip">NOT</span>}
-                    {renderCellValues(policy.src_addresses)}
-                  </div>
-                ))}
-              </td>
-              <td>
-                {renderEditableCell(policy, 'dst_addresses', (
-                  <div className="cisco-addr-cell">
-                    {(policy.dst_zones || []).length > 0 && (
-                      <span className="cisco-iface-label" title={`Interface: ${policy.dst_zones.join(', ')}`}>
-                        {policy.dst_zones.join(', ')}
-                      </span>
-                    )}
-                    {policy.negate_destination && <span className="cell-chip negate-chip">NOT</span>}
-                    {renderCellValues(policy.dst_addresses)}
-                  </div>
-                ))}
-              </td>
-              {hasIdentityPolicies && <td>{renderCellValues(policy.source_users || [])}</td>}
-              <td>{renderEditableCell(policy, 'services', renderCiscoService(policy))}</td>
-              <td style={{ textAlign: 'center' }}>{renderCiscoLog(policy)}</td>
-              <td style={{ textAlign: 'center' }}>{renderCiscoHitCount(policy)}</td>
-              <td>
-                <button
-                  className="btn-icon btn-icon-danger"
-                  onClick={(e) => { e.stopPropagation(); onDeleteRule(realIndex); }}
-                  title="Delete ACE"
-                >
-                  x
-                </button>
-              </td>
-            </tr>
-          );
-        })}
-      </tbody>
-    </table>
+  const renderPanosHeader = () => (
+    <tr>
+      {renderHeaderCheckbox()}
+      <th onClick={() => handleSort('_rule_index')}>#{sortIndicator('_rule_index')}</th>
+      <th onClick={() => handleSort('name')}>Name{sortIndicator('name')}</th>
+      {hasIdentityPolicies && <th>Users</th>}
+      <th onClick={() => handleSort('src_zones')}>Src Zone{sortIndicator('src_zones')}</th>
+      <th onClick={() => handleSort('dst_zones')}>Dst Zone{sortIndicator('dst_zones')}</th>
+      <th onClick={() => handleSort('src_addresses')}>Source{sortIndicator('src_addresses')}</th>
+      <th onClick={() => handleSort('dst_addresses')}>Destination{sortIndicator('dst_addresses')}</th>
+      <th onClick={() => handleSort('applications')}>App / Service{sortIndicator('applications')}</th>
+      <th>Profiles</th>
+      <th onClick={() => handleSort('action')}>Action{sortIndicator('action')}</th>
+      <th>Log</th>
+      <th style={{ width: 36 }}></th>
+    </tr>
   );
 
-  /** Render a group header with collapse/rename/dissolve controls */
+  const renderSrxHeader = () => (
+    <tr>
+      {renderHeaderCheckbox()}
+      <th onClick={() => handleSort('_rule_index')} style={{ width: 52 }}>Seq{sortIndicator('_rule_index')}</th>
+      <th onClick={() => handleSort('name')}>Name{sortIndicator('name')}</th>
+      <th>Sources</th>
+      <th>Destinations</th>
+      <th onClick={() => handleSort('applications')}>Applications / Ports{sortIndicator('applications')}</th>
+      {hasIdentityPolicies && <th>Source Identity</th>}
+      <th onClick={() => handleSort('action')} style={{ width: 100 }}>Action{sortIndicator('action')}</th>
+      <th>Security Subscriptions</th>
+      <th style={{ width: 70 }}>Options</th>
+    </tr>
+  );
+
+  const renderFortigateHeader = () => (
+    <tr>
+      {renderHeaderCheckbox()}
+      <th onClick={() => handleSort('_rule_index')} style={{ width: 44 }}>Seq{sortIndicator('_rule_index')}</th>
+      <th onClick={() => handleSort('name')}>Name{sortIndicator('name')}</th>
+      <th onClick={() => handleSort('src_zones')}>From{sortIndicator('src_zones')}</th>
+      <th onClick={() => handleSort('dst_zones')}>To{sortIndicator('dst_zones')}</th>
+      <th onClick={() => handleSort('src_addresses')}>Source{sortIndicator('src_addresses')}</th>
+      <th onClick={() => handleSort('dst_addresses')}>Destination{sortIndicator('dst_addresses')}</th>
+      {hasIdentityPolicies && <th>Users</th>}
+      <th>Schedule</th>
+      <th onClick={() => handleSort('services')}>Service{sortIndicator('services')}</th>
+      <th onClick={() => handleSort('action')} style={{ width: 90 }}>Action{sortIndicator('action')}</th>
+      <th style={{ width: 52 }}>NAT</th>
+      <th>Security Profiles</th>
+      <th style={{ width: 40 }}>Log</th>
+      <th style={{ width: 36 }}></th>
+    </tr>
+  );
+
+  const renderCheckpointHeader = () => (
+    <tr>
+      {renderHeaderCheckbox()}
+      <th onClick={() => handleSort('_rule_index')} style={{ width: 44 }}>#{sortIndicator('_rule_index')}</th>
+      <th onClick={() => handleSort('name')}>Name{sortIndicator('name')}</th>
+      <th onClick={() => handleSort('src_addresses')}>Source{sortIndicator('src_addresses')}</th>
+      <th onClick={() => handleSort('dst_addresses')}>Destination{sortIndicator('dst_addresses')}</th>
+      {hasIdentityPolicies && <th>Users</th>}
+      <th onClick={() => handleSort('services')}>Services &amp; Apps{sortIndicator('services')}</th>
+      <th onClick={() => handleSort('action')} style={{ width: 80 }}>Action{sortIndicator('action')}</th>
+      <th>Track</th>
+      <th>Install On</th>
+      <th style={{ width: 36 }}></th>
+    </tr>
+  );
+
+  const renderSonicwallHeader = () => (
+    <tr>
+      {renderHeaderCheckbox()}
+      <th onClick={() => handleSort('_rule_index')} style={{ width: 50 }}>Pri{sortIndicator('_rule_index')}</th>
+      <th onClick={() => handleSort('name')}>Name{sortIndicator('name')}</th>
+      <th onClick={() => handleSort('src_zones')}>From{sortIndicator('src_zones')}</th>
+      <th onClick={() => handleSort('dst_zones')}>To{sortIndicator('dst_zones')}</th>
+      <th onClick={() => handleSort('src_addresses')}>Source{sortIndicator('src_addresses')}</th>
+      <th onClick={() => handleSort('dst_addresses')}>Destination{sortIndicator('dst_addresses')}</th>
+      {hasIdentityPolicies && <th>Users</th>}
+      <th onClick={() => handleSort('services')}>Service{sortIndicator('services')}</th>
+      <th onClick={() => handleSort('action')} style={{ width: 80 }}>Action{sortIndicator('action')}</th>
+      <th style={{ width: 40 }}>DPI</th>
+      <th style={{ width: 40 }}>Log</th>
+      <th style={{ width: 36 }}></th>
+    </tr>
+  );
+
+  const renderHuaweiHeader = () => (
+    <tr>
+      {renderHeaderCheckbox()}
+      <th onClick={() => handleSort('_rule_index')} style={{ width: 44 }}>#{sortIndicator('_rule_index')}</th>
+      <th onClick={() => handleSort('name')}>Rule Name{sortIndicator('name')}</th>
+      <th onClick={() => handleSort('src_zones')}>Src Zone{sortIndicator('src_zones')}</th>
+      <th onClick={() => handleSort('dst_zones')}>Dst Zone{sortIndicator('dst_zones')}</th>
+      <th onClick={() => handleSort('src_addresses')}>Source{sortIndicator('src_addresses')}</th>
+      <th onClick={() => handleSort('dst_addresses')}>Destination{sortIndicator('dst_addresses')}</th>
+      {hasIdentityPolicies && <th>Users</th>}
+      <th onClick={() => handleSort('services')}>Service{sortIndicator('services')}</th>
+      <th>Profiles</th>
+      <th onClick={() => handleSort('action')} style={{ width: 80 }}>Action{sortIndicator('action')}</th>
+      <th style={{ width: 40 }}>Log</th>
+      <th style={{ width: 36 }}></th>
+    </tr>
+  );
+
+  const renderCiscoHeader = () => (
+    <tr>
+      {renderHeaderCheckbox()}
+      <th onClick={() => handleSort('_rule_index')} style={{ width: 50 }}>#ACE{sortIndicator('_rule_index')}</th>
+      <th onClick={() => handleSort('action')} style={{ width: 80 }}>Action{sortIndicator('action')}</th>
+      <th onClick={() => handleSort('name')}>Name / Remark{sortIndicator('name')}</th>
+      <th>Protocol</th>
+      <th onClick={() => handleSort('src_addresses')}>Source{sortIndicator('src_addresses')}</th>
+      <th onClick={() => handleSort('dst_addresses')}>Destination{sortIndicator('dst_addresses')}</th>
+      {hasIdentityPolicies && <th>Users</th>}
+      <th>Service / Port</th>
+      <th style={{ width: 52 }}>Log</th>
+      <th style={{ width: 50 }}>Hits</th>
+      <th style={{ width: 36 }}></th>
+    </tr>
+  );
+
+  /** Select the correct header for the current view */
+  const renderCurrentViewHeader = () => {
+    if (isCisco) return renderCiscoHeader();
+    if (isCheckpoint) return renderCheckpointHeader();
+    if (isSonicwall) return renderSonicwallHeader();
+    if (isHuawei) return renderHuaweiHeader();
+    if (isFortigate) return renderFortigateHeader();
+    if (isSrx) return renderSrxHeader();
+    return renderPanosHeader();
+  };
+
+  // =========================================================================
+  // ROW RENDERERS — one per vendor view
+  // =========================================================================
+
+  const buildRowClass = (policy) => {
+    const isSelected = selectedRule?.name === policy.name && selectedRule?._rule_index === policy._rule_index;
+    return `${isSelected ? 'selected' : ''} ${selectedRuleKeys.has(makeKey(policy)) ? 'bulk-selected' : ''} ${policy.disabled ? 'disabled-rule' : ''} ${policy._implicit ? 'implicit-rule' : ''}`;
+  };
+
+  const renderPanosRow = (policy, measureRef) => {
+    const isSelected = selectedRule?.name === policy.name && selectedRule?._rule_index === policy._rule_index;
+    const realIndex = getRealIndex(policy);
+    return (
+      <tr
+        key={`${policy.name}-${policy._rule_index}`}
+        ref={measureRef}
+        className={buildRowClass(policy)}
+        onClick={(e) => handleRowClick(policy, isSelected, e)}
+        style={{ cursor: 'pointer' }}
+      >
+        {renderRowCheckbox(policy)}
+        <td>{policy._rule_index}</td>
+        <td title={policy.name}>
+          {policy._implicit && <span className="cell-chip implicit-chip">Implicit</span>}
+          {renderEditableCell(policy, 'name', policy.name)}
+        </td>
+        {hasIdentityPolicies && <td>{renderCellValues(policy.source_users || [])}</td>}
+        <td>{renderEditableCell(policy, 'src_zones', renderCellValues(policy.src_zones))}</td>
+        <td>{renderEditableCell(policy, 'dst_zones', renderCellValues(policy.dst_zones))}</td>
+        <td>{renderEditableCell(policy, 'src_addresses', <>{policy.negate_source && <span className="cell-chip negate-chip">NOT</span>}{renderCellValues(policy.src_addresses)}</>)}</td>
+        <td>{renderEditableCell(policy, 'dst_addresses', <>{policy.negate_destination && <span className="cell-chip negate-chip">NOT</span>}{renderCellValues(policy.dst_addresses)}</>)}</td>
+        <td>{renderEditableCell(policy, 'applications', renderCellValues([...policy.applications, ...policy.services.filter(s => s !== 'application-default')]))}</td>
+        <td>{renderProfileCell(policy)}</td>
+        <td>
+          <span className={`action-${policy.action === 'allow' ? 'permit' : 'deny'}`}>
+            {policy.action}
+          </span>
+        </td>
+        <td style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+          {getDisplayLog(policy)}
+        </td>
+        <td>
+          <button className="btn-icon btn-icon-danger" onClick={(e) => { e.stopPropagation(); onDeleteRule(realIndex); }} title="Delete rule">x</button>
+        </td>
+      </tr>
+    );
+  };
+
+  const renderSrxRow = (policy, measureRef) => {
+    const status = getRuleStatus(policy);
+    const warnStatus = getWarningStatus(policy);
+    const isSelected = selectedRule?.name === policy.name && selectedRule?._rule_index === policy._rule_index;
+    const realIndex = getRealIndex(policy);
+    return (
+      <tr
+        key={`${policy.name}-${policy._rule_index}`}
+        ref={measureRef}
+        className={buildRowClass(policy)}
+        onClick={(e) => handleRowClick(policy, isSelected, e)}
+        style={{ cursor: 'pointer' }}
+      >
+        {renderRowCheckbox(policy)}
+        <td><div className="srx-seq">{policy._rule_index}</div></td>
+        <td>
+          <div>
+            {policy._implicit && <span className="cell-chip implicit-chip">Implicit</span>}
+            {renderEditableCell(policy, 'name', <span style={{ fontWeight: 500 }}>{policy.name}</span>)}
+          </div>
+          <div style={{ marginTop: 4 }}>
+            <span className={`status-label status-${status}`}>{statusLabels[status]}</span>
+            {warnStatus !== 'clean' && (
+              <span className={`status-dot ${warnStatus}`} data-tooltip={warningTooltips[warnStatus] || warnStatus} style={{ marginLeft: 4 }} />
+            )}
+          </div>
+        </td>
+        <td>
+          <div className="editable-cell" onDoubleClick={(e) => { e.stopPropagation(); startEdit(realIndex, 'src_addresses', policy.src_addresses); }} title="Double-click to edit addresses">
+            {renderSrxSourceDest(policy, 'src')}
+          </div>
+        </td>
+        <td>
+          <div className="editable-cell" onDoubleClick={(e) => { e.stopPropagation(); startEdit(realIndex, 'dst_addresses', policy.dst_addresses); }} title="Double-click to edit addresses">
+            {renderSrxSourceDest(policy, 'dst')}
+          </div>
+        </td>
+        <td>
+          <div className="editable-cell" onDoubleClick={(e) => { e.stopPropagation(); startEdit(realIndex, 'applications', policy.applications); }} title="Double-click to edit">
+            {renderSrxApps(policy)}
+          </div>
+        </td>
+        {hasIdentityPolicies && <td>{renderCellValues(policy.source_users || [])}</td>}
+        <td>{renderSrxAction(policy)}</td>
+        <td>{renderSrxSubscriptions(policy)}</td>
+        <td style={{ textAlign: 'center' }}>
+          <button className="btn-icon btn-icon-danger" onClick={(e) => { e.stopPropagation(); onDeleteRule(realIndex); }} title="Delete policy">x</button>
+        </td>
+      </tr>
+    );
+  };
+
+  const renderFortigateRow = (policy, measureRef) => {
+    const isSelected = selectedRule?.name === policy.name && selectedRule?._rule_index === policy._rule_index;
+    const realIndex = getRealIndex(policy);
+    const fg = policy._fortigate || {};
+    return (
+      <tr
+        key={`${policy.name}-${policy._rule_index}`}
+        ref={measureRef}
+        className={`${buildRowClass(policy)}${policy.disabled ? ' fg-disabled-row' : ''}`}
+        onClick={(e) => handleRowClick(policy, isSelected, e)}
+        style={{ cursor: 'pointer' }}
+      >
+        {renderRowCheckbox(policy)}
+        <td>
+          <div className="fg-seq">
+            {renderFortigateStatus(policy)}
+            <span className="fg-seq-id">{fg.policyid || policy._rule_index}</span>
+          </div>
+        </td>
+        <td>
+          {policy._implicit && <span className="cell-chip implicit-chip">Implicit</span>}
+          {renderEditableCell(policy, 'name', <span className="fg-name">{policy.name}</span>)}
+        </td>
+        <td>{renderEditableCell(policy, 'src_zones', renderCellValues(policy.src_zones))}</td>
+        <td>{renderEditableCell(policy, 'dst_zones', renderCellValues(policy.dst_zones))}</td>
+        <td>{renderEditableCell(policy, 'src_addresses', <>{policy.negate_source && <span className="cell-chip negate-chip">NOT</span>}{renderCellValues(policy.src_addresses)}</>)}</td>
+        <td>{renderEditableCell(policy, 'dst_addresses', <>{policy.negate_destination && <span className="cell-chip negate-chip">NOT</span>}{renderCellValues(policy.dst_addresses)}</>)}</td>
+        {hasIdentityPolicies && <td>{renderCellValues(policy.source_users || [])}</td>}
+        <td><span className="fg-schedule">{fg.schedule || 'always'}</span></td>
+        <td>{renderEditableCell(policy, 'services', renderCellValues(policy.services))}</td>
+        <td>{renderFortigateAction(policy)}</td>
+        <td>{renderFortigateNat(policy)}</td>
+        <td>{renderFortigateProfiles(policy)}</td>
+        <td style={{ fontSize: '11px', color: 'var(--text-muted)', textAlign: 'center' }}>
+          {policy.log_start && policy.log_end ? 'All' : policy.log_end ? 'UTM' : '-'}
+        </td>
+        <td>
+          <button className="btn-icon btn-icon-danger" onClick={(e) => { e.stopPropagation(); onDeleteRule(realIndex); }} title="Delete policy">x</button>
+        </td>
+      </tr>
+    );
+  };
+
+  const renderCheckpointRow = (policy, measureRef) => {
+    const isSelected = selectedRule?.name === policy.name && selectedRule?._rule_index === policy._rule_index;
+    const realIndex = getRealIndex(policy);
+    const cp = policy._checkpoint || {};
+    return (
+      <tr
+        key={`${policy.name}-${policy._rule_index}`}
+        ref={measureRef}
+        className={buildRowClass(policy)}
+        onClick={(e) => handleRowClick(policy, isSelected, e)}
+        style={{ cursor: 'pointer' }}
+      >
+        {renderRowCheckbox(policy)}
+        <td>{cp.ruleNumber || policy._rule_index}</td>
+        <td>
+          {policy._implicit && <span className="cell-chip implicit-chip">Implicit</span>}
+          {renderEditableCell(policy, 'name', policy.name)}
+          {cp.section && <span className="cell-chip" style={{ background: 'var(--bg-alt)', fontSize: '9px' }}>{cp.section}</span>}
+        </td>
+        <td>{renderEditableCell(policy, 'src_addresses', <>{policy.negate_source && <span className="cell-chip negate-chip">NOT</span>}{renderCellValues(policy.src_addresses)}</>)}</td>
+        <td>{renderEditableCell(policy, 'dst_addresses', <>{policy.negate_destination && <span className="cell-chip negate-chip">NOT</span>}{renderCellValues(policy.dst_addresses)}</>)}</td>
+        {hasIdentityPolicies && <td>{renderCellValues(policy.source_users || [])}</td>}
+        <td>{renderEditableCell(policy, 'services', renderCellValues(policy.services))}</td>
+        <td>
+          <span className={`action-${policy.action === 'allow' ? 'permit' : 'deny'}`}>
+            {policy.action === 'allow' ? 'Accept' : 'Drop'}
+          </span>
+        </td>
+        <td style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+          {policy.log_end ? 'Log' : 'None'}
+        </td>
+        <td style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
+          {(cp.installOn || []).join(', ') || 'Policy Targets'}
+        </td>
+        <td>
+          <button className="btn-icon btn-icon-danger" onClick={(e) => { e.stopPropagation(); onDeleteRule(realIndex); }} title="Delete rule">x</button>
+        </td>
+      </tr>
+    );
+  };
+
+  const renderSonicwallRow = (policy, measureRef) => {
+    const isSelected = selectedRule?.name === policy.name && selectedRule?._rule_index === policy._rule_index;
+    const realIndex = getRealIndex(policy);
+    const sw = policy._sonicwall || {};
+    return (
+      <tr
+        key={`${policy.name}-${policy._rule_index}`}
+        ref={measureRef}
+        className={buildRowClass(policy)}
+        onClick={(e) => handleRowClick(policy, isSelected, e)}
+        style={{ cursor: 'pointer' }}
+      >
+        {renderRowCheckbox(policy)}
+        <td>{sw.priority || policy._rule_index}</td>
+        <td>
+          {policy._implicit && <span className="cell-chip implicit-chip">Implicit</span>}
+          {renderEditableCell(policy, 'name', policy.name)}
+        </td>
+        <td>{renderEditableCell(policy, 'src_zones', renderCellValues(policy.src_zones))}</td>
+        <td>{renderEditableCell(policy, 'dst_zones', renderCellValues(policy.dst_zones))}</td>
+        <td>{renderEditableCell(policy, 'src_addresses', renderCellValues(policy.src_addresses))}</td>
+        <td>{renderEditableCell(policy, 'dst_addresses', renderCellValues(policy.dst_addresses))}</td>
+        {hasIdentityPolicies && <td>{renderCellValues(policy.source_users || [])}</td>}
+        <td>{renderEditableCell(policy, 'services', renderCellValues(policy.services))}</td>
+        <td>
+          <span className={`action-${policy.action === 'allow' ? 'permit' : 'deny'}`}>
+            {policy.action === 'allow' ? 'Allow' : policy.action === 'deny' ? 'Deny' : policy.action}
+          </span>
+        </td>
+        <td style={{ textAlign: 'center', fontSize: '11px' }}>
+          {sw.dpi ? <span style={{ color: 'var(--accent)' }}>On</span> : <span style={{ opacity: 0.4 }}>-</span>}
+        </td>
+        <td style={{ textAlign: 'center', fontSize: '11px', color: 'var(--text-muted)' }}>
+          {policy.log_end ? 'Yes' : '-'}
+        </td>
+        <td>
+          <button className="btn-icon btn-icon-danger" onClick={(e) => { e.stopPropagation(); onDeleteRule(realIndex); }} title="Delete rule">x</button>
+        </td>
+      </tr>
+    );
+  };
+
+  const renderHuaweiRow = (policy, measureRef) => {
+    const isSelected = selectedRule?.name === policy.name && selectedRule?._rule_index === policy._rule_index;
+    const realIndex = getRealIndex(policy);
+    return (
+      <tr
+        key={`${policy.name}-${policy._rule_index}`}
+        ref={measureRef}
+        className={buildRowClass(policy)}
+        onClick={(e) => handleRowClick(policy, isSelected, e)}
+        style={{ cursor: 'pointer' }}
+      >
+        {renderRowCheckbox(policy)}
+        <td>{policy._rule_index}</td>
+        <td>
+          {policy._implicit && <span className="cell-chip implicit-chip">Implicit</span>}
+          {renderEditableCell(policy, 'name', policy.name)}
+        </td>
+        <td>{renderEditableCell(policy, 'src_zones', renderCellValues(policy.src_zones))}</td>
+        <td>{renderEditableCell(policy, 'dst_zones', renderCellValues(policy.dst_zones))}</td>
+        <td>{renderEditableCell(policy, 'src_addresses', renderCellValues(policy.src_addresses))}</td>
+        <td>{renderEditableCell(policy, 'dst_addresses', renderCellValues(policy.dst_addresses))}</td>
+        {hasIdentityPolicies && <td>{renderCellValues(policy.source_users || [])}</td>}
+        <td>{renderEditableCell(policy, 'services', renderCellValues(policy.services))}</td>
+        <td>{renderProfileCell(policy)}</td>
+        <td>
+          <span className={`action-${policy.action === 'allow' ? 'permit' : 'deny'}`}>
+            {policy.action === 'allow' ? 'Permit' : 'Deny'}
+          </span>
+        </td>
+        <td style={{ textAlign: 'center', fontSize: '11px', color: 'var(--text-muted)' }}>
+          {policy.log_end ? 'Yes' : '-'}
+        </td>
+        <td>
+          <button className="btn-icon btn-icon-danger" onClick={(e) => { e.stopPropagation(); onDeleteRule(realIndex); }} title="Delete rule">x</button>
+        </td>
+      </tr>
+    );
+  };
+
+  const renderCiscoRow = (policy, measureRef) => {
+    const isSelected = selectedRule?.name === policy.name && selectedRule?._rule_index === policy._rule_index;
+    const realIndex = getRealIndex(policy);
+    const cisco = policy._cisco || {};
+    return (
+      <tr
+        key={`${policy.name}-${policy._rule_index}`}
+        ref={measureRef}
+        className={`${buildRowClass(policy)}${policy.disabled ? ' cisco-inactive-row' : ''}`}
+        onClick={(e) => handleRowClick(policy, isSelected, e)}
+        style={{ cursor: 'pointer' }}
+      >
+        {renderRowCheckbox(policy)}
+        <td>
+          <div className="cisco-ace-num">
+            {policy._rule_index}
+            {policy.disabled && <span className="cisco-inactive-badge">X</span>}
+          </div>
+        </td>
+        <td>{renderCiscoAction(policy)}</td>
+        <td>
+          <div className="cisco-name-cell">
+            {policy._implicit && <span className="cell-chip implicit-chip">Implicit</span>}
+            {renderEditableCell(policy, 'name', <span className="cisco-rule-name">{policy.name}</span>)}
+            {cisco.aclName && <span className="cisco-acl-badge" title={`ACL: ${cisco.aclName}`}>{cisco.aclName}</span>}
+            {renderCiscoSecLevel(policy)}
+          </div>
+        </td>
+        <td>{renderCiscoProtocol(policy)}</td>
+        <td>
+          {renderEditableCell(policy, 'src_addresses', (
+            <div className="cisco-addr-cell">
+              {(policy.src_zones || []).length > 0 && (
+                <span className="cisco-iface-label" title={`Interface: ${policy.src_zones.join(', ')}`}>{policy.src_zones.join(', ')}</span>
+              )}
+              {policy.negate_source && <span className="cell-chip negate-chip">NOT</span>}
+              {renderCellValues(policy.src_addresses)}
+            </div>
+          ))}
+        </td>
+        <td>
+          {renderEditableCell(policy, 'dst_addresses', (
+            <div className="cisco-addr-cell">
+              {(policy.dst_zones || []).length > 0 && (
+                <span className="cisco-iface-label" title={`Interface: ${policy.dst_zones.join(', ')}`}>{policy.dst_zones.join(', ')}</span>
+              )}
+              {policy.negate_destination && <span className="cell-chip negate-chip">NOT</span>}
+              {renderCellValues(policy.dst_addresses)}
+            </div>
+          ))}
+        </td>
+        {hasIdentityPolicies && <td>{renderCellValues(policy.source_users || [])}</td>}
+        <td>{renderEditableCell(policy, 'services', renderCiscoService(policy))}</td>
+        <td style={{ textAlign: 'center' }}>{renderCiscoLog(policy)}</td>
+        <td style={{ textAlign: 'center' }}>{renderCiscoHitCount(policy)}</td>
+        <td>
+          <button className="btn-icon btn-icon-danger" onClick={(e) => { e.stopPropagation(); onDeleteRule(realIndex); }} title="Delete ACE">x</button>
+        </td>
+      </tr>
+    );
+  };
+
+  /** Select the correct row renderer for the current view */
+  const renderCurrentViewRow = useCallback((policy, measureRef) => {
+    if (isCisco) return renderCiscoRow(policy, measureRef);
+    if (isCheckpoint) return renderCheckpointRow(policy, measureRef);
+    if (isSonicwall) return renderSonicwallRow(policy, measureRef);
+    if (isHuawei) return renderHuaweiRow(policy, measureRef);
+    if (isFortigate) return renderFortigateRow(policy, measureRef);
+    if (isSrx) return renderSrxRow(policy, measureRef);
+    return renderPanosRow(policy, measureRef);
+  });
+
+  // =========================================================================
+  // GROUP HEADER RENDERER
+  // =========================================================================
+
   const renderGroupHeader = (group) => {
     const isCollapsed = collapsedGroups.has(group.group_name);
     const isEditing = editingGroupName === group.group_name;
@@ -1435,16 +1323,116 @@ export default function PolicyTable({
     );
   };
 
-  /** Select the appropriate table renderer for the current view */
-  const renderCurrentViewTable = () => {
-    if (isCisco) return renderCiscoTable();
-    if (isCheckpoint) return renderCheckpointTable();
-    if (isSonicwall) return renderSonicwallTable();
-    if (isHuawei) return renderHuaweiTable();
-    if (isFortigate) return renderFortigateTable();
-    if (isSrx) return renderSrxTable();
-    return renderPanosTable();
-  };
+  // =========================================================================
+  // VIRTUAL SCROLL SETUP
+  // =========================================================================
+
+  const containerRef = useRef(null);
+
+  /** Flat list of virtual items (rows + headers) for virtual scroll */
+  const virtualItems = useMemo(() => {
+    if (hasGroups && displayGroups.length > 0) {
+      const items = [];
+      for (const group of displayGroups) {
+        items.push({ type: 'group-header', group });
+        if (!collapsedGroups.has(group.group_name)) {
+          for (const policy of group.policies) {
+            items.push({ type: 'row', policy });
+          }
+        }
+      }
+      return items;
+    }
+
+    if (isSrx) {
+      const zonePairGroups = groupByZonePair(displayPolicies);
+      const items = [];
+      for (const zpGroup of zonePairGroups) {
+        items.push({ type: 'zone-header', group: zpGroup });
+        for (const policy of zpGroup.policies) {
+          items.push({ type: 'row', policy });
+        }
+      }
+      return items;
+    }
+
+    return displayPolicies.map(p => ({ type: 'row', policy: p }));
+  }, [hasGroups, displayGroups, collapsedGroups, isSrx, displayPolicies]);
+
+  /** Estimated row height per vendor view */
+  const estimatedRowHeight = useMemo(() => {
+    if (isSrx) return 72;
+    if (isFortigate) return 35;
+    return 32;
+  }, [isSrx, isFortigate]);
+
+  /** Column count for spacer colSpan */
+  const colCount = useMemo(() => {
+    const identityCol = hasIdentityPolicies ? 1 : 0;
+    if (isSrx) return 9 + identityCol;
+    if (isFortigate) return 14 + identityCol;
+    if (isCheckpoint) return 10 + identityCol;
+    if (isSonicwall) return 12 + identityCol;
+    if (isHuawei) return 12 + identityCol;
+    if (isCisco) return 11 + identityCol;
+    return 12 + identityCol; // PAN-OS
+  }, [isSrx, isFortigate, isCheckpoint, isSonicwall, isHuawei, isCisco, hasIdentityPolicies]);
+
+  /** Table CSS class */
+  const tableClass = useMemo(() => {
+    if (isSrx) return 'srx-table';
+    if (isFortigate) return 'fg-table';
+    if (isCheckpoint) return 'cp-table';
+    if (isSonicwall) return 'sw-table';
+    if (isHuawei) return 'hw-table';
+    if (isCisco) return 'cisco-table';
+    return '';
+  }, [isSrx, isFortigate, isCheckpoint, isSonicwall, isHuawei, isCisco]);
+
+  const {
+    visibleItems,
+    topSpacerHeight,
+    bottomSpacerHeight,
+    onScroll,
+    measureRow,
+    scrollToIndex,
+    resetCache,
+  } = useVirtualScroll({
+    items: virtualItems,
+    containerRef,
+    estimatedRowHeight,
+    overscan: 20,
+    getItemKey: (item, idx) => {
+      if (item.type === 'group-header') return `gh::${item.group.group_name}`;
+      if (item.type === 'zone-header') return `zh::${item.group.key}`;
+      return makeKey(item.policy);
+    },
+    getItemHeight: (item) => {
+      if (item.type === 'group-header') return 38;
+      if (item.type === 'zone-header') return 34;
+      return null; // use estimated/measured height
+    },
+  });
+
+  // Clear height cache when view mode changes
+  useEffect(() => {
+    resetCache();
+  }, [viewMode, platformView]);
+
+  // Auto-scroll to selected rule when it changes (keyboard nav)
+  useEffect(() => {
+    if (!selectedRule) return;
+    const idx = virtualItems.findIndex(
+      item => item.type === 'row' &&
+              item.policy.name === selectedRule.name &&
+              item.policy._rule_index === selectedRule._rule_index
+    );
+    if (idx >= 0) scrollToIndex(idx);
+  }, [selectedRule]);
+
+  // =========================================================================
+  // RENDER
+  // =========================================================================
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
@@ -1499,180 +1487,71 @@ export default function PolicyTable({
         </button>
       </div>
 
-      {/* Table — grouped or flat */}
-      <div className="policy-table-container">
-        {hasGroups && displayGroups.length > 0 ? (
-          /* Grouped rendering: collapsible sections */
-          displayGroups.map((group) => (
-            <div key={group.group_name} className="policy-group-section">
-              {renderGroupHeader(group)}
-              {!collapsedGroups.has(group.group_name) && (
-                <GroupedTableSlice
-                  policies={policies}
-                  displayPolicies={group.policies}
-                  viewMode={viewMode}
-                  platformView={platformView}
-                  isSrx={isSrx}
-                  isFortigate={isFortigate}
-                  isCisco={isCisco}
-                  isCheckpoint={isCheckpoint}
-                  isSonicwall={isSonicwall}
-                  isHuawei={isHuawei}
-                  hasIdentityPolicies={hasIdentityPolicies}
-                  selectedRule={selectedRule}
-                  selectedRuleKeys={selectedRuleKeys}
-                  onSelectRule={onSelectRule}
-                  onToggleRuleSelect={onToggleRuleSelect}
-                  onUpdateRule={onUpdateRule}
-                  onDeleteRule={onDeleteRule}
-                  warningsByRule={warningsByRule}
-                  getRuleStatus={getRuleStatus}
-                  getWarningStatus={getWarningStatus}
-                  statusLabels={statusLabels}
-                  warningTooltips={warningTooltips}
-                  renderCellValues={renderCellValues}
-                  renderEditableCell={renderEditableCell}
-                  renderProfileCell={renderProfileCell}
-                  renderSrxSourceDest={renderSrxSourceDest}
-                  renderSrxAction={renderSrxAction}
-                  renderSrxApps={renderSrxApps}
-                  renderSrxSubscriptions={renderSrxSubscriptions}
-                  renderFortigateAction={renderFortigateAction}
-                  renderFortigateProfiles={renderFortigateProfiles}
-                  renderFortigateNat={renderFortigateNat}
-                  renderFortigateStatus={renderFortigateStatus}
-                  handleSort={handleSort}
-                  sortIndicator={sortIndicator}
-                  makeKey={makeKey}
-                  handleRowClick={handleRowClick}
-                  getRealIndex={getRealIndex}
-                  renderRowCheckbox={renderRowCheckbox}
-                />
-              )}
-            </div>
-          ))
-        ) : (
-          /* Flat rendering (no groups) */
-          renderCurrentViewTable()
-        )}
-
-        {displayPolicies.length === 0 && (
+      {/* Virtualized table */}
+      <div className="policy-table-container" ref={containerRef} onScroll={onScroll}>
+        {displayPolicies.length === 0 ? (
           <div className="empty-state">
             <p>{isCisco ? 'No access control entries match your filter.' : (isSrx || isFortigate || isSonicwall || isHuawei) ? 'No security policies match your filter.' : 'No security rules match your filter.'}</p>
           </div>
+        ) : (
+          <table className={`policy-table ${tableClass}`}>
+            <thead>
+              {renderCurrentViewHeader()}
+            </thead>
+            <tbody>
+              {/* Top spacer */}
+              {topSpacerHeight > 0 && (
+                <tr className="virtual-spacer" aria-hidden="true">
+                  <td colSpan={colCount} style={{ height: topSpacerHeight }} />
+                </tr>
+              )}
+
+              {/* Visible items */}
+              {visibleItems.map(({ item, index }) => {
+                const mRef = (el) => { if (el) measureRow(index, el); };
+
+                if (item.type === 'group-header') {
+                  return (
+                    <tr key={`gh-${item.group.group_name}`} ref={mRef} className="virtual-group-header-row">
+                      <td colSpan={colCount} style={{ padding: 0, border: 'none' }}>
+                        {renderGroupHeader(item.group)}
+                      </td>
+                    </tr>
+                  );
+                }
+
+                if (item.type === 'zone-header') {
+                  const srxColCount = (hasIdentityPolicies ? 9 : 8) + 1;
+                  return (
+                    <tr key={`zh-${item.group.key}`} ref={mRef} className="srx-zone-group-row">
+                      <td colSpan={srxColCount}>
+                        <div className="srx-zone-group-label">
+                          <span className="srx-zone-group-arrow">{'\u25BC'}</span>
+                          <span>ZONE</span>
+                          <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--accent)' }}>{item.group.from}</span>
+                          <span style={{ color: 'var(--text-muted)' }}>{'\u2192'}</span>
+                          <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--accent)' }}>{item.group.to}</span>
+                          <span className="srx-zone-group-count">({item.group.policies.length} {item.group.policies.length === 1 ? 'Rule' : 'Rules'})</span>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                }
+
+                // Regular policy row
+                return renderCurrentViewRow(item.policy, mRef);
+              })}
+
+              {/* Bottom spacer */}
+              {bottomSpacerHeight > 0 && (
+                <tr className="virtual-spacer" aria-hidden="true">
+                  <td colSpan={colCount} style={{ height: bottomSpacerHeight }} />
+                </tr>
+              )}
+            </tbody>
+          </table>
         )}
       </div>
     </div>
-  );
-}
-
-/**
- * GroupedTableSlice — renders a subset of policies using the appropriate vendor view.
- * Avoids duplicating render logic by rendering a minimal table for each group's policies.
- */
-function GroupedTableSlice({
-  policies,
-  displayPolicies,
-  isSrx, isFortigate, isCisco, isCheckpoint, isSonicwall, isHuawei,
-  hasIdentityPolicies,
-  selectedRule, selectedRuleKeys,
-  onSelectRule, onToggleRuleSelect, onUpdateRule, onDeleteRule,
-  warningsByRule,
-  getRuleStatus, getWarningStatus, statusLabels, warningTooltips,
-  renderCellValues, renderEditableCell, renderProfileCell,
-  renderSrxSourceDest, renderSrxAction, renderSrxApps, renderSrxSubscriptions,
-  renderFortigateAction, renderFortigateProfiles, renderFortigateNat, renderFortigateStatus,
-  handleSort, sortIndicator, makeKey, handleRowClick, getRealIndex, renderRowCheckbox,
-}) {
-  // Render a simple table body with the group's policies, using the appropriate view
-  const renderRow = (policy) => {
-    const status = getRuleStatus(policy);
-    const warnStatus = getWarningStatus(policy);
-    const isSelected = selectedRule?.name === policy.name && selectedRule?._rule_index === policy._rule_index;
-    const realIndex = getRealIndex(policy);
-    const rowClass = `${isSelected ? 'selected' : ''} ${selectedRuleKeys.has(makeKey(policy)) ? 'bulk-selected' : ''} ${policy.disabled ? 'disabled-rule' : ''} ${policy._implicit ? 'implicit-rule' : ''}`;
-
-    if (isSrx) {
-      return (
-        <tr
-          key={`${policy.name}-${policy._rule_index}`}
-          className={rowClass}
-          onClick={(e) => handleRowClick(policy, isSelected, e)}
-          style={{ cursor: 'pointer' }}
-        >
-          {renderRowCheckbox(policy)}
-          <td><div className="srx-seq">{policy._rule_index}</div></td>
-          <td>
-            <div>
-              {policy._implicit && <span className="cell-chip implicit-chip">Implicit</span>}
-              {renderEditableCell(policy, 'name', <span style={{ fontWeight: 500 }}>{policy.name}</span>)}
-            </div>
-            <div style={{ marginTop: 4 }}>
-              <span className={`status-label status-${status}`}>{statusLabels[status]}</span>
-              {warnStatus !== 'clean' && <span className={`status-dot ${warnStatus}`} data-tooltip={warningTooltips[warnStatus]} style={{ marginLeft: 4 }} />}
-            </div>
-          </td>
-          <td>{renderSrxSourceDest(policy, 'src')}</td>
-          <td>{renderSrxSourceDest(policy, 'dst')}</td>
-          <td>{renderSrxApps(policy)}</td>
-          {hasIdentityPolicies && <td>{renderCellValues(policy.source_users || [])}</td>}
-          <td>{renderSrxAction(policy)}</td>
-          <td>{renderSrxSubscriptions(policy)}</td>
-          <td style={{ textAlign: 'center' }}>
-            <button className="btn-icon btn-icon-danger" onClick={(e) => { e.stopPropagation(); onDeleteRule(realIndex); }} title="Delete policy">x</button>
-          </td>
-        </tr>
-      );
-    }
-
-    // Default / PAN-OS row for all other views in grouped mode
-    return (
-      <tr
-        key={`${policy.name}-${policy._rule_index}`}
-        className={rowClass}
-        onClick={(e) => handleRowClick(policy, isSelected, e)}
-        style={{ cursor: 'pointer' }}
-      >
-        {renderRowCheckbox(policy)}
-        <td>{policy._rule_index}</td>
-        <td>
-          {policy._implicit && <span className="cell-chip implicit-chip">Implicit</span>}
-          {renderEditableCell(policy, 'name', policy.name)}
-        </td>
-        {hasIdentityPolicies && <td>{renderCellValues(policy.source_users || [])}</td>}
-        <td>{renderEditableCell(policy, 'src_zones', renderCellValues(policy.src_zones))}</td>
-        <td>{renderEditableCell(policy, 'dst_zones', renderCellValues(policy.dst_zones))}</td>
-        <td>{renderEditableCell(policy, 'src_addresses', renderCellValues(policy.src_addresses))}</td>
-        <td>{renderEditableCell(policy, 'dst_addresses', renderCellValues(policy.dst_addresses))}</td>
-        <td>{renderEditableCell(policy, 'applications', renderCellValues(policy.applications))}</td>
-        <td>{renderEditableCell(policy, 'services', renderCellValues(policy.services))}</td>
-        <td>
-          <span className={`action-label action-${policy.action}`}>{policy.action}</span>
-        </td>
-        <td>{renderProfileCell(policy)}</td>
-        <td style={{ textAlign: 'center' }}>
-          <button className="btn-icon btn-icon-danger" onClick={(e) => { e.stopPropagation(); onDeleteRule(realIndex); }} title="Delete">x</button>
-        </td>
-      </tr>
-    );
-  };
-
-  if (isSrx) {
-    const srxColCount = (hasIdentityPolicies ? 9 : 8) + 1;
-    return (
-      <table className="policy-table srx-table" style={{ marginBottom: 0 }}>
-        <tbody>
-          {displayPolicies.map(renderRow)}
-        </tbody>
-      </table>
-    );
-  }
-
-  return (
-    <table className="policy-table" style={{ marginBottom: 0 }}>
-      <tbody>
-        {displayPolicies.map(renderRow)}
-      </tbody>
-    </table>
   );
 }

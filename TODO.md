@@ -229,6 +229,7 @@
 - [x] **Keyboard shortcuts** — 39 shortcuts including Ctrl+Z/Y undo/redo, Ctrl+P command palette, Ctrl+B/Shift+B panel toggles, Ctrl+1-4 nav, j/k/a/n rule navigation
 - [x] **Default to Import** — App opens on Import/Config view instead of empty Policies tab
 - [x] **app.jsx reduced from 2382 to ~450 lines** — Layout shell with context hooks, remaining greenfield/merge handlers, modal rendering
+- [x] **Virtualized tables** — `useVirtualScroll` hook with spacer-based table windowing. Renders only ~60-80 visible rows regardless of total count. RAF-batched scroll handler, ResizeObserver-driven container measurement, per-row height caching with measurement fallback for variable-height SRX rows. Flat virtual list model unifies grouped mode, SRX zone-pair headers, and flat mode into a single scroll container. Auto-scroll on keyboard navigation (j/k), height cache reset on vendor view switch. Zero external dependencies
 
 ### Blocked — Waiting on Vendor APIs
 - [ ] **Push to SDC / SD On-Prem / Mist** — Direct deployment to Juniper management platforms. Requires HPE Juniper public REST APIs. UI placeholder already present ("Push via MCP" button)

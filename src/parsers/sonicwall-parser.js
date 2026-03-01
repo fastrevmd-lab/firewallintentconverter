@@ -23,7 +23,7 @@
  *   - Route policies (static routes)
  */
 
-import { createWarning, mapAppToJunos, sanitizeJunosName, safeJsonParse } from './parser-utils.js';
+import { createWarning, mapAppToJunos, sanitizeJunosName, safeJsonParse, detectIpVersion } from './parser-utils.js';
 
 
 // ---------------------------------------------------------------------------
@@ -222,6 +222,22 @@ function parseJsonInterfaces(config, warnings) {
   const interfaces = [];
   const rawInterfaces = safeArray(config.interfaces?.ipv4);
 
+  // Build IPv6 lookup from config.interfaces.ipv6 if present
+  const ipv6Map = {};
+  const rawIpv6 = safeArray(config.interfaces?.ipv6);
+  for (const iface6 of rawIpv6) {
+    const name = iface6.name || '';
+    if (!name) continue;
+    const staticCfg = iface6.ip_assignment?.mode?.static;
+    if (staticCfg) {
+      const addr6 = staticCfg.ip || '';
+      const prefix = staticCfg.prefix_length || staticCfg.prefix || '';
+      if (addr6) {
+        ipv6Map[name] = prefix ? `${addr6}/${prefix}` : addr6;
+      }
+    }
+  }
+
   for (const iface of rawInterfaces) {
     const name = iface.name || '';
     if (!name) continue;
@@ -242,6 +258,7 @@ function parseJsonInterfaces(config, warnings) {
     interfaces.push({
       name,
       ip,
+      ipv6: ipv6Map[name] || '',
       zone,
       enabled: iface.enabled !== false,
       comment: iface.comment || iface.description || '',
@@ -360,6 +377,11 @@ function parseJsonAddressObjects(config, warnings) {
       `MAC address object "${name}" (${obj.mac_address || ''}) skipped - SRX does not support MAC-based address objects`,
       'Replace with IP-based address object or remove rules referencing this object'
     ));
+  }
+
+  // Auto-tag ip_version on all address objects
+  for (const obj of objects) {
+    obj.ip_version = detectIpVersion(obj.value);
   }
 
   return objects;
@@ -925,6 +947,11 @@ function parseCliAddressObjects(lines, warnings) {
       ));
       continue;
     }
+  }
+
+  // Auto-tag ip_version on all address objects
+  for (const obj of objects) {
+    obj.ip_version = detectIpVersion(obj.value);
   }
 
   return objects;

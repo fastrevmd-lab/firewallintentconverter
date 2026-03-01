@@ -178,6 +178,18 @@
 - [x] **Project persistence** — Groups saved/loaded in `.fpic.json` project files (`ruleGroups` state key)
 - [x] **Groups cleared on re-parse** — Ensures stale groups don't persist across different configs
 
+### Rev11 — Incremental IPv6 Support
+- [x] **`detectIpVersion()` helper** — Auto-detects IPv4 vs IPv6 from address strings (`parser-utils.js`)
+- [x] **IPv6 interface parsing (all 7 parsers)** — Dual-stack `ipv6` field extracted alongside IPv4:
+  - SRX: `family.inet6.address` | FortiGate: `ipv6.ip6-address` | PAN-OS: `layer3.ipv6.address`
+  - Cisco ASA: `ipv6 address` command | Huawei: `ipv6 address` regex
+  - Check Point: `set interface ... ipv6-address` | SonicWall: `config.interfaces.ipv6`
+- [x] **NAT ANY address fix** — 6 locations in `srx-converter.js` and `srx-xml-builder.js` now use `::/0` for IPv6 NAT rules instead of hardcoded `0.0.0.0/0`
+- [x] **`ip_version` auto-tagging** — All address objects auto-tagged with `ip_version: 'v4'|'v6'|null` via `detectIpVersion(obj.value)` post-processing in all 7 parsers
+- [x] **Interface address output** — SRX converter emits `set interfaces ... family inet6 address` for IPv6 interfaces; XML builder emits `<inet6><address>` elements
+- [x] **InterfaceMapper IPv6 display** — Shows `v6:` prefix with IPv6 address below interface name in mapping table
+- [x] **Dual-stack sample configs** — SRX, FortiGate, Cisco ASA, PAN-OS samples updated with IPv6 interface addresses
+
 ### Blocked — Waiting on Vendor APIs
 - [ ] **Push to SDC / SD On-Prem / Mist** — Direct deployment to Juniper management platforms. Requires HPE Juniper public REST APIs. UI placeholder already present ("Push via MCP" button)
 

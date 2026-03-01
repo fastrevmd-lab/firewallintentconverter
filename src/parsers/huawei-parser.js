@@ -26,7 +26,7 @@
  * The config is section-delimited by `#` with indented sub-commands.
  */
 
-import { createWarning, mapAppToJunos, sanitizeJunosName } from './parser-utils.js';
+import { createWarning, mapAppToJunos, sanitizeJunosName, detectIpVersion } from './parser-utils.js';
 
 // ---------------------------------------------------------------------------
 // Predefined Huawei Service Mapping
@@ -197,6 +197,7 @@ function parseInterfaces(sections, warnings) {
 
     const ifaceName = match[1];
     let ip = '';
+    let ipv6 = '';
     let description = '';
     let shutdown = false;
     let vlan = '';
@@ -212,6 +213,11 @@ function parseInterfaces(sections, warnings) {
       if (ipMatch) {
         const cidr = huaweiMaskToCidr(ipMatch[2]);
         ip = `${ipMatch[1]}/${cidr}`;
+        continue;
+      }
+      const ipv6Match = line.match(/^ipv6\s+address\s+(\S+)/i);
+      if (ipv6Match) {
+        ipv6 = ipv6Match[1];
         continue;
       }
       const aliasMatch = line.match(/^alias\s+"([^"]+)"/i);
@@ -233,6 +239,7 @@ function parseInterfaces(sections, warnings) {
     interfaces.push({
       name: ifaceName,
       ip,
+      ipv6,
       description,
       shutdown,
       vlan,
@@ -364,6 +371,11 @@ function parseAddressSets(sections, warnings) {
 
       continue;
     }
+  }
+
+  // Auto-tag ip_version on all address objects
+  for (const obj of addressObjects) {
+    obj.ip_version = detectIpVersion(obj.value);
   }
 
   return { addressObjects, addressGroups };

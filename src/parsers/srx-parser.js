@@ -19,7 +19,7 @@
  *   - Hierarchical curly-brace format (show configuration)
  */
 
-import { createWarning } from './parser-utils.js';
+import { createWarning, detectIpVersion } from './parser-utils.js';
 
 // ---------------------------------------------------------------------------
 // Main Parser Entry Point
@@ -730,6 +730,11 @@ function parseAddressObjects(tree, warnings) {
       (extractStringValue(data.description) || '') : '';
 
     objects.push({ name, type, value, description, tags: [] });
+  }
+
+  // Auto-tag ip_version on all address objects
+  for (const obj of objects) {
+    obj.ip_version = detectIpVersion(obj.value);
   }
 
   return objects;
@@ -2726,10 +2731,19 @@ function parseSrxInterfaces(tree, zones, warnings) {
           if (addrKeys.length > 0) ip = addrKeys[0]; // First address (CIDR format)
         }
 
+        // Extract IPv6 addresses
+        const inet6Addr = unitData?.family?.inet6?.address;
+        let ipv6 = '';
+        if (inet6Addr && typeof inet6Addr === 'object') {
+          const addr6Keys = Object.keys(inet6Addr).filter(k => !k.startsWith('_'));
+          if (addr6Keys.length > 0) ipv6 = addr6Keys[0];
+        }
+
         seenNames.add(fullName);
         interfaces.push({
           name: fullName,
           ip: ip,
+          ipv6: ipv6,
           zone: ifToZone[fullName] || '',
           vlan: vlanId,
           type: getType(ifName),
@@ -2745,6 +2759,7 @@ function parseSrxInterfaces(tree, zones, warnings) {
       interfaces.push({
         name: ifName,
         ip: '',
+        ipv6: '',
         zone: ifToZone[ifName] || '',
         vlan: '',
         type: getType(ifName),
@@ -2763,6 +2778,7 @@ function parseSrxInterfaces(tree, zones, warnings) {
     interfaces.push({
       name: ifName,
       ip: '',
+      ipv6: '',
       zone: zoneName,
       vlan: '',
       type: getType(baseName),

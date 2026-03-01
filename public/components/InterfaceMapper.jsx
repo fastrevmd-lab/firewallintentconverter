@@ -145,6 +145,15 @@ export default function InterfaceMapper({
   const sourceModelData = sourceModel ? sourceModelDb[sourceModel] : null;
   const targetPorts = targetModelData?.ports || [];
 
+  // Build parsed interface lookup for IP/IPv6 display
+  const parsedIfaceMap = useMemo(() => {
+    const m = {};
+    for (const iface of (intermediateConfig?.interfaces || [])) {
+      m[iface.name || iface.hardware || ''] = iface;
+    }
+    return m;
+  }, [intermediateConfig]);
+
   // Build L2 interface lookup from intermediateConfig
   const l2InterfaceSet = useMemo(() => {
     const s = new Set();
@@ -337,6 +346,16 @@ export default function InterfaceMapper({
                             </span>
                           )}
                         </div>
+                        {(() => {
+                          const pIface = parsedIfaceMap[panosIface];
+                          if (!pIface) return null;
+                          return (
+                            <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2, fontFamily: 'var(--font-mono)' }}>
+                              {pIface.ip && <span>v4: {pIface.ip}</span>}
+                              {pIface.ipv6 && <span style={{ marginLeft: pIface.ip ? 8 : 0 }}>v6: {pIface.ipv6}</span>}
+                            </div>
+                          );
+                        })()}
                       </td>
                       <td style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: 16 }}>
                         -&gt;

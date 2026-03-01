@@ -18,7 +18,7 @@
  * under object/object-group blocks.
  */
 
-import { createWarning } from './parser-utils.js';
+import { createWarning, detectIpVersion } from './parser-utils.js';
 
 // ---------------------------------------------------------------------------
 // Main Parser Entry Point
@@ -336,6 +336,7 @@ function parseInterfaces(blocks, warnings) {
       nameif: '',
       securityLevel: 0,
       ip: '',
+      ipv6: '',
       shutdown: false,
       description: '',
       vlan: '',
@@ -348,6 +349,8 @@ function parseInterfaces(blocks, warnings) {
         iface.securityLevel = parseInt(child.slice(15).trim(), 10) || 0;
       } else if (child.startsWith('ip address ')) {
         iface.ip = child.slice(11).trim();
+      } else if (child.startsWith('ipv6 address ')) {
+        iface.ipv6 = child.slice(13).trim();
       } else if (child === 'shutdown') {
         iface.shutdown = true;
       } else if (child.startsWith('description ')) {
@@ -959,7 +962,7 @@ function buildZones(interfaces) {
 }
 
 function buildAddressObjects(objectNetworks) {
-  return objectNetworks.map(obj => {
+  const objects = objectNetworks.map(obj => {
     const result = {
       name: obj.name,
       type: obj.type === 'host' ? 'host' : obj.type,
@@ -973,6 +976,13 @@ function buildAddressObjects(objectNetworks) {
     }
     return result;
   });
+
+  // Auto-tag ip_version on all address objects
+  for (const obj of objects) {
+    obj.ip_version = detectIpVersion(obj.value);
+  }
+
+  return objects;
 }
 
 function buildAddressGroups(objectGroupNetworks) {

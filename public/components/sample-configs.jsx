@@ -3022,14 +3022,19 @@ set interfaces fab0 fabric-options member-interfaces ge-0/0/5
 set interfaces fab1 fabric-options member-interfaces ge-5/0/5
 
 set interfaces ge-0/0/0 unit 0 family inet address 10.1.1.1/24
+set interfaces ge-0/0/0 unit 0 family inet6 address 2001:db8:1::1/64
 set interfaces ge-0/0/0 unit 0 description "Trust LAN"
 set interfaces ge-0/0/1 unit 0 family inet address 10.1.2.1/24
+set interfaces ge-0/0/1 unit 0 family inet6 address 2001:db8:2::1/64
 set interfaces ge-0/0/1 unit 0 description "Trust Server VLAN"
 set interfaces ge-0/0/2 unit 0 family inet address 203.0.113.1/30
+set interfaces ge-0/0/2 unit 0 family inet6 address 2001:db8:ffff::1/126
 set interfaces ge-0/0/2 unit 0 description "Untrust WAN uplink"
 set interfaces ge-0/0/3 unit 0 family inet address 172.16.10.1/24
+set interfaces ge-0/0/3 unit 0 family inet6 address 2001:db8:a::1/64
 set interfaces ge-0/0/3 unit 0 description "DMZ segment"
 set interfaces lo0 unit 0 family inet address 10.255.0.1/32
+set interfaces lo0 unit 0 family inet6 address 2001:db8::1/128
 set interfaces st0 unit 0 family inet address 10.10.10.1/30
 
 set security zones security-zone trust interfaces ge-0/0/0.0
@@ -3252,6 +3257,9 @@ config system interface
         set ip 203.0.113.1 255.255.255.0
         set type physical
         set alias "WAN-Primary"
+        config ipv6
+            set ip6-address 2001:db8:ffff::1/126
+        end
     next
     edit "wan2"
         set vdom "root"
@@ -3264,12 +3272,18 @@ config system interface
         set ip 172.16.10.1 255.255.255.0
         set type physical
         set alias "DMZ-Servers"
+        config ipv6
+            set ip6-address 2001:db8:a::1/64
+        end
     next
     edit "internal1"
         set vdom "root"
         set ip 10.1.1.1 255.255.255.0
         set type physical
         set alias "LAN-Users"
+        config ipv6
+            set ip6-address 2001:db8:1::1/64
+        end
     next
     edit "internal2"
         set vdom "root"
@@ -3791,16 +3805,19 @@ interface GigabitEthernet1/1
  nameif inside
  security-level 100
  ip address 10.1.1.1 255.255.255.0
+ ipv6 address 2001:db8:1::1/64
 !
 interface GigabitEthernet1/2
  nameif outside
  security-level 0
  ip address 203.0.113.1 255.255.255.252
+ ipv6 address 2001:db8:ffff::1/126
 !
 interface GigabitEthernet1/3
  nameif dmz
  security-level 50
  ip address 172.16.1.1 255.255.255.0
+ ipv6 address 2001:db8:a::1/64
 !
 object network web-server
  host 172.16.1.10
@@ -4631,9 +4648,9 @@ ospfv3 1 router-id 10.1.1.254
     </vsys>
     <network>
       <interface><ethernet>
-        <entry name="ethernet1/1"><layer3><ip><entry name="10.1.1.1/24"/></ip></layer3></entry>
-        <entry name="ethernet1/2"><layer3><ip><entry name="203.0.113.1/30"/></ip></layer3></entry>
-        <entry name="ethernet1/3"><layer3><ip><entry name="172.16.1.1/24"/></ip></layer3></entry>
+        <entry name="ethernet1/1"><layer3><ip><entry name="10.1.1.1/24"/></ip><ipv6><address><entry name="2001:db8:1::1/64"/></address></ipv6></layer3></entry>
+        <entry name="ethernet1/2"><layer3><ip><entry name="203.0.113.1/30"/></ip><ipv6><address><entry name="2001:db8:ffff::1/126"/></address></ipv6></layer3></entry>
+        <entry name="ethernet1/3"><layer3><ip><entry name="172.16.1.1/24"/></ip><ipv6><address><entry name="2001:db8:a::1/64"/></address></ipv6></layer3></entry>
         <entry name="ethernet1/4"><layer3><ip><entry name="192.168.100.1/24"/></ip></layer3></entry>
       </ethernet></interface>
       <virtual-router><entry name="default"><routing-table><ip><static-route>

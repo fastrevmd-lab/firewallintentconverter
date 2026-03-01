@@ -86,7 +86,7 @@ export default function useConfig() {
   // handleParse — sanitize + parse config, set parse result, auto-open
   //               model selector
   // -----------------------------------------------------------------------
-  const handleParse = useCallback((selectedVendorHint, overrideText) => {
+  const handleParse = useCallback(async (selectedVendorHint, overrideText) => {
     const rawText = overrideText || configState.configText;
     if (!rawText.trim()) return;
 
@@ -110,7 +110,7 @@ export default function useConfig() {
         configDispatch({ type: 'SET_FIELD', field: 'isSanitized', value: true });
       }
 
-      const data = parseConfig(textToParse);
+      const data = await parseConfig(textToParse);
 
       // Inject _review_status on every rule
       const policies = data.intermediateConfig.security_policies || [];

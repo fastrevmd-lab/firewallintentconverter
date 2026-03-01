@@ -6,22 +6,14 @@
  */
 
 import { detectVendor } from '../../src/parsers/parser-utils.js';
-import { parsePanosConfig } from '../../src/parsers/panos-parser.js';
-import { parseSrxConfig } from '../../src/parsers/srx-parser.js';
-import { parseFortigateConfig } from '../../src/parsers/fortigate-parser.js';
-import { parseCiscoAsaConfig } from '../../src/parsers/cisco-asa-parser.js';
-import { parseCheckPointConfig } from '../../src/parsers/checkpoint-parser.js';
-import { parseSonicWallConfig } from '../../src/parsers/sonicwall-parser.js';
-import { parseHuaweiConfig } from '../../src/parsers/huawei-parser.js';
-import { convertToSrxSetCommands, convertMergedToSrxSetCommands } from '../../src/converters/srx-converter.js';
-import { buildSrxXml, buildMergedSrxXml } from '../../src/converters/srx-xml-builder.js';
-import { validateSrxOutput } from '../../src/validators/srx-validator.js';
-import { detectShadowedRules } from '../../src/analysis/shadow-detector.js';
+
+// All parsers, converters, validators, and analysis modules are loaded on
+// demand via dynamic import() — see parseConfig / convertConfig / mergeConvert.
 
 // ---------------------------------------------------------------------------
 // parseConfig  (replaces POST /api/parse)
 // ---------------------------------------------------------------------------
-export function parseConfig(configText) {
+export async function parseConfig(configText) {
   if (!configText || typeof configText !== 'string') {
     throw new Error('configText is required and must be a string');
   }
@@ -29,20 +21,30 @@ export function parseConfig(configText) {
   const detection = detectVendor(configText);
   let result;
 
-  if (detection.vendor === 'srx') {
-    result = parseSrxConfig(configText);
-  } else if (detection.vendor === 'fortigate') {
-    result = parseFortigateConfig(configText);
-  } else if (detection.vendor === 'cisco_asa') {
-    result = parseCiscoAsaConfig(configText);
-  } else if (detection.vendor === 'checkpoint') {
-    result = parseCheckPointConfig(configText);
-  } else if (detection.vendor === 'sonicwall') {
-    result = parseSonicWallConfig(configText);
-  } else if (detection.vendor === 'huawei_usg') {
-    result = parseHuaweiConfig(configText);
+  const parserMap = {
+    srx:        () => import('../../src/parsers/srx-parser.js'),
+    fortigate:  () => import('../../src/parsers/fortigate-parser.js'),
+    cisco_asa:  () => import('../../src/parsers/cisco-asa-parser.js'),
+    checkpoint: () => import('../../src/parsers/checkpoint-parser.js'),
+    sonicwall:  () => import('../../src/parsers/sonicwall-parser.js'),
+    huawei_usg: () => import('../../src/parsers/huawei-parser.js'),
+  };
+
+  const fnNameMap = {
+    srx:        'parseSrxConfig',
+    fortigate:  'parseFortigateConfig',
+    cisco_asa:  'parseCiscoAsaConfig',
+    checkpoint: 'parseCheckPointConfig',
+    sonicwall:  'parseSonicWallConfig',
+    huawei_usg: 'parseHuaweiConfig',
+  };
+
+  if (parserMap[detection.vendor]) {
+    const mod = await parserMap[detection.vendor]();
+    result = mod[fnNameMap[detection.vendor]](configText);
   } else {
-    result = parsePanosConfig(configText);
+    const mod = await import('../../src/parsers/panos-parser.js');
+    result = mod.parsePanosConfig(configText);
   }
 
   result.detectedVendor = detection.vendor;
@@ -52,7 +54,7 @@ export function parseConfig(configText) {
 // ---------------------------------------------------------------------------
 // convertConfig  (replaces POST /api/convert)
 // ---------------------------------------------------------------------------
-export function convertConfig(intermediateConfig, format = 'set', interfaceMappings = {}, targetContext = null) {
+export async function convertConfig(intermediateConfig, format = 'set', interfaceMappings = {}, targetContext = null) {
   if (!intermediateConfig) {
     throw new Error('intermediateConfig is required');
   }
@@ -60,15 +62,22 @@ export function convertConfig(intermediateConfig, format = 'set', interfaceMappi
     throw new Error("format must be 'set' or 'xml'");
   }
 
+  const [converterMod, xmlMod, validatorMod, shadowMod] = await Promise.all([
+    import('../../src/converters/srx-converter.js'),
+    import('../../src/converters/srx-xml-builder.js'),
+    import('../../src/validators/srx-validator.js'),
+    import('../../src/analysis/shadow-detector.js'),
+  ]);
+
   let output;
   if (format === 'xml') {
-    output = buildSrxXml(intermediateConfig, interfaceMappings, targetContext);
+    output = xmlMod.buildSrxXml(intermediateConfig, interfaceMappings, targetContext);
   } else {
-    output = convertToSrxSetCommands(intermediateConfig, interfaceMappings, targetContext);
+    output = converterMod.convertToSrxSetCommands(intermediateConfig, interfaceMappings, targetContext);
   }
 
   // Detect shadowed rules and optimization opportunities
-  const analysis = detectShadowedRules(intermediateConfig.security_policies, output.warnings);
+  const analysis = shadowMod.detectShadowedRules(intermediateConfig.security_policies, output.warnings);
   if (output.summary) {
     output.summary.shadowed_rules = analysis.shadowedCount;
     output.summary.reorder_issues = analysis.reorderCount;
@@ -77,7 +86,7 @@ export function convertConfig(intermediateConfig, format = 'set', interfaceMappi
   }
 
   // Run validation on the generated output
-  const validation = validateSrxOutput(intermediateConfig, output);
+  const validation = validatorMod.validateSrxOutput(intermediateConfig, output);
 
   return { output, format, validation };
 }
@@ -85,7 +94,7 @@ export function convertConfig(intermediateConfig, format = 'set', interfaceMappi
 // ---------------------------------------------------------------------------
 // mergeConvert  (replaces POST /api/merge-convert)
 // ---------------------------------------------------------------------------
-export function mergeConvert(configSlots, crossLsLinks = [], format = 'set', globalConfig = {}) {
+export async function mergeConvert(configSlots, crossLsLinks = [], format = 'set', globalConfig = {}) {
   if (!configSlots || !Array.isArray(configSlots) || configSlots.length < 1) {
     throw new Error('configSlots array is required with at least 1 entry');
   }
@@ -93,11 +102,16 @@ export function mergeConvert(configSlots, crossLsLinks = [], format = 'set', glo
     throw new Error("format must be 'set' or 'xml'");
   }
 
+  const [converterMod, xmlMod] = await Promise.all([
+    import('../../src/converters/srx-converter.js'),
+    import('../../src/converters/srx-xml-builder.js'),
+  ]);
+
   let output;
   if (format === 'xml') {
-    output = buildMergedSrxXml(configSlots, crossLsLinks, globalConfig);
+    output = xmlMod.buildMergedSrxXml(configSlots, crossLsLinks, globalConfig);
   } else {
-    output = convertMergedToSrxSetCommands(configSlots, crossLsLinks, globalConfig);
+    output = converterMod.convertMergedToSrxSetCommands(configSlots, crossLsLinks, globalConfig);
   }
 
   return { output, format };

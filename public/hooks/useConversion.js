@@ -32,7 +32,7 @@ export default function useConversion() {
   // -----------------------------------------------------------------------
   // handleConvert — convert a single parsed config to SRX output
   // -----------------------------------------------------------------------
-  const handleConvert = useCallback((format = 'set') => {
+  const handleConvert = useCallback(async (format = 'set') => {
     if (!intermediateConfig) return;
 
     uiDispatch({ type: 'SET_LOADING', isLoading: true, message: 'Converting to SRX format...' });
@@ -58,7 +58,7 @@ export default function useConversion() {
         };
       }
 
-      const data = convertConfig(
+      const data = await convertConfig(
         configForConversion,
         format,
         interfaceMappings,
@@ -103,7 +103,7 @@ export default function useConversion() {
   // -----------------------------------------------------------------------
   // handleMergeConvert — convert all parsed merge-mode slots to SRX output
   // -----------------------------------------------------------------------
-  const handleMergeConvert = useCallback((format = 'set') => {
+  const handleMergeConvert = useCallback(async (format = 'set') => {
     const { configSlots, crossLsLinks } = mergeState;
     const parsedSlots = configSlots.filter(s => s.intermediateConfig);
     if (parsedSlots.length === 0) return;
@@ -126,7 +126,7 @@ export default function useConversion() {
         syslog_config: parsedSlots.flatMap(s => s.intermediateConfig.syslog_config || []),
       };
 
-      const data = mergeConvert(slotsPayload, crossLsLinks, format, globalConfig);
+      const data = await mergeConvert(slotsPayload, crossLsLinks, format, globalConfig);
 
       conversionDispatch({
         type: 'SET_CONVERSION_RESULT',

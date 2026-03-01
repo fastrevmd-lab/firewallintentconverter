@@ -1277,7 +1277,7 @@ html, body, #root {
 
 /* --- Model Selector Styles --- */
 .model-section {
-  margin-bottom: 8px;
+  margin-bottom: 0;
 }
 
 .model-section-title {
@@ -1286,6 +1286,67 @@ html, body, #root {
   letter-spacing: 0.5px;
   color: var(--text-muted);
   margin-bottom: 8px;
+}
+
+/* Step-based wizard headers for ModelSelector */
+.model-step-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.step-number {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  background: var(--bg-tertiary);
+  border: 1.5px solid var(--border-color);
+  color: var(--text-muted);
+  flex-shrink: 0;
+  transition: all 0.2s ease;
+}
+
+.step-number.complete {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--bg-primary);
+}
+
+.step-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.step-required {
+  font-size: 10px;
+  color: var(--error);
+  font-weight: 600;
+  padding: 2px 6px;
+  border: 1px solid rgba(248, 113, 113, 0.3);
+  border-radius: 3px;
+  background: rgba(248, 113, 113, 0.08);
+}
+
+.step-optional {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-weight: 500;
+  padding: 2px 6px;
+  border: 1px solid var(--border-color);
+  border-radius: 3px;
+}
+
+.model-step-divider {
+  border: none;
+  border-top: 1px solid var(--border-color);
+  margin: 16px 0;
 }
 
 .model-select {

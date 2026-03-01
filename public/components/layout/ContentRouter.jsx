@@ -1,27 +1,33 @@
-import React, { useMemo, useCallback } from 'react';
+import React, { Suspense, useMemo, useCallback } from 'react';
 import { useConfigContext } from '../../contexts/ConfigContext.jsx';
 import { useConversionContext } from '../../contexts/ConversionContext.jsx';
 import { useUIContext } from '../../contexts/UIContext.jsx';
 import { useMergeContext } from '../../contexts/MergeContext.jsx';
 
-// Editor components (still prop-based — context bridge happens here)
-import ConfigInput from '../ConfigInput.jsx';
-import PolicyTable from '../PolicyTable.jsx';
-import BulkActionBar from '../BulkActionBar.jsx';
-import ZoneEditor from '../ZoneEditor.jsx';
-import ObjectEditor from '../ObjectEditor.jsx';
-import NATEditor from '../NATEditor.jsx';
-import RoutingEditor from '../RoutingEditor.jsx';
-import VPNEditor from '../VPNEditor.jsx';
-import HAEditor from '../HAEditor.jsx';
-import ScreenEditor from '../ScreenEditor.jsx';
-import SyslogEditor from '../SyslogEditor.jsx';
-import DHCPEditor from '../DHCPEditor.jsx';
-import QoSEditor from '../QoSEditor.jsx';
-import GreenfieldChat from '../GreenfieldChat.jsx';
-import SRXOutput from '../SRXOutput.jsx';
-import WarningsPanel from '../WarningsPanel.jsx';
-import DiffPanel from '../DiffPanel.jsx';
+// Editor components — lazy-loaded per tab (only one visible at a time)
+const ConfigInput = React.lazy(() => import('../ConfigInput.jsx'));
+const PolicyTable = React.lazy(() => import('../PolicyTable.jsx'));
+const BulkActionBar = React.lazy(() => import('../BulkActionBar.jsx'));
+const ZoneEditor = React.lazy(() => import('../ZoneEditor.jsx'));
+const ObjectEditor = React.lazy(() => import('../ObjectEditor.jsx'));
+const NATEditor = React.lazy(() => import('../NATEditor.jsx'));
+const RoutingEditor = React.lazy(() => import('../RoutingEditor.jsx'));
+const VPNEditor = React.lazy(() => import('../VPNEditor.jsx'));
+const HAEditor = React.lazy(() => import('../HAEditor.jsx'));
+const ScreenEditor = React.lazy(() => import('../ScreenEditor.jsx'));
+const SyslogEditor = React.lazy(() => import('../SyslogEditor.jsx'));
+const DHCPEditor = React.lazy(() => import('../DHCPEditor.jsx'));
+const QoSEditor = React.lazy(() => import('../QoSEditor.jsx'));
+const GreenfieldChat = React.lazy(() => import('../GreenfieldChat.jsx'));
+const SRXOutput = React.lazy(() => import('../SRXOutput.jsx'));
+const WarningsPanel = React.lazy(() => import('../WarningsPanel.jsx'));
+const DiffPanel = React.lazy(() => import('../DiffPanel.jsx'));
+
+const LoadingTab = () => (
+  <div className="center-content" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 1, color: 'var(--text-muted)' }}>
+    <span className="spinner" style={{ marginRight: 8 }} />Loading...
+  </div>
+);
 
 // Hooks
 import useConfig from '../../hooks/useConfig.js';

@@ -8,7 +8,7 @@
  *   - Contains handlers not yet extracted (greenfield, model/mapping, merge slot CRUD)
  *   - Renders the layout shell + modals
  */
-import React, { useCallback, useMemo, useRef, useEffect } from 'react';
+import React, { Suspense, useCallback, useMemo, useRef, useEffect } from 'react';
 
 // Layout components
 import TopBar from './components/layout/TopBar.jsx';
@@ -20,14 +20,15 @@ import Breadcrumb from './components/layout/Breadcrumb.jsx';
 import ContentRouter from './components/layout/ContentRouter.jsx';
 import CommandPalette from './components/layout/CommandPalette.jsx';
 
-// Modal components (still prop-based, not yet migrated to context)
-import ModelSelector from './components/ModelSelector.jsx';
-import InterfaceMapper from './components/InterfaceMapper.jsx';
-import LLMSettings from './components/LLMSettings.jsx';
-import FeedbackModal from './components/FeedbackModal.jsx';
-import SaveProjectModal from './components/SaveProjectModal.jsx';
-import ReportModal from './components/ReportModal.jsx';
-import GuidedTour from './components/GuidedTour.jsx';
+// Modal components — lazy-loaded (only rendered when their modal state is active)
+const ModelSelector = React.lazy(() => import('./components/ModelSelector.jsx'));
+const InterfaceMapper = React.lazy(() => import('./components/InterfaceMapper.jsx'));
+const LLMSettings = React.lazy(() => import('./components/LLMSettings.jsx'));
+const FeedbackModal = React.lazy(() => import('./components/FeedbackModal.jsx'));
+const SaveProjectModal = React.lazy(() => import('./components/SaveProjectModal.jsx'));
+const ReportModal = React.lazy(() => import('./components/ReportModal.jsx'));
+const GuidedTour = React.lazy(() => import('./components/GuidedTour.jsx'));
+// LLMRiskDisclaimer stays static — renders before app shell on first visit
 import LLMRiskDisclaimer, { RejectedScreen } from './components/LLMRiskDisclaimer.jsx';
 
 // Contexts
@@ -296,14 +297,14 @@ export default function App() {
     mergeDispatch({ type: 'UPDATE_SLOT', index, slot: { lsName: name } });
   }, [mergeDispatch]);
 
-  const handleParseSlot = useCallback((slotIndex) => {
+  const handleParseSlot = useCallback(async (slotIndex) => {
     const slot = merge.configSlots[slotIndex];
     if (!slot || !slot.configText.trim()) return;
     uiDispatch({ type: 'SET_LOADING', isLoading: true, message: `Parsing config for ${slot.lsName}...` });
     uiDispatch({ type: 'CLEAR_ERROR' });
     try {
       const sanitized = sanitizeConfig(slot.configText);
-      const data = parseConfig(sanitized.sanitizedText);
+      const data = await parseConfig(sanitized.sanitizedText);
       (data.intermediateConfig.security_policies || []).forEach(r => { r._review_status = 'unreviewed'; });
       const detectedVendor = data.detectedVendor || data.intermediateConfig?.metadata?.source_vendor || 'panos';
       mergeDispatch({ type: 'UPDATE_SLOT', index: slotIndex, slot: {
@@ -427,16 +428,18 @@ export default function App() {
         <div className="app-workspace">
           <div className="app-center">
             <Breadcrumb />
-            <ContentRouter
-              onStartGreenfield={handleStartGreenfield}
-              onStartGreenfieldWithTemplate={handleStartGreenfieldWithTemplate}
-              onGreenfieldAction={handleGreenfieldAction}
-              onModeSwitch={handleModeSwitch}
-              onAddSlot={handleAddSlot}
-              onRemoveSlot={handleRemoveSlot}
-              onUpdateSlotLsName={handleUpdateSlotLsName}
-              onParseSlot={handleParseSlot}
-            />
+            <Suspense fallback={<div className="center-content" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 1, color: 'var(--text-muted)' }}><span className="spinner" style={{ marginRight: 8 }} />Loading...</div>}>
+              <ContentRouter
+                onStartGreenfield={handleStartGreenfield}
+                onStartGreenfieldWithTemplate={handleStartGreenfieldWithTemplate}
+                onGreenfieldAction={handleGreenfieldAction}
+                onModeSwitch={handleModeSwitch}
+                onAddSlot={handleAddSlot}
+                onRemoveSlot={handleRemoveSlot}
+                onUpdateSlotLsName={handleUpdateSlotLsName}
+                onParseSlot={handleParseSlot}
+              />
+            </Suspense>
           </div>
           <ResizeHandle direction="vertical" onResize={handleRightResize} onDoubleClick={() => uiDispatch({ type: 'TOGGLE_INSPECTOR' })} />
           <RightPanel />
@@ -458,7 +461,8 @@ export default function App() {
         onChange={project.handleLoadProjectFile}
       />
 
-      {/* --- Modals --- */}
+      {/* --- Modals (lazy-loaded) --- */}
+      <Suspense fallback={null}>
       {ui.showFeedback && (
         <FeedbackModal onClose={() => uiDispatch({ type: 'HIDE_MODAL', name: 'feedback' })} />
       )}
@@ -657,6 +661,7 @@ export default function App() {
 
       {/* Guided Tour */}
       {ui.showTour && <GuidedTour onClose={() => uiDispatch({ type: 'HIDE_MODAL', name: 'tour' })} />}
+      </Suspense>
     </div>
   );
 }

@@ -10,7 +10,7 @@
  *
  * Also collects SRX license level (A1/A2/P1/P2) for feature gating.
  */
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   PANOS_MODELS,
   SRX_MODELS,
@@ -59,8 +59,9 @@ export default function ModelSelector({
   const [detection, setDetection] = useState(null);
   const [throughputMetric, setThroughputMetric] = useState('l7');
   const [recommendedSrx, setRecommendedSrx] = useState(null); // { model, recommended }
-  const [subscriptionError, setSubscriptionError] = useState('');
   const [showDatasheets, setShowDatasheets] = useState(false);
+  const subscriptionRef = useRef(null);
+  const targetRef = useRef(null);
 
   const isHealthCheckMode = sourceVendor === 'srx_healthcheck';
   const isSrxSource = sourceVendor === 'srx' || isHealthCheckMode;
@@ -111,6 +112,19 @@ export default function ModelSelector({
     }
   }, [selectedSource, throughputMetric, isHealthCheckMode]);
 
+  // Auto-scroll to next incomplete step
+  useEffect(() => {
+    if (selectedSource && !selectedTarget && targetRef.current) {
+      targetRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+  }, [selectedSource, selectedTarget]);
+
+  useEffect(() => {
+    if (selectedTarget && !selectedLicense && subscriptionRef.current) {
+      subscriptionRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+  }, [selectedTarget, selectedLicense]);
+
   const sourceModelsDb = isSrxSource ? SRX_SOURCE_MODELS : isFortigateSource ? FORTIGATE_SOURCE_MODELS : isCiscoSource ? CISCO_SOURCE_MODELS : isCheckpointSource ? CHECKPOINT_SOURCE_MODELS : isSonicwallSource ? SONICWALL_SOURCE_MODELS : isHuaweiSource ? HUAWEI_SOURCE_MODELS : PANOS_MODELS;
   const sourceInfo = sourceModelsDb[selectedSource];
   const targetRaw = SRX_MODELS[selectedTarget];
@@ -126,12 +140,20 @@ export default function ModelSelector({
 
   const metricLabel = METRIC_PREFIX[throughputMetric] || 'L7';
 
+  const canContinue = isHealthCheckMode
+    ? !!selectedSource
+    : !!selectedTarget && !!selectedLicense;
+
+  const continueLabel = isHealthCheckMode
+    ? (selectedSource ? 'Continue' : 'Select Source Model')
+    : !selectedTarget ? 'Select Target Model'
+    : !selectedLicense ? 'Select Subscription to Continue'
+    : 'Continue to Interface Mapping';
+
+  // Step numbering shifts in greenfield (no source step)
+  const stepOffset = greenfieldMode ? 0 : 1;
+
   const handleContinue = () => {
-    if (selectedTarget && !selectedLicense && !isHealthCheckMode) {
-      setSubscriptionError('Please select an SRX subscription before continuing to interface mapping.');
-      return;
-    }
-    setSubscriptionError('');
     onModelSelection({
       sourceModel: selectedSource || null,
       targetModel: selectedTarget || null,
@@ -187,12 +209,14 @@ export default function ModelSelector({
             </div>
           </div>
 
-          {/* Source Model — hidden in greenfield mode */}
+          {/* Step 1: Source Model — hidden in greenfield mode */}
           {!greenfieldMode && (
           <div className="model-section">
-            <h3 className="model-section-title">
-              Source Firewall ({isSrxSource ? 'Juniper SRX' : isFortigateSource ? 'FortiGate' : isCiscoSource ? 'Cisco ASA/FTD' : isCheckpointSource ? 'Check Point' : isSonicwallSource ? 'SonicWall' : isHuaweiSource ? 'Huawei USG' : 'PAN-OS'})
-            </h3>
+            <StepHeader
+              number={1}
+              title={`Source Firewall (${isSrxSource ? 'Juniper SRX' : isFortigateSource ? 'FortiGate' : isCiscoSource ? 'Cisco ASA/FTD' : isCheckpointSource ? 'Check Point' : isSonicwallSource ? 'SonicWall' : isHuaweiSource ? 'Huawei USG' : 'PAN-OS'})`}
+              complete={!!selectedSource}
+            />
 
             {detection && (
               <div className="detection-banner">
@@ -226,10 +250,15 @@ export default function ModelSelector({
           </div>
           )}
 
-          {/* Target SRX Model — hidden in health check mode (target = source) */}
+          {/* Step 2: Target SRX Model — hidden in health check mode (target = source) */}
           {!isHealthCheckMode && (
-          <div className="model-section" style={{ marginTop: 20 }}>
-            <h3 className="model-section-title">Target Firewall (Juniper SRX)</h3>
+          <div className="model-section" ref={targetRef}>
+            {!greenfieldMode && <div className="model-step-divider" />}
+            <StepHeader
+              number={1 + stepOffset}
+              title="Target Firewall (Juniper SRX)"
+              complete={!!selectedTarget}
+            />
 
             <select
               className="model-select"
@@ -269,8 +298,9 @@ export default function ModelSelector({
 
           {/* SRX4700 Port Profile Selector — hidden in health check mode */}
           {targetRaw?.hasPortProfiles && !isHealthCheckMode && (
-            <div className="model-section" style={{ marginTop: 16 }}>
-              <h3 className="model-section-title">Port Profile</h3>
+            <div className="model-section">
+              <div className="model-step-divider" />
+              <StepHeader number={2 + stepOffset} title="Port Profile" complete={!!selectedPortProfile} />
               <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: '0 0 8px', lineHeight: 1.4 }}>
                 The SRX4700 supports configurable port profiles per PIC. Each PIC uses the same profile. Totals shown are for both PICs combined.
               </p>
@@ -313,10 +343,16 @@ export default function ModelSelector({
             </div>
           )}
 
-          {/* SRX Subscriptions */}
+          {/* Step 3: SRX Subscriptions */}
           {selectedTarget && (
-            <div className="model-section" style={{ marginTop: 16 }}>
-              <h3 className="model-section-title">SRX Subscriptions</h3>
+            <div className="model-section" ref={subscriptionRef}>
+              <div className="model-step-divider" />
+              <StepHeader
+                number={(targetRaw?.hasPortProfiles ? 3 : 2) + stepOffset}
+                title="SRX Subscription"
+                complete={!!selectedLicense}
+                required
+              />
               <div className="license-tier-grid">
                 {Object.entries(SRX_LICENSE_TIERS).map(([key, tier]) => (
                   <label
@@ -328,7 +364,7 @@ export default function ModelSelector({
                       name="srxLicense"
                       value={key}
                       checked={selectedLicense === key}
-                      onChange={() => { setSelectedLicense(key); setSubscriptionError(''); }}
+                      onChange={() => setSelectedLicense(key)}
                     />
                     <div className="license-tier-name">{tier.name}</div>
                     <div className="license-tier-desc">{tier.description}</div>
@@ -342,10 +378,14 @@ export default function ModelSelector({
           )}
         </div>
 
-        {/* Site Identification (optional — for SDC/Mist integration) — hidden in health check mode */}
+        {/* Step 4: Site Identification (optional — for SDC/Mist integration) — hidden in health check mode */}
         {!isHealthCheckMode && (
         <div className="model-section" style={{ padding: '12px 20px', borderTop: '1px solid var(--border-color)' }}>
-          <h3 className="model-section-title" style={{ marginBottom: 4 }}>Site Identification (Optional)</h3>
+          <StepHeader
+            number={(targetRaw?.hasPortProfiles ? 4 : 3) + stepOffset}
+            title="Site Identification"
+            optional
+          />
           <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: '0 0 8px 0' }}>
             Added as header comments in the SRX output. Useful for SDC / Mist integration.
           </p>
@@ -376,30 +416,15 @@ export default function ModelSelector({
         </div>
         )}
 
-        {subscriptionError && (
-          <div style={{
-            padding: '8px 16px',
-            background: 'rgba(248, 113, 113, 0.1)',
-            borderTop: '1px solid rgba(248, 113, 113, 0.3)',
-            color: 'var(--error)',
-            fontSize: 13,
-            fontWeight: 500,
-          }}>
-            {subscriptionError}
-          </div>
-        )}
-
         <div className="modal-footer">
           <button className="btn btn-secondary" onClick={onClose}>Skip</button>
           <button
             className="btn btn-primary"
             onClick={handleContinue}
-            disabled={isHealthCheckMode ? !selectedSource : !selectedTarget}
+            disabled={!canContinue}
+            title={!canContinue ? continueLabel : ''}
           >
-            {isHealthCheckMode
-              ? (selectedSource ? 'Continue' : 'Select Source Model')
-              : (selectedTarget ? 'Continue to Interface Mapping' : 'Select Target Model')
-            }
+            {continueLabel}
           </button>
         </div>
       </div>
@@ -477,6 +502,20 @@ function DatasheetPanel({ onClose }) {
           All links open official juniper.net datasheets in a new window.
         </div>
       </div>
+    </div>
+  );
+}
+
+/** Step header with numbered circle, title, and optional required/optional badge */
+function StepHeader({ number, title, complete, required, optional }) {
+  return (
+    <div className="model-step-header">
+      <span className={`step-number${complete ? ' complete' : ''}`}>
+        {complete ? '\u2713' : number}
+      </span>
+      <span className="step-title">{title}</span>
+      {required && <span className="step-required">Required</span>}
+      {optional && <span className="step-optional">Optional</span>}
     </div>
   );
 }

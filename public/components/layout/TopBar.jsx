@@ -216,13 +216,18 @@ export default function TopBar() {
         </button>
 
         {isDeterministicMode(ui.llmRiskAcceptance) && (
-          <span style={{
-            display: 'inline-flex', alignItems: 'center', gap: 4,
-            padding: '2px 8px', borderRadius: 10, fontSize: 11, fontWeight: 600,
-            background: 'var(--success)', color: '#fff',
-          }} title="AI features disabled — using deterministic conversion">
+          <button
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 4,
+              padding: '2px 8px', borderRadius: 10, fontSize: 11, fontWeight: 600,
+              background: 'var(--success)', color: '#fff',
+              border: 'none', cursor: 'pointer',
+            }}
+            title="Click to change AI mode"
+            onClick={() => uiDispatch({ type: 'SET_LLM_RISK_ACCEPTANCE', value: null })}
+          >
             No AI
-          </span>
+          </button>
         )}
 
         {/* Settings — hidden in deterministic mode (no LLM to configure) */}

@@ -107,7 +107,7 @@ After translation, all rules appear in the "to SRX" table with **LLM Reviewed** 
 
 ### 7. Convert
 
-Click **Convert to SRX** to generate the output. Switch between **Set Commands** and **XML** formats in the bottom panel. The **Warnings** tab shows any conversion notes. Use **Push via MCP** to deploy directly to SRX devices.
+Click **Convert to SRX** to generate the output. Switch between **Set Commands** and **XML** formats in the bottom panel. The **Warnings** tab shows any conversion notes. Use **Push via PyEZ** to deploy directly to SRX devices.
 
 ## Features
 
@@ -230,6 +230,24 @@ Click **Convert to SRX** to generate the output. Switch between **Set Commands**
 - **Subscription-aware translation** — SRX subscription tier is included in both the system prompt and user prompt, ensuring security profiles are correctly mapped to available features
 - **Real-time progress** — Translation progress panel shows live elapsed time, chunk progress, and token estimates during LLM calls
 
+### No-AI / Deterministic Mode
+- **No-AI toggle** — Select "No AI Mode (Deterministic Only)" on the risk disclaimer at startup. Disables ALL LLM features. No data leaves the browser
+- **Mode switching** — Click the green "No AI" badge in the top bar to return to the risk disclaimer and switch to any mode (Accept All, Local Only, No AI, Reject)
+- **Deterministic conversion** — Full parse → analysis → convert → export workflow without any AI dependency. Uses built-in mapping tables and algorithms
+- **4-button platform bar** — Persistent navigation bar on all tabs: "From XXX" | "Analysis" | "Review w/LLM" (greyed out in No-AI) | "To SRX"
+- **App mappings** — 236-entry L7 application mapping table with per-vendor names and confidence scores. Maps vendor-specific apps (PAN-OS "ssl", FortiGate "HTTP") to Junos equivalents ("junos-https", "junos-http"). App mapping data contributed by [fatcat-converter](https://github.com/fatcat/converter)
+- **Deterministic profile mapping** — Security profile types (antivirus, IPS, URL filtering, etc.) mapped to SRX UTM/IDP equivalents with subscription tier requirements
+- **Descriptive rule naming** — Generic rule names (e.g., "rule1", "policy-5") are auto-replaced with descriptive names like `permit-trust-to-untrust-https-1`
+- **LLM hints** — When LLM is enabled, app mapping results are injected as hints into the translation prompt to reduce hallucination
+
+### Configuration Analysis Engine
+- **7 analysis checks** — Unused objects, shadowed policies, duplicates, disabled policies, logging disabled, overly permissive rules, empty groups. Analysis engine logic adapted from [fatcat-converter](https://github.com/fatcat/converter)
+- **Analysis button** — Runs analysis from any tab via the platform bar. Badge shows total finding count
+- **Card-based results** — Each finding category is a collapsible card with count badge, severity indicator, bulk action dropdown (Keep/Remove/Consolidate), and per-item override toggles
+- **Apply and review** — "Apply Analysis" cleans up the config based on selections and auto-switches to the SRX rules view for review before conversion
+- **Pre-LLM filtering** — In LLM mode, unused objects are automatically stripped before sending to the LLM to reduce token usage
+- **Available in both modes** — Analysis works identically in No-AI and LLM modes
+
 ### Conversion Features
 - **Security policies** — Zone-based firewall rules with source/dest addresses, applications, services, actions, logging
 - **NAT** — Source NAT, destination NAT, static NAT with zone-pair rule sets
@@ -249,7 +267,7 @@ Click **Convert to SRX** to generate the output. Switch between **Set Commands**
 - **User-ID / Identity policies** — `source_users` field extracted from all vendors (PAN-OS `<source-user>`, FortiGate FSSO users/groups, Cisco ASA IDFW, Check Point Access Roles, SonicWall user/group, Huawei source-user). Converted to SRX `source-identity` match conditions with JIMS service placeholder config
 
 ### Push & Integration
-- **Push via MCP** — Connect to an MCP server to push configurations directly to SRX devices (configurable in Settings)
+- **Push via PyEZ Bridge** — Connect to a local PyEZ Bridge server to push configurations directly to SRX devices via NETCONF. The bridge runs as a standalone Python process alongside the app (configurable in Settings)
 - **Push to SDC** — Security Director Cloud integration (coming soon)
 - **Push to Mist** — Juniper Mist Cloud integration (coming soon)
 - **Convert confirmation** — Warning dialog when converting with unaccepted policies
@@ -304,9 +322,15 @@ firewall-intent-converter/
 │   │   ├── srx-converter.js      # Intermediate JSON → SRX set commands
 │   │   └── srx-xml-builder.js    # Intermediate JSON → SRX XML
 │   ├── analysis/
-│   │   └── shadow-detector.js    # Rule shadowing, optimization, and consolidation analysis
+│   │   ├── shadow-detector.js    # Rule shadowing, optimization, and consolidation analysis
+│   │   └── config-analyzer.js    # Pre-conversion analysis engine (7 checks, adapted from fatcat)
 │   ├── validators/
 │   │   └── srx-validator.js      # SRX output validation
+│   ├── utils/
+│   │   ├── app-mappings.js       # 236-entry L7 app mapping adapter (vendor-key mapping + index)
+│   │   └── profile-mappings.js   # Deterministic security profile → SRX mapping table
+│   ├── data/
+│   │   └── app-mappings.json     # Cross-vendor L7 application mappings (from fatcat-converter)
 │   └── interview/
 │       ├── llm-client.js         # LLM client helpers
 │       └── question-engine.js    # Interview question logic
@@ -362,6 +386,7 @@ firewall-intent-converter/
 │   │   ├── GreenfieldChat.jsx    # LLM-guided greenfield config builder
 │   │   ├── SRXOutput.jsx         # SRX output display (set commands / XML)
 │   │   ├── WarningsPanel.jsx     # Conversion warnings + optimization suggestions
+│   │   ├── AnalysisPanel.jsx      # Pre-conversion analysis findings UI (card-based)
 │   │   ├── DiffPanel.jsx         # Source vs LLM-translated policy diff view
 │   │   ├── BulkActionBar.jsx     # Floating bar for multi-select rule operations
 │   │   ├── ModelSelector.jsx     # Modal — source/target hardware model picker
@@ -369,7 +394,7 @@ firewall-intent-converter/
 │   │   ├── FeedbackModal.jsx     # Modal — feedback submission via GitHub Issues
 │   │   ├── SaveProjectModal.jsx  # Modal — project naming before download
 │   │   ├── ReportModal.jsx       # Modal — migration report generation
-│   │   ├── LLMSettings.jsx       # Modal — LLM provider config, MCP, system prompts
+│   │   ├── LLMSettings.jsx       # Modal — LLM provider config, PyEZ Bridge, system prompts
 │   │   ├── GuidedTour.jsx        # 6-step spotlight walkthrough for new users
 │   │   └── sample-configs.jsx    # Built-in sample configs (7 vendors)
 │   ├── utils/
@@ -382,6 +407,11 @@ firewall-intent-converter/
 │   └── data/
 │       ├── hardware-db.js        # 7-vendor model database (current + EOS)
 │       └── greenfield-templates.js # Pre-built greenfield templates (branch, datacenter, campus, cloud, blank)
+├── tools/
+│   └── pyez-bridge/              # PyEZ Bridge server for NETCONF push to SRX devices
+│       ├── app.py                # Flask REST API — /api/push, /api/devices, /api/health
+│       ├── requirements.txt      # Python dependencies (junos-eznc, flask, flask-cors)
+│       └── README.md             # PyEZ Bridge setup and usage instructions
 └── dist/                         # Production build output (generated, fully static)
 ```
 
@@ -413,9 +443,9 @@ Editable plain-text prompt files control how the LLM behaves during translation 
 
 **Priority order:** For translation, vendor-specific prompts take precedence: user edits in Settings UI (per-vendor localStorage) > vendor-specific file (`translate-{vendor}.txt`) > generic user edits > generic file (`translate.txt`) > hardcoded defaults. Select a vendor in the Settings prompt dropdown to view or edit its prompt. Click "Reset to Default" to revert to the on-disk version.
 
-### MCP Settings
+### PyEZ Bridge Settings
 
-MCP server configuration is stored in `localStorage` under the key `mcp-settings`. Use the Settings modal (MCP Connection tab) to configure the server URL, test the connection, and view connected SRX devices.
+PyEZ Bridge configuration is stored in `localStorage` under the key `pyez-bridge-settings`. Use the Settings modal (PyEZ Bridge tab) to configure the bridge URL, test the connection, and view connected SRX devices. The bridge server (`tools/pyez-bridge/`) runs as a standalone Python Flask process that uses Juniper's PyEZ library for NETCONF push operations.
 
 ## Tech Stack
 

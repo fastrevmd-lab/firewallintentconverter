@@ -88,6 +88,7 @@ export default function ConfigInput({
   sourceModel,
   targetModel,
   onOpenModels,
+  deterministicMode,
   // Merge mode props
   mergeMode,
   configSlots = [],
@@ -98,7 +99,7 @@ export default function ConfigInput({
   onUpdateSlotLsName,
 }) {
   const fileInputRef = useRef(null);
-  const [selectedVendor, setSelectedVendor] = useState('greenfield');
+  const [selectedVendor, setSelectedVendor] = useState(deterministicMode ? 'panos' : 'greenfield');
   const [showSanitizeTable, setShowSanitizeTable] = useState(false);
 
   const isGreenfield = selectedVendor === 'greenfield';
@@ -155,8 +156,8 @@ export default function ConfigInput({
           onChange={(e) => setSelectedVendor(e.target.value)}
           disabled={greenfieldMode || isParsed}
         >
-          <option value="greenfield">Greenfield (New Config)</option>
-          <option value="srx_healthcheck">Junos SRX Best Practice</option>
+          {!deterministicMode && <option value="greenfield">Greenfield (New Config)</option>}
+          {!deterministicMode && <option value="srx_healthcheck">Junos SRX Best Practice</option>}
           <option value="srx">Junos SRX</option>
           <option value="panos">PAN-OS</option>
           <option value="fortigate">FortiGate</option>

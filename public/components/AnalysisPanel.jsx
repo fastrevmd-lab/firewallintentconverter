@@ -61,7 +61,7 @@ const FINDING_ACTIONS = {
   ],
 };
 
-export default function AnalysisPanel({ findings, onApply, onRunAnalysis, isLoading, progressLabel, hasConfig }) {
+export default function AnalysisPanel({ findings, onApply, onRunAnalysis, isLoading, progressLabel, hasConfig, onNavigate }) {
   const [localFindings, setLocalFindings] = useState(findings || []);
   const [expanded, setExpanded] = useState(new Set());
 
@@ -159,6 +159,38 @@ export default function AnalysisPanel({ findings, onApply, onRunAnalysis, isLoad
               borderRadius: 2, animation: 'pulse 1.5s ease-in-out infinite',
             }} />
           </div>
+        </div>
+      )}
+
+      {/* Summary badges */}
+      {hasFindings && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
+          {localFindings.filter(f => f.count > 0).map(f => {
+            const sev = FINDING_SEVERITY[f.id] || 'info';
+            return (
+              <span
+                key={f.id}
+                onClick={() => toggleExpand(f.id)}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 6,
+                  padding: '4px 10px', borderRadius: 6, fontSize: 12, fontWeight: 600,
+                  cursor: 'pointer',
+                  background: sev === 'warning' ? 'rgba(245,158,11,0.12)' : 'var(--surface-2, rgba(128,128,128,0.1))',
+                  color: sev === 'warning' ? '#d97706' : 'var(--text-secondary)',
+                  border: `1px solid ${sev === 'warning' ? 'rgba(245,158,11,0.3)' : 'var(--border-color)'}`,
+                }}
+              >
+                {FINDING_LABELS[f.id] || f.id}
+                <span style={{
+                  display: 'inline-block', minWidth: 18, padding: '0 5px',
+                  borderRadius: 8, fontSize: 11, textAlign: 'center',
+                  background: sev === 'warning' ? '#f59e0b' : '#6b7280', color: '#fff',
+                }}>
+                  {f.count}
+                </span>
+              </span>
+            );
+          })}
         </div>
       )}
 
@@ -260,6 +292,32 @@ export default function AnalysisPanel({ findings, onApply, onRunAnalysis, isLoad
           </div>
         );
       })}
+
+      {/* Next Steps guide */}
+      {hasFindings && !isLoading && (
+        <div style={{
+          marginTop: 20, padding: '16px 20px', borderRadius: 8,
+          background: 'var(--surface-2, rgba(128,128,128,0.06))',
+          border: '1px solid var(--border-color)',
+        }}>
+          <h4 style={{ margin: '0 0 10px', fontSize: 14 }}>Next Steps</h4>
+          <ol style={{ margin: 0, paddingLeft: 20, lineHeight: 1.8, fontSize: 13, color: 'var(--text-secondary)' }}>
+            <li><strong>Review findings above</strong> — expand each category and choose a bulk action (Keep, Remove, Consolidate, etc.)</li>
+            <li><strong>Override individual items</strong> if needed — click Keep/Remove per item within a category</li>
+            <li>Click <strong>"Apply Analysis"</strong> above to clean up the config based on your selections</li>
+            <li>
+              Switch to the <strong>SRX view</strong> and click{' '}
+              <strong
+                style={{ cursor: 'pointer', color: 'var(--accent)' }}
+                onClick={() => onNavigate?.('rules')}
+              >
+                "Convert to SRX"
+              </strong>
+              {' '}to generate the final output
+            </li>
+          </ol>
+        </div>
+      )}
     </div>
   );
 }

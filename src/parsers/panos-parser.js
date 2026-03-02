@@ -309,6 +309,7 @@ export function parsePanosConfig(configText) {
     syslog_config: syslogConfig,
     dhcp_config: dhcpConfig,
     qos_config: qosConfig,
+    flow_monitoring_config: parseNetflowConfig(config, warnings),
     interfaces,
     transparent_mode: hasL2,
     bridge_domains: [],
@@ -2633,4 +2634,70 @@ function parseVwirePairs(config, warnings) {
   }
 
   return pairs;
+}
+
+
+// ---------------------------------------------------------------------------
+// NetFlow / IP Flow Export Parser
+// ---------------------------------------------------------------------------
+
+/**
+ * Parses PAN-OS NetFlow (IP Flow Export) configuration.
+ * Located at: deviceconfig > setting > ctd > ip-flow-export
+ * Also checks: network > interface > ethernet > ... > netflow-profile
+ */
+function parseNetflowConfig(config, warnings) {
+  const result = { collectors: [], sampling: { input_rate: 1000, run_length: 0, interfaces: [] }, templates: [] };
+
+  // Check deviceconfig > setting for flow export
+  const deviceConfig = config.deviceconfig || config['device-config'] || {};
+  const setting = deviceConfig.setting || {};
+  const ctd = setting.ctd || {};
+  const flowExport = ctd['ip-flow-export'] || {};
+
+  if (!flowExport || Object.keys(flowExport).length === 0) return result;
+
+  // Parse collectors (can be nested under "server" or direct entries)
+  const servers = flowExport.server || flowExport;
+  if (servers && typeof servers === 'object') {
+    const entries = extractEntries(servers);
+    for (const entry of entries) {
+      const name = entry['@_name'] || '';
+      const host = entry.host || entry.server || name;
+      const port = parseInt(entry.port) || 2055;
+      const templateRefresh = parseInt(entry['template-refresh-rate']) || 600;
+
+      if (host) {
+        result.collectors.push({
+          address: host,
+          port,
+          protocol: 'netflow-v9',
+          source_address: entry['source-address'] || '',
+        });
+        result.templates.push({
+          name: sanitizeName(name || `tpl-${host}`),
+          flow_type: 'ipv4',
+          active_timeout: parseInt(entry['active-timeout']) || 60,
+          refresh_rate: templateRefresh,
+        });
+      }
+    }
+  }
+
+  // Parse sampling rate
+  if (flowExport['active-timeout']) {
+    result.sampling.input_rate = parseInt(flowExport['active-timeout']) || 1000;
+  }
+
+  if (result.collectors.length > 0) {
+    warnings.push(createWarning('info', 'netflow',
+      `Parsed ${result.collectors.length} NetFlow collector(s)`,
+      'NetFlow IP flow export configuration detected'));
+  }
+
+  return result;
+}
+
+function sanitizeName(name) {
+  return name.replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 63);
 }

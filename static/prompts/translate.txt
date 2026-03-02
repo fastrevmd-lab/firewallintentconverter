@@ -95,6 +95,19 @@ Source firewalls often include security profiles (AV, IPS, URL filtering, sandbo
 }
 ```
 
+### SSL Decryption / SSL Proxy
+- If the source has SSL decryption rules (provided as context), set `_srx_decrypt: true` on any translated security rule whose traffic matches a decrypt-action decryption rule
+- For no-decrypt rules, note in `_translation_notes` that traffic is explicitly excluded from decryption
+- SRX SSL Proxy profiles (ssl-fwd-proxy, ssl-inbound-proxy) are generated automatically — just set the flag
+
+### Policy-Based Forwarding
+- PBF rules are converted separately to SRX filter-based forwarding (firewall filter + routing-instances)
+- Do NOT convert PBF rules as security policies — they are handled by a dedicated converter
+
+### NetFlow / Flow Monitoring
+- Flow monitoring configuration is converted separately to SRX inline-jflow
+- Do NOT include flow monitoring in security policy translation
+
 ## Important
 - Translate ALL source rules — do not skip any
 - Preserve the intent of each source rule

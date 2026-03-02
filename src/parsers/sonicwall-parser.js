@@ -130,6 +130,7 @@ function parseJsonFormat(text, warnings) {
     syslog_config: [],
     dhcp_config: [],
     qos_config: [],
+    flow_monitoring_config: { collectors: [], sampling: { input_rate: 1000, run_length: 0, interfaces: [] }, templates: [] },
     interfaces: normalizedInterfaces,
     routing_contexts: [{ name: 'default', type: 'default', virtual_routers: [], zones: [] }],
     static_routes: staticRoutes,

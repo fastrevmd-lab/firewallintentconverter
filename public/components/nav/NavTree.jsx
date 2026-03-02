@@ -54,6 +54,8 @@ const NAV_STRUCTURE = [
     { id: 'nat', label: 'NAT Rules', countKey: 'nat_rules' },
     { id: 'zones', label: 'Zones', countKey: 'zones' },
     { id: 'screen', label: 'Screens', countKey: 'screen_config' },
+    { id: 'decryption', label: 'SSL B&I', countKey: 'decryption_rules' },
+    { id: 'pbf', label: 'PBF', countKey: 'pbf_rules' },
   ]},
   { id: 'objects', label: 'Objects', icon: 'box', children: [
     { id: 'objects', label: 'Addr/Svc/App', countFn: (ic) =>
@@ -68,6 +70,7 @@ const NAV_STRUCTURE = [
     },
     { id: 'vpn', label: 'VPN', countKey: 'vpn_tunnels' },
     { id: 'dhcp', label: 'DHCP', countKey: 'dhcp_config' },
+    { id: 'flow-monitoring', label: 'Flow Monitoring', countFn: (ic) => ic?.flow_monitoring_config?.collectors?.length || 0 },
   ]},
   { id: 'system', label: 'System', icon: 'settings', children: [
     { id: 'ha', label: 'HA', countFn: (ic) => ic?.ha_config?.enabled ? 1 : 0 },

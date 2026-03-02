@@ -79,10 +79,11 @@ export function parseCiscoAsaConfig(configText) {
   // Parse VPN/IPsec tunnel configuration
   const vpnTunnels = parseCiscoVpnConfig(lines, blocks, warnings);
 
-  // Parse syslog, DHCP, QoS
+  // Parse syslog, DHCP, QoS, NetFlow
   const syslogConfig = parseCiscoSyslogConfig(lines, warnings);
   const dhcpConfig = parseCiscoDhcpConfig(lines, blocks, warnings);
   const qosConfig = parseCiscoQosConfig(lines, blocks, warnings);
+  const flowMonitoringConfig = parseCiscoFlowExport(lines, warnings);
 
   // Normalize interfaces to standard schema
   const normalizedInterfaces = interfaces.map(iface => {
@@ -127,6 +128,7 @@ export function parseCiscoAsaConfig(configText) {
     syslog_config: syslogConfig,
     dhcp_config: dhcpConfig,
     qos_config: qosConfig,
+    flow_monitoring_config: flowMonitoringConfig,
     interfaces: normalizedInterfaces,
     routing_contexts: routingContexts,
     static_routes: staticRoutes,
@@ -2467,4 +2469,68 @@ function parseCiscoQosConfig(lines, blocks, warnings) {
     warnings.push(createWarning('info', 'qos', `Parsed ${qosProfiles.length} QoS policy(ies)`, 'QoS/service policy configuration detected'));
   }
   return qosProfiles;
+}
+
+
+// ---------------------------------------------------------------------------
+// NetFlow / Flow Export Configuration Parser
+// ---------------------------------------------------------------------------
+
+/**
+ * Parses Cisco ASA flow-export configuration.
+ *
+ * Sources:
+ *   flow-export destination <interface> <address> <port>
+ *   flow-export active refresh-interval <seconds>
+ *   flow-export template timeout-rate <packets>
+ */
+function parseCiscoFlowExport(lines, warnings) {
+  const result = { collectors: [], sampling: { input_rate: 1000, run_length: 0, interfaces: [] }, templates: [] };
+
+  let activeTimeout = 60;
+  let templateRefresh = 600;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+
+    // flow-export destination <interface> <address> <port>
+    const destMatch = trimmed.match(/^flow-export\s+destination\s+(\S+)\s+(\S+)\s+(\d+)/);
+    if (destMatch) {
+      result.collectors.push({
+        address: destMatch[2],
+        port: parseInt(destMatch[3]) || 2055,
+        protocol: 'netflow-v9',
+        source_address: '',
+      });
+      continue;
+    }
+
+    // flow-export active refresh-interval <seconds>
+    const refreshMatch = trimmed.match(/^flow-export\s+active\s+refresh-interval\s+(\d+)/);
+    if (refreshMatch) {
+      activeTimeout = parseInt(refreshMatch[1]) || 60;
+      continue;
+    }
+
+    // flow-export template timeout-rate <packets>
+    const templateMatch = trimmed.match(/^flow-export\s+template\s+timeout-rate\s+(\d+)/);
+    if (templateMatch) {
+      templateRefresh = parseInt(templateMatch[1]) || 600;
+    }
+  }
+
+  if (result.collectors.length > 0) {
+    result.templates.push({
+      name: 'asa-flow-export',
+      flow_type: 'ipv4',
+      active_timeout: activeTimeout,
+      refresh_rate: templateRefresh,
+    });
+
+    warnings.push(createWarning('info', 'netflow',
+      `Parsed ${result.collectors.length} flow-export destination(s)`,
+      'Cisco ASA flow-export configuration detected'));
+  }
+
+  return result;
 }

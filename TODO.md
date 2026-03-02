@@ -242,6 +242,13 @@
 - [x] **SRX Device Connection settings** — Renamed MCP Connection tab to SRX Device Connection. PyEZ Bridge URL configuration with connection testing. Device add/remove management via bridge API. localStorage migration from old mcp-settings key
 - [x] **Push to SRX button** — Renamed "Push MCP" to "Push to SRX" with smart routing: opens PushModal when bridge is configured, Settings tab when not. Disabled when no SRX output exists
 
+### Rev15 — Virtual-Wire, SSL Proxy, PBF, NetFlow
+- [x] **Virtual-Wire completion** — PAN-OS vwire pairs now auto-assign SRX interfaces via Interface Mapper. Generates `bridge-domain` + `family bridge` interface bindings. FortiGate transparent-mode virtual-switch also synthesizes vwire pairs. Unresolved interfaces get actionable warnings
+- [x] **Full SRX SSL Proxy generation** — Decryption rules (PAN-OS, FortiGate ssl-ssh-profile) now generate `set services ssl proxy profile` commands with PKI ca-profile placeholders. SSL forward-proxy and inbound-inspection profiles. Policy `_srx_decrypt` attachment via `application-services ssl-proxy profile-name`. FortiGate deep-inspection profiles auto-set `_srx_decrypt` on matching policies
+- [x] **Policy-Based Forwarding conversion** — PAN-OS PBF, FortiGate `config router policy`, and SRX firewall filter round-trip. Generates routing-instances (type forwarding), firewall filter terms, and interface filter bindings. Nav sidebar shows PBF tab with badge count
+- [x] **NetFlow / Flow Monitoring** — End-to-end support: PAN-OS ip-flow-export, FortiGate netflow/sflow, Cisco ASA flow-export, Huawei NetStream, SRX inline-jflow round-trip. Converter generates `forwarding-options sampling` + `services flow-monitoring`. New FlowMonitoringEditor UI with collectors, sampling, and template sections. Nav sidebar shows Flow Monitoring under Network
+- [x] **SSL B&I and PBF nav items** — Added missing sidebar navigation entries for SSL B&I (decryption) and PBF tabs under Security section
+
 ### Blocked — Waiting on Vendor APIs
 - [ ] **Push to SDC / SD On-Prem / Mist** — Direct deployment to Juniper management platforms. Requires HPE Juniper public REST APIs
 
@@ -250,12 +257,10 @@
 ## Known Limitations
 
 - **AAA / Authentication** — RADIUS, TACACS+, LDAP server config not converted (noted in output comments)
-- **SSL/TLS Decryption** — PAN-OS SSL B&I rules parsed, displayed in dedicated tab, and used during LLM translation to set `_srx_decrypt` on matching security rules. Full SRX SSL Proxy config generation not yet automated (certificate management, PKI, proxy profiles require manual setup)
-- **Policy-Based Forwarding** — PAN-OS PBF rules now parsed and displayed in dedicated tab; SRX filter-based forwarding generation not yet automated
-- **NetFlow / Telemetry** — sFlow, streaming telemetry not converted
+- **SSL/TLS Decryption** — Full SSL Proxy generation automated (PKI ca-profile, ssl proxy profiles, policy attachment). Certificate import requires manual `request security pki` commands after commit
 - **Management Access** — Admin users, SNMP communities, SSH/API access not converted
 - **Dynamic Routing** — BGP, OSPF, OSPFv3, EVPN/VxLAN supported across applicable vendors
 - **User Identity** — User-ID / FSSO / IDFW parsed and converted to SRX `source-identity` — requires manual JIMS server configuration
-- **Virtual-Wire** — SRX has no native vwire; mapped to bridge-domain with TODO comments for interface assignment
+- **Virtual-Wire** — SRX maps vwire to bridge-domain; auto-assigns interfaces when mapped in Interface Mapper
 - **MNHA** — Only 2-node configurations supported
 - **Application Mapping** — ~120 apps mapped; unmapped apps get `Customfwic` suffix + warning

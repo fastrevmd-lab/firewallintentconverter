@@ -130,6 +130,18 @@ export function buildSrxXml(config, interfaceMappings = {}, targetContext = null
   // QoS / CoS
   buildQosXml(config.qos_config, lines);
 
+  // L2 / Bridge Domains / Virtual-Wire
+  buildL2Xml(config, lines, interfaceMappings);
+
+  // Policy-Based Forwarding (filter-based forwarding)
+  buildPbfXml(config.pbf_rules, lines, interfaceMappings);
+
+  // SSL Proxy / PKI
+  buildSslProxyXml(config, lines);
+
+  // Flow Monitoring (Inline Jflow)
+  buildFlowMonitoringXml(config.flow_monitoring_config, lines);
+
   // Applications (includes Customfwic placeholders for unmapped apps)
   buildApplicationsXml(config.service_objects, config.applications, config.service_groups, lines, xmlCustomfwicApps);
 
@@ -409,7 +421,9 @@ function buildPoliciesXml(policies, lines, warnings, profileMaps = {}, appGroups
       const hasSecIntel = secIntelEnabled && policy.action === 'allow' &&
         policy.dst_zones.some(z => z.toLowerCase() === 'untrust');
 
-      if (hasUtm || hasIdp || hasSecIntel || hasProfileGroup) {
+      const hasSslProxy = policy._srx_decrypt && policy.action === 'allow';
+
+      if (hasUtm || hasIdp || hasSecIntel || hasProfileGroup || hasSslProxy) {
         lines.push('            <application-services>');
         if (hasUtm) {
           lines.push(`              <utm-policy>${escapeXml(utmPolicyMap[policy.name])}</utm-policy>`);
@@ -421,6 +435,14 @@ function buildPoliciesXml(policies, lines, warnings, profileMaps = {}, appGroups
         }
         if (hasSecIntel) {
           lines.push('              <security-intelligence-policy>secIntel-policy</security-intelligence-policy>');
+        }
+        if (hasSslProxy) {
+          const sslProfile = policy._srx_decrypt_profile
+            ? sanitizeJunosName(policy._srx_decrypt_profile)
+            : 'ssl-fwd-proxy';
+          lines.push('              <ssl-proxy>');
+          lines.push(`                <profile-name>${escapeXml(sslProfile)}</profile-name>`);
+          lines.push('              </ssl-proxy>');
         }
         lines.push('            </application-services>');
       }
@@ -1900,6 +1922,375 @@ function buildQosXml(qosConfig, lines) {
   }
 
   lines.push('  </class-of-service>');
+}
+
+
+// ---------------------------------------------------------------------------
+// L2 / Bridge Domains / Virtual-Wire
+// ---------------------------------------------------------------------------
+
+function buildL2Xml(config, lines, interfaceMappings = {}) {
+  const bridgeDomains = config.bridge_domains || [];
+  const l2Interfaces = config.l2_interfaces || [];
+  const vwirePairs = config.vwire_pairs || [];
+
+  if (bridgeDomains.length === 0 && l2Interfaces.length === 0 && vwirePairs.length === 0) return;
+
+  lines.push('  <!-- L2 / Bridge Domains -->');
+  lines.push('  <bridge-domains>');
+
+  // Explicit bridge domains
+  for (const bd of bridgeDomains) {
+    const bdName = sanitizeJunosName(bd.name);
+    lines.push('    <domain>');
+    lines.push(`      <name>${escapeXml(bdName)}</name>`);
+    lines.push('      <domain-type>bridge</domain-type>');
+    if (bd.vlan_id) lines.push(`      <vlan-id>${escapeXml(String(bd.vlan_id))}</vlan-id>`);
+    if (bd.irb_interface) lines.push(`      <routing-interface>${escapeXml(bd.irb_interface)}</routing-interface>`);
+    lines.push('    </domain>');
+  }
+
+  // Virtual-wire bridge domains
+  for (const vw of vwirePairs) {
+    const bdName = sanitizeJunosName(`vwire-${vw.name}`);
+    lines.push('    <domain>');
+    lines.push(`      <name>${escapeXml(bdName)}</name>`);
+    lines.push('      <domain-type>bridge</domain-type>');
+    if (vw.tag_allowed && vw.tag_allowed.length === 1 && vw.tag_allowed[0] !== '0') {
+      lines.push(`      <vlan-id>${escapeXml(String(vw.tag_allowed[0]))}</vlan-id>`);
+    }
+    if (vw.tag_allowed && vw.tag_allowed.length > 1) {
+      lines.push(`      <vlan-id-list>${escapeXml(vw.tag_allowed.join(' '))}</vlan-id-list>`);
+    }
+    lines.push('    </domain>');
+  }
+
+  lines.push('  </bridge-domains>');
+
+  // Interface family bridge assignments for resolved vwire interfaces
+  const bridgeInterfaces = [];
+  for (const vw of vwirePairs) {
+    const bdName = sanitizeJunosName(`vwire-${vw.name}`);
+    for (const srcIf of [vw.interface1, vw.interface2]) {
+      let srxName = srcIf;
+      if (interfaceMappings[srcIf]) {
+        srxName = interfaceMappings[srcIf];
+        if (!srxName.includes('.')) srxName += '.0';
+      } else {
+        const base = srcIf.split('.')[0];
+        if (interfaceMappings[base]) {
+          srxName = `${interfaceMappings[base].split('.')[0]}.0`;
+        }
+      }
+      // Only emit if actually mapped (not the original name)
+      const origNorm = srcIf.includes('.') ? srcIf : `${srcIf}.0`;
+      if (srxName !== origNorm) {
+        bridgeInterfaces.push({ srxName, bdName, vlanList: vw.tag_allowed });
+      }
+    }
+  }
+  for (const l2if of l2Interfaces) {
+    const parts = l2if.name.match(/^(.+?)\.(\d+)$/);
+    const srxName = parts ? l2if.name : `${l2if.name}.0`;
+    bridgeInterfaces.push({ srxName, bdName: l2if.bridge_domain });
+  }
+
+  if (bridgeInterfaces.length > 0) {
+    lines.push('  <!-- L2 Interface Assignments -->');
+    lines.push('  <interfaces>');
+    for (const bi of bridgeInterfaces) {
+      const [baseName, unitNum = '0'] = bi.srxName.split('.');
+      lines.push('    <interface>');
+      lines.push(`      <name>${escapeXml(baseName)}</name>`);
+      lines.push('      <unit>');
+      lines.push(`        <name>${escapeXml(unitNum)}</name>`);
+      lines.push('        <family>');
+      lines.push('          <bridge>');
+      if (bi.vlanList && bi.vlanList.length > 1) {
+        lines.push('            <interface-mode>trunk</interface-mode>');
+        lines.push(`            <vlan-id-list>${escapeXml(bi.vlanList.join(' '))}</vlan-id-list>`);
+      } else if (bi.bdName) {
+        lines.push(`            <bridge-domain-name>${escapeXml(sanitizeJunosName(bi.bdName))}</bridge-domain-name>`);
+      }
+      lines.push('          </bridge>');
+      lines.push('        </family>');
+      lines.push('      </unit>');
+      lines.push('    </interface>');
+    }
+    lines.push('  </interfaces>');
+  }
+}
+
+
+// ---------------------------------------------------------------------------
+// Policy-Based Forwarding (Filter-Based Forwarding)
+// ---------------------------------------------------------------------------
+
+function buildPbfXml(pbfRules, lines, interfaceMappings = {}) {
+  if (!pbfRules || pbfRules.length === 0) return;
+
+  const activeRules = pbfRules.filter(r => !r.disabled);
+  if (activeRules.length === 0) return;
+
+  // Collect routing instances (type forwarding)
+  const instances = new Map();
+  for (const rule of activeRules) {
+    if (rule.action === 'forward' && rule.next_hop_value) {
+      if (!instances.has(rule.next_hop_value)) {
+        instances.set(rule.next_hop_value, sanitizeJunosName(`PBF-${rule.name}`));
+      }
+    }
+  }
+
+  // Emit routing-instances for PBF
+  if (instances.size > 0) {
+    lines.push('  <!-- PBF Routing Instances -->');
+    lines.push('  <routing-instances>');
+    for (const [nextHop, instName] of instances) {
+      const defaultRoute = nextHop.includes(':') ? '::/0' : '0.0.0.0/0';
+      lines.push('    <instance>');
+      lines.push(`      <name>${escapeXml(instName)}</name>`);
+      lines.push('      <instance-type>forwarding</instance-type>');
+      lines.push('      <routing-options>');
+      lines.push('        <static>');
+      lines.push('          <route>');
+      lines.push(`            <name>${escapeXml(defaultRoute)}</name>`);
+      lines.push(`            <next-hop>${escapeXml(nextHop)}</next-hop>`);
+      lines.push('          </route>');
+      lines.push('        </static>');
+      lines.push('      </routing-options>');
+      lines.push('    </instance>');
+    }
+    lines.push('  </routing-instances>');
+  }
+
+  // Emit firewall filter
+  lines.push('  <!-- PBF Firewall Filter -->');
+  lines.push('  <firewall>');
+  lines.push('    <filter>');
+  lines.push('      <name>PBF-FILTER</name>');
+
+  for (const rule of activeRules) {
+    const termName = sanitizeJunosName(rule.name);
+    lines.push('      <term>');
+    lines.push(`        <name>${escapeXml(termName)}</name>`);
+
+    // from clause
+    const hasSrc = (rule.src_addresses || []).some(a => a !== 'any');
+    const hasDst = (rule.dst_addresses || []).some(a => a !== 'any');
+    if (hasSrc || hasDst) {
+      lines.push('        <from>');
+      for (const src of (rule.src_addresses || []).filter(a => a !== 'any')) {
+        lines.push(`          <source-address>${escapeXml(src)}</source-address>`);
+      }
+      for (const dst of (rule.dst_addresses || []).filter(a => a !== 'any')) {
+        lines.push(`          <destination-address>${escapeXml(dst)}</destination-address>`);
+      }
+      lines.push('        </from>');
+    }
+
+    // then clause
+    lines.push('        <then>');
+    if (rule.action === 'forward' && rule.next_hop_value) {
+      const instName = instances.get(rule.next_hop_value);
+      lines.push(`          <routing-instance>${escapeXml(instName)}</routing-instance>`);
+    } else if (rule.action === 'discard') {
+      lines.push('          <discard/>');
+    } else {
+      lines.push('          <accept/>');
+    }
+    lines.push('        </then>');
+    lines.push('      </term>');
+  }
+
+  // Default accept term
+  lines.push('      <term>');
+  lines.push('        <name>default</name>');
+  lines.push('        <then><accept/></then>');
+  lines.push('      </term>');
+  lines.push('    </filter>');
+  lines.push('  </firewall>');
+}
+
+
+// ---------------------------------------------------------------------------
+// SSL Proxy / PKI XML
+// ---------------------------------------------------------------------------
+
+/**
+ * Builds SSL proxy profile and PKI ca-profile XML from decryption rules.
+ */
+function buildSslProxyXml(config, lines) {
+  const decryptionRules = config.decryption_rules || [];
+  const hasDecryptPolicies = (config.security_policies || []).some(p => p._srx_decrypt);
+  const hasDecryptRules = decryptionRules.some(r => r.action === 'decrypt');
+
+  if (!hasDecryptRules && !hasDecryptPolicies) return;
+
+  // Collect profiles
+  const fwdProxyProfiles = new Set();
+  const inboundProfiles = new Map();
+
+  for (const rule of decryptionRules) {
+    if (rule.disabled) continue;
+    if (rule.action === 'decrypt' || rule.action === 'decrypt-and-forward') {
+      if (rule.decryption_type === 'ssl-forward-proxy') {
+        fwdProxyProfiles.add(rule.decryption_profile
+          ? sanitizeJunosName(`ssl-fwd-${rule.decryption_profile}`)
+          : 'ssl-fwd-proxy');
+      } else if (rule.decryption_type === 'ssl-inbound-inspection') {
+        const pName = rule.decryption_profile
+          ? sanitizeJunosName(`ssl-inbound-${rule.decryption_profile}`)
+          : 'ssl-inbound-proxy';
+        inboundProfiles.set(pName, rule.ssl_certificate || 'SERVER-CERT');
+      } else if (rule.decryption_type !== 'ssh-proxy') {
+        fwdProxyProfiles.add('ssl-fwd-proxy');
+      }
+    }
+  }
+
+  if (fwdProxyProfiles.size === 0 && hasDecryptPolicies) {
+    fwdProxyProfiles.add('ssl-fwd-proxy');
+  }
+
+  if (fwdProxyProfiles.size === 0 && inboundProfiles.size === 0) return;
+
+  // PKI ca-profile (inside <security>)
+  if (fwdProxyProfiles.size > 0) {
+    lines.push('  <!-- PKI CA Profile for SSL Forward Proxy -->');
+    lines.push('  <security>');
+    lines.push('    <pki>');
+    lines.push('      <ca-profile>');
+    lines.push('        <name>FPIC-CA</name>');
+    lines.push('        <ca-identity>FPIC-CA</ca-identity>');
+    lines.push('      </ca-profile>');
+    lines.push('    </pki>');
+    lines.push('  </security>');
+  }
+
+  // Services SSL proxy profiles
+  lines.push('  <!-- SSL Proxy Profiles -->');
+  lines.push('  <services>');
+  lines.push('    <ssl>');
+  lines.push('      <proxy>');
+
+  for (const profileName of fwdProxyProfiles) {
+    lines.push('        <profile>');
+    lines.push(`          <name>${escapeXml(profileName)}</name>`);
+    lines.push('          <root-ca>FPIC-CA</root-ca>');
+    lines.push('          <protocol-version>tls12-and-above</protocol-version>');
+    lines.push('          <actions>');
+    lines.push('            <log/>');
+    lines.push('            <crl-disable/>');
+    lines.push('          </actions>');
+    lines.push('        </profile>');
+  }
+
+  for (const [profileName, certName] of inboundProfiles) {
+    lines.push('        <profile>');
+    lines.push(`          <name>${escapeXml(profileName)}</name>`);
+    lines.push(`          <server-certificate>${escapeXml(certName)}</server-certificate>`);
+    lines.push('          <protocol-version>tls12-and-above</protocol-version>');
+    lines.push('          <actions>');
+    lines.push('            <log/>');
+    lines.push('          </actions>');
+    lines.push('        </profile>');
+  }
+
+  lines.push('      </proxy>');
+  lines.push('    </ssl>');
+  lines.push('  </services>');
+}
+
+
+// ---------------------------------------------------------------------------
+// Flow Monitoring XML (Inline Jflow)
+// ---------------------------------------------------------------------------
+
+/**
+ * Builds SRX inline-jflow XML configuration from flow monitoring config.
+ */
+function buildFlowMonitoringXml(flowConfig, lines) {
+  if (!flowConfig || !flowConfig.collectors || flowConfig.collectors.length === 0) return;
+
+  const instanceName = flowConfig.instance_name || 'FLOW-SAMPLE';
+  const sampling = flowConfig.sampling || {};
+  const rate = sampling.input_rate || 1000;
+  const templates = flowConfig.templates || [];
+
+  // forwarding-options > sampling
+  lines.push('  <!-- Flow Monitoring (Inline Jflow) -->');
+  lines.push('  <forwarding-options>');
+  lines.push('    <sampling>');
+  lines.push('      <instance>');
+  lines.push(`        <name>${escapeXml(instanceName)}</name>`);
+  lines.push('        <input>');
+  lines.push(`          <rate>${rate}</rate>`);
+  lines.push('        </input>');
+  lines.push('        <family>');
+  lines.push('          <inet>');
+  lines.push('            <output>');
+
+  for (let i = 0; i < flowConfig.collectors.length; i++) {
+    const collector = flowConfig.collectors[i];
+    const tpl = templates[i] || { name: `flow-tpl-${i + 1}` };
+    const tplName = sanitizeJunosName(tpl.name);
+    const isIpfix = !collector.protocol || collector.protocol === 'ipfix' || collector.protocol === 'netflow-v10';
+
+    lines.push('              <flow-server>');
+    lines.push(`                <name>${escapeXml(collector.address)}</name>`);
+    lines.push(`                <port>${collector.port || 2055}</port>`);
+    if (isIpfix) {
+      lines.push('                <version-ipfix>');
+      lines.push(`                  <template>${escapeXml(tplName)}</template>`);
+      lines.push('                </version-ipfix>');
+    } else {
+      lines.push('                <version9>');
+      lines.push(`                  <template>${escapeXml(tplName)}</template>`);
+      lines.push('                </version9>');
+    }
+    lines.push('              </flow-server>');
+  }
+
+  // Inline jflow source address
+  const srcAddr = flowConfig.collectors.find(c => c.source_address)?.source_address;
+  if (srcAddr) {
+    lines.push('              <inline-jflow>');
+    lines.push(`                <source-address>${escapeXml(srcAddr)}</source-address>`);
+    lines.push('              </inline-jflow>');
+  }
+
+  lines.push('            </output>');
+  lines.push('          </inet>');
+  lines.push('        </family>');
+  lines.push('      </instance>');
+  lines.push('    </sampling>');
+  lines.push('  </forwarding-options>');
+
+  // services > flow-monitoring templates
+  if (templates.length > 0) {
+    lines.push('  <services>');
+    lines.push('    <flow-monitoring>');
+
+    for (const tpl of templates) {
+      const tplName = sanitizeJunosName(tpl.name);
+      lines.push('      <version-ipfix>');
+      lines.push('        <template>');
+      lines.push(`          <name>${escapeXml(tplName)}</name>`);
+      lines.push(`          <flow-active-timeout>${tpl.active_timeout || 60}</flow-active-timeout>`);
+      lines.push('          <template-refresh-rate>');
+      lines.push(`            <packets>${tpl.refresh_rate || 1000}</packets>`);
+      lines.push('          </template-refresh-rate>');
+      if (tpl.flow_type === 'ipv6') {
+        lines.push('          <ipv6-template/>');
+      }
+      lines.push('        </template>');
+      lines.push('      </version-ipfix>');
+    }
+
+    lines.push('    </flow-monitoring>');
+    lines.push('  </services>');
+  }
 }
 
 

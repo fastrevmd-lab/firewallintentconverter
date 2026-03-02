@@ -193,6 +193,14 @@ You may ALSO include a `"security_profiles"` object with descriptive profile nam
 ```
 But the `_srx_*` boolean flags are what controls the UI — they are REQUIRED when profiles are present.
 
+### Policy-Based Forwarding
+- PAN-OS PBF rules are converted separately to SRX filter-based forwarding (firewall filter + routing-instances)
+- Do NOT convert PBF rules as security policies — they are handled by a dedicated converter
+
+### NetFlow / IP Flow Export
+- Flow monitoring is converted separately to SRX inline-jflow
+- Do NOT include flow config in security policy translation
+
 ## Important
 - Translate ALL PAN-OS rules — do not skip any
 - Preserve the intent of each source rule

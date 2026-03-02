@@ -136,6 +136,14 @@ Source Huawei USG profiles MUST be translated to SRX equivalents.
   "ssl_proxy": "ssl-profile-name"
 }
 
+### NetStream / Flow Monitoring
+- Huawei ip netstream is converted separately to SRX inline-jflow
+- Do NOT include flow config in security policy translation
+
+### Policy-Based Routing
+- Huawei policy-based-route is converted separately to SRX filter-based forwarding
+- Do NOT convert PBR as security policies
+
 ## Important
 - Translate ALL Huawei USG rules — do not skip any
 - Handle default interzone policies — generate explicit rules if Huawei permits by default

@@ -55,9 +55,9 @@ export function parseFortigateConfig(configText) {
   const profileGroups = parseProfileGroups(tree, warnings);
   const securityProfileDefinitions = parseSecurityProfileDefinitions(tree, warnings);
   const transparentMode = detectTransparentMode(tree);
-  const { l2Interfaces, bridgeDomains: l2BridgeDomains } = transparentMode
+  const { l2Interfaces, bridgeDomains: l2BridgeDomains, vwirePairs: fortiVwirePairs } = transparentMode
     ? parseSwitchInterfaces(tree, warnings)
-    : { l2Interfaces: [], bridgeDomains: [] };
+    : { l2Interfaces: [], bridgeDomains: [], vwirePairs: [] };
   const staticRoutes = parseStaticRoutes(tree, warnings);
   const bgpConfig = parseFortiBgpConfig(tree, warnings);
   const ospfConfig = parseFortiOspfConfig(tree, warnings);
@@ -65,6 +65,7 @@ export function parseFortigateConfig(configText) {
   const vxlanConfig = parseFortiVxlanConfig(tree, warnings);
   const haConfig = parseHaConfig(tree, warnings);
   const screenConfig = parseScreenConfig(tree, warnings);
+  const pbfRules = parseFortiPolicyRouting(tree, warnings);
 
   // Promote schedules to intermediate format (normalize day names to short form)
   const dayShortMap = { monday: 'Mon', tuesday: 'Tue', wednesday: 'Wed', thursday: 'Thu', friday: 'Fri', saturday: 'Sat', sunday: 'Sun' };
@@ -211,6 +212,12 @@ export function parseFortigateConfig(configText) {
   const dhcpConfig = parseFortiDhcpConfig(tree, warnings);
   const qosConfig = parseFortiQosConfig(tree, warnings);
 
+  // Synthesize decryption_rules from ssl-ssh-profile references (must run after profile group expansion)
+  const decryptionRules = parseFortiSslProfiles(tree, securityPolicies, warnings);
+
+  // Parse NetFlow/sFlow configuration
+  const flowMonitoringConfig = parseFortiNetflow(tree, warnings);
+
   const intermediateConfig = {
     zones: mergedZones,
     address_objects: addressObjects,
@@ -235,7 +242,7 @@ export function parseFortigateConfig(configText) {
     transparent_mode: transparentMode,
     bridge_domains: l2BridgeDomains,
     l2_interfaces: l2Interfaces,
-    vwire_pairs: [],
+    vwire_pairs: fortiVwirePairs,
     routing_contexts: routingContexts,
     static_routes: staticRoutes,
     bgp_config: bgpConfig,
@@ -243,6 +250,9 @@ export function parseFortigateConfig(configText) {
     ospf3_config: ospf3Config,
     evpn_config: [],
     vxlan_config: vxlanConfig,
+    pbf_rules: pbfRules,
+    decryption_rules: decryptionRules,
+    flow_monitoring_config: flowMonitoringConfig,
     target_context: null,
     // FortiGate-specific extras (for the FortiGate view)
     _fortigate: {
@@ -280,6 +290,79 @@ export function parseFortigateConfig(configText) {
     warnings,
     parseStats: intermediateConfig.metadata,
   };
+}
+
+
+// ---------------------------------------------------------------------------
+// Policy-Based Routing (config router policy)
+// ---------------------------------------------------------------------------
+
+function parseFortiPolicyRouting(tree, warnings) {
+  const section = tree['router policy'] || {};
+  const rules = [];
+  for (const [id, entry] of Object.entries(section)) {
+    if (typeof entry !== 'object') continue;
+    const inputDevice = getString(entry['input-device']) || '';
+    const srcRaw = getString(entry.src) || '';
+    const dstRaw = getString(entry.dst) || '';
+    const gateway = getString(entry.gateway) || '';
+    const outputDevice = getString(entry['output-device']) || '';
+    const protocol = getString(entry.protocol) || '';
+    const startPort = getString(entry['start-port']) || '';
+    const endPort = getString(entry['end-port']) || '';
+
+    if (!gateway && !outputDevice) continue;
+
+    // Convert src/dst from "IP MASK" to CIDR
+    const toCidr = (raw) => {
+      if (!raw || raw === '0.0.0.0 0.0.0.0') return 'any';
+      const parts = raw.split(/\s+/);
+      if (parts.length === 2) {
+        const mask = parts[1];
+        const bits = mask.split('.').reduce((a, o) => a + (parseInt(o, 10) >>> 0).toString(2).replace(/0/g, '').length, 0);
+        return `${parts[0]}/${bits}`;
+      }
+      return raw;
+    };
+
+    const srcAddr = toCidr(srcRaw);
+    const dstAddr = toCidr(dstRaw);
+
+    const services = [];
+    if (protocol && startPort) {
+      const proto = protocol === '6' ? 'tcp' : protocol === '17' ? 'udp' : protocol;
+      services.push(endPort && endPort !== startPort ? `${proto}/${startPort}-${endPort}` : `${proto}/${startPort}`);
+    }
+
+    rules.push({
+      name: `pbf-${id}`,
+      from_type: inputDevice ? 'interface' : 'zone',
+      from_value: inputDevice ? [inputDevice] : [],
+      src_addresses: srcAddr !== 'any' ? [srcAddr] : ['any'],
+      dst_addresses: dstAddr !== 'any' ? [dstAddr] : ['any'],
+      src_users: [],
+      negate_source: false,
+      negate_destination: false,
+      applications: [],
+      services,
+      action: 'forward',
+      egress_interface: outputDevice,
+      next_hop_type: 'ip-address',
+      next_hop_value: gateway,
+      forward_vsys: '',
+      monitor_profile: '',
+      monitor_ip: '',
+      monitor_disable_if_unreachable: false,
+      symmetric_return: false,
+      symmetric_return_addresses: [],
+      description: '',
+      tags: [],
+      disabled: false,
+      schedule: '',
+      _rule_index: rules.length + 1,
+    });
+  }
+  return rules;
 }
 
 
@@ -1869,6 +1952,7 @@ function detectTransparentMode(tree) {
 function parseSwitchInterfaces(tree, warnings) {
   const l2Interfaces = [];
   const bridgeDomains = [];
+  const vwirePairs = [];
 
   // Parse system virtual-switch for L2 port groups
   const vsSection = tree['system virtual-switch'] || {};
@@ -1894,6 +1978,15 @@ function parseSwitchInterfaces(tree, warnings) {
           mode: 'access',
           vlan: null,
           bridge_domain: vsName,
+        });
+      }
+      // 2-port virtual-switch → synthetic vwire pair (SRX bridge-domain auto-mapping)
+      if (ports.length === 2) {
+        vwirePairs.push({
+          name: vsName,
+          interface1: ports[0],
+          interface2: ports[1],
+          tag_allowed: [],
         });
       }
     }
@@ -1939,7 +2032,7 @@ function parseSwitchInterfaces(tree, warnings) {
     }
   }
 
-  return { l2Interfaces, bridgeDomains };
+  return { l2Interfaces, bridgeDomains, vwirePairs };
 }
 
 function parseProfileGroups(tree, warnings) {
@@ -2047,6 +2140,99 @@ function parseSecurityProfileDefinitions(tree, warnings) {
 
   return defs;
 }
+
+
+// ---------------------------------------------------------------------------
+// SSL/SSH Inspection Profile Parser
+// ---------------------------------------------------------------------------
+
+/**
+ * Parses FortiGate `firewall ssl-ssh-profile` definitions and synthesizes
+ * decryption_rules from security policies that reference deep-inspection profiles.
+ *
+ * FortiGate model: profiles define inspection mode (deep/certificate); policies reference them.
+ * PAN-OS model: explicit decryption rulebase with per-rule decrypt/no-decrypt actions.
+ * We bridge the gap by creating synthetic decryption_rules entries.
+ */
+function parseFortiSslProfiles(tree, securityPolicies, warnings) {
+  const profileSection = tree['firewall ssl-ssh-profile'] || {};
+  const profiles = {};
+
+  for (const [name, entry] of Object.entries(profileSection)) {
+    if (typeof entry !== 'object') continue;
+
+    // Determine inspection mode from https section
+    const httpsBlock = entry.https || {};
+    const httpsMode = getString(httpsBlock['inspection-mode']) || getString(httpsBlock.status) || '';
+    const isDeep = httpsMode === 'deep-inspection' || name.toLowerCase().includes('deep-inspection');
+    const certMode = getString(httpsBlock['server-cert-mode']) || '';
+    const caCert = getString(entry['server-cert']) || getString(entry['caname']) || '';
+
+    profiles[name] = {
+      name,
+      is_deep_inspection: isDeep,
+      cert_mode: certMode,
+      ca_cert: caCert,
+      ssl_exempt: entry['ssl-exempt'] ? Object.keys(entry['ssl-exempt']) : [],
+    };
+  }
+
+  // Synthesize decryption_rules from policies referencing ssl-ssh-profiles
+  const decryptionRules = [];
+  let ruleIndex = 0;
+
+  for (const policy of securityPolicies) {
+    const sslProfileName = policy.security_profiles?.decryption;
+    if (!sslProfileName) continue;
+
+    const profileDef = profiles[sslProfileName];
+    const isDecrypt = profileDef ? profileDef.is_deep_inspection : sslProfileName.toLowerCase().includes('deep');
+    const action = isDecrypt ? 'decrypt' : 'no-decrypt';
+
+    ruleIndex++;
+    decryptionRules.push({
+      name: `${policy.name}-ssl`,
+      src_zones: policy.src_zones || [],
+      dst_zones: policy.dst_zones || [],
+      src_addresses: policy.src_addresses || [],
+      dst_addresses: policy.dst_addresses || [],
+      src_users: [],
+      negate_source: false,
+      negate_destination: false,
+      services: policy.services || [],
+      url_categories: [],
+      action,
+      decryption_type: isDecrypt ? 'ssl-forward-proxy' : '',
+      ssl_certificate: profileDef?.ca_cert || '',
+      decryption_profile: sslProfileName,
+      log_success: false,
+      log_fail: false,
+      log_setting: '',
+      description: `Synthesized from FortiGate policy "${policy.name}" with ssl-ssh-profile "${sslProfileName}"`,
+      tags: [],
+      disabled: policy.disabled || false,
+      _rule_index: ruleIndex,
+      _source_policy: policy.name,
+    });
+
+    // Flag the security policy for SSL proxy attachment
+    if (isDecrypt && policy.action === 'allow') {
+      policy._srx_decrypt = true;
+    }
+  }
+
+  if (decryptionRules.length > 0) {
+    warnings.push({
+      severity: 'info',
+      id: 'fortigate/ssl-profiles',
+      message: `Synthesized ${decryptionRules.length} decryption rules from FortiGate ssl-ssh-profile references`,
+      recommendation: 'Review the SSL B&I tab to verify decryption scope matches your intent',
+    });
+  }
+
+  return decryptionRules;
+}
+
 
 // --- Build security profile objects list ---
 function buildProfileObjects(policies, profileGroups) {
@@ -2302,4 +2488,77 @@ function parseFortiQosConfig(tree, warnings) {
     warnings.push(createWarning('info', 'qos', `Parsed ${qosProfiles.length} QoS/shaping config(s)`, 'Traffic shaping configuration detected'));
   }
   return qosProfiles;
+}
+
+
+// ---------------------------------------------------------------------------
+// NetFlow / sFlow Configuration Parser
+// ---------------------------------------------------------------------------
+
+/**
+ * Parses FortiGate NetFlow and sFlow configuration.
+ *
+ * Sources:
+ *   config system netflow — global NetFlow collector
+ *   config system sflow — global sFlow collector
+ *   Per-interface: set netflow-sampler both/tx/rx
+ */
+function parseFortiNetflow(tree, warnings) {
+  const result = { collectors: [], sampling: { input_rate: 1000, run_length: 0, interfaces: [] }, templates: [] };
+
+  // Global NetFlow: config system netflow
+  const netflowSection = tree['system netflow'] || {};
+  const nfCollector = getString(netflowSection['collector-ip'] || netflowSection.server || '');
+  const nfPort = parseInt(getString(netflowSection['collector-port'] || netflowSection.port || '')) || 2055;
+  const nfSourceIp = getString(netflowSection['source-ip'] || '');
+  const nfActiveTimeout = parseInt(getString(netflowSection['active-flow-timeout'] || '')) || 60;
+
+  if (nfCollector) {
+    result.collectors.push({
+      address: nfCollector,
+      port: nfPort,
+      protocol: 'netflow-v9',
+      source_address: nfSourceIp,
+    });
+    result.templates.push({
+      name: 'forti-netflow',
+      flow_type: 'ipv4',
+      active_timeout: nfActiveTimeout,
+      refresh_rate: 600,
+    });
+  }
+
+  // Global sFlow: config system sflow
+  const sflowSection = tree['system sflow'] || {};
+  const sfCollector = getString(sflowSection['collector-ip'] || sflowSection.server || '');
+  const sfPort = parseInt(getString(sflowSection['collector-port'] || sflowSection.port || '')) || 6343;
+  const sfSourceIp = getString(sflowSection['source-ip'] || '');
+
+  if (sfCollector) {
+    result.collectors.push({
+      address: sfCollector,
+      port: sfPort,
+      protocol: 'sflow',
+      source_address: sfSourceIp,
+    });
+  }
+
+  // Per-interface sampling detection
+  const ifSection = tree['system interface'] || {};
+  for (const [ifName, ifEntry] of Object.entries(ifSection)) {
+    if (typeof ifEntry !== 'object') continue;
+    const sampler = getString(ifEntry['netflow-sampler'] || ifEntry['sflow-sampler'] || '');
+    if (sampler && sampler !== 'disable') {
+      result.sampling.interfaces.push(ifName);
+    }
+  }
+
+  if (result.collectors.length > 0) {
+    warnings.push(createWarning('info', 'netflow',
+      `Parsed ${result.collectors.length} flow collector(s)` +
+      (result.sampling.interfaces.length > 0 ? ` with ${result.sampling.interfaces.length} sampled interface(s)` : ''),
+      'NetFlow/sFlow configuration detected'));
+  }
+
+  return result;
 }

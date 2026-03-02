@@ -120,6 +120,15 @@ function parseFlatSrx(tree, setCommands, warnings) {
   const bridgeDomains = parseSrxBridgeDomains(tree, warnings);
   const l2Interfaces = detectSrxL2Interfaces(tree, interfaces, warnings);
 
+  // Parse SSL Proxy profiles (round-trip) — must run after policies
+  const decryptionRules = parseSrxSslProxy(tree, securityPolicies, warnings);
+
+  // Parse PBF / Firewall filter (round-trip)
+  const pbfRules = parseSrxPbfRules(tree, warnings);
+
+  // Parse flow monitoring (round-trip)
+  const flowMonitoringConfig = parseSrxFlowMonitoring(tree, warnings);
+
   const intermediateConfig = {
     zones,
     address_objects: addressObjects,
@@ -147,6 +156,9 @@ function parseFlatSrx(tree, setCommands, warnings) {
     ospf3_config: ospf3Config,
     evpn_config: evpnConfig,
     vxlan_config: vxlanConfig,
+    pbf_rules: pbfRules,
+    decryption_rules: decryptionRules,
+    flow_monitoring_config: flowMonitoringConfig,
     target_context: null,
     transparent_mode: bridgeDomains.length > 0,
     bridge_domains: bridgeDomains,
@@ -213,6 +225,8 @@ function parseMultiContextSrx(tree, setCommands, lsNode, lsNames, tenantNode, te
   const allInterfaces = [];
   const allBridgeDomains = [];
   const allL2Interfaces = [];
+  const allDecryptionRules = [];
+  const allPbfRules = [];
   const routingContexts = [];
   let haConfig = { enabled: false };
   let ruleIndex = 0;
@@ -264,6 +278,8 @@ function parseMultiContextSrx(tree, setCommands, lsNode, lsNames, tenantNode, te
     allInterfaces.push(...parsed.interfaces);
     allBridgeDomains.push(...parsed.bridgeDomains);
     allL2Interfaces.push(...parsed.l2Interfaces);
+    allDecryptionRules.push(...(parsed.decryptionRules || []));
+    allPbfRules.push(...(parsed.pbfRules || []));
 
     routingContexts.push({
       name: lsName,
@@ -310,6 +326,8 @@ function parseMultiContextSrx(tree, setCommands, lsNode, lsNames, tenantNode, te
     allInterfaces.push(...parsed.interfaces);
     allBridgeDomains.push(...parsed.bridgeDomains);
     allL2Interfaces.push(...parsed.l2Interfaces);
+    allDecryptionRules.push(...(parsed.decryptionRules || []));
+    allPbfRules.push(...(parsed.pbfRules || []));
 
     routingContexts.push({
       name: tName,
@@ -381,6 +399,9 @@ function parseMultiContextSrx(tree, setCommands, lsNode, lsNames, tenantNode, te
     ospf3_config: allOspf3Config,
     evpn_config: allEvpnConfig,
     vxlan_config: allVxlanConfig,
+    pbf_rules: allPbfRules,
+    decryption_rules: allDecryptionRules,
+    flow_monitoring_config: { collectors: [], sampling: { input_rate: 1000, run_length: 0, interfaces: [] }, templates: [] },
     target_context: null,
     transparent_mode: allBridgeDomains.length > 0,
     bridge_domains: allBridgeDomains,
@@ -445,13 +466,15 @@ function parseContextSubTree(subTree, setCommands, ctxLabel, ctxName, warnings) 
   const interfaces = parseSrxInterfaces(subTree, zones, warnings);
   const bridgeDomains = parseSrxBridgeDomains(subTree, warnings);
   const l2Interfaces = detectSrxL2Interfaces(subTree, interfaces, warnings);
+  const decryptionRules = parseSrxSslProxy(subTree, policies, warnings);
+  const pbfRules = parseSrxPbfRules(subTree, warnings);
 
   return {
     zones, addressObjects, addressGroups, serviceObjects, serviceGroups,
     policies, natRules, applications, schedules, staticRoutes,
     bgpConfig, ospfConfig, ospf3Config, evpnConfig, vxlanConfig,
     vpnTunnels, screenConfig, syslogConfig, dhcpConfig, qosConfig,
-    interfaces, bridgeDomains, l2Interfaces,
+    interfaces, bridgeDomains, l2Interfaces, decryptionRules, pbfRules,
   };
 }
 
@@ -1006,6 +1029,20 @@ function parseSinglePolicy(name, data, srcZones, dstZones, ruleIndex, warnings) 
     security_profiles['vulnerability'] = idpPolicyName;
   }
 
+  // SSL Proxy profile detection
+  let sslProxyProfile = '';
+  if (appServices['ssl-proxy']) {
+    const sslNode = appServices['ssl-proxy'];
+    if (typeof sslNode === 'object' && sslNode['profile-name']) {
+      sslProxyProfile = extractStringValue(sslNode['profile-name']);
+    } else {
+      sslProxyProfile = extractStringValue(sslNode);
+    }
+    if (sslProxyProfile) {
+      security_profiles['decryption'] = sslProxyProfile;
+    }
+  }
+
   // Map SRX action to intermediate (PAN-OS-compatible) action
   const actionMap = { permit: 'allow', deny: 'deny', reject: 'reset-both' };
   const intermediateAction = actionMap[action] || action;
@@ -1034,6 +1071,7 @@ function parseSinglePolicy(name, data, srcZones, dstZones, ruleIndex, warnings) 
     schedule: schedulerName,
     source_users: sourceIdentity.filter(id => id !== 'any'),
     _rule_index: ruleIndex,
+    ...(sslProxyProfile ? { _srx_ssl_proxy_profile: sslProxyProfile } : {}),
   };
 }
 
@@ -2792,4 +2830,295 @@ function parseSrxInterfaces(tree, zones, warnings) {
     warnings.push(createWarning('info', 'interfaces', `Parsed ${interfaces.length} interface(s)`, 'Interface configuration detected'));
   }
   return interfaces;
+}
+
+
+// ---------------------------------------------------------------------------
+// SSL Proxy / PKI Round-Trip Parser
+// ---------------------------------------------------------------------------
+
+/**
+ * Parses SRX SSL proxy profiles and PKI ca-profiles from set commands.
+ *
+ * Source config:
+ *   set services ssl proxy profile <name> root-ca <ca>
+ *   set services ssl proxy profile <name> server-certificate <cert>
+ *   set services ssl proxy profile <name> protocol-version <ver>
+ *   set security pki ca-profile <name> ca-identity <id>
+ *
+ * Also scans security policies for ssl-proxy profile-name attachments
+ * and sets _srx_decrypt on matching policies.
+ */
+function parseSrxSslProxy(tree, securityPolicies, warnings) {
+  const rules = [];
+  let ruleIndex = 0;
+
+  // Parse SSL proxy profiles from tree
+  const sslNode = tree.services?.ssl?.proxy?.profile;
+  if (!sslNode || typeof sslNode !== 'object') return rules;
+
+  const profiles = {};
+  for (const [profileName, profileData] of Object.entries(sslNode)) {
+    if (typeof profileData !== 'object') continue;
+    const rootCa = extractStringValue(profileData['root-ca']);
+    const serverCert = extractStringValue(profileData['server-certificate']);
+    const protocolVersion = extractStringValue(profileData['protocol-version']);
+    const isInbound = !!serverCert && !rootCa;
+
+    profiles[profileName] = {
+      name: profileName,
+      root_ca: rootCa,
+      server_certificate: serverCert,
+      protocol_version: protocolVersion,
+      is_inbound: isInbound,
+    };
+  }
+
+  if (Object.keys(profiles).length === 0) return rules;
+
+  // Scan security policies for ssl-proxy attachments and create synthetic decryption rules
+  for (const policy of securityPolicies) {
+    // Check if policy has _srx_ssl_proxy_profile set during policy parsing
+    // (set by parseSinglePolicy when ssl-proxy profile-name is encountered)
+    if (policy._srx_ssl_proxy_profile) {
+      const profileName = policy._srx_ssl_proxy_profile;
+      const profileDef = profiles[profileName];
+      const isInbound = profileDef?.is_inbound || false;
+
+      policy._srx_decrypt = true;
+      policy._srx_decrypt_profile = profileName;
+
+      ruleIndex++;
+      rules.push({
+        name: `${policy.name}-ssl`,
+        src_zones: policy.src_zones || [],
+        dst_zones: policy.dst_zones || [],
+        src_addresses: policy.src_addresses || [],
+        dst_addresses: policy.dst_addresses || [],
+        src_users: [],
+        negate_source: false,
+        negate_destination: false,
+        services: policy.services || [],
+        url_categories: [],
+        action: 'decrypt',
+        decryption_type: isInbound ? 'ssl-inbound-inspection' : 'ssl-forward-proxy',
+        ssl_certificate: profileDef?.server_certificate || '',
+        decryption_profile: profileName,
+        log_success: false,
+        log_fail: false,
+        log_setting: '',
+        description: `Round-trip from SRX ssl-proxy profile "${profileName}" on policy "${policy.name}"`,
+        tags: [],
+        disabled: policy.disabled || false,
+        _rule_index: ruleIndex,
+        _source_policy: policy.name,
+      });
+    }
+  }
+
+  if (rules.length > 0) {
+    warnings.push(createWarning('info', 'ssl-proxy',
+      `Parsed ${Object.keys(profiles).length} SSL proxy profile(s) and ${rules.length} decryption rule(s)`,
+      'SSL proxy configuration detected for round-trip'));
+  }
+
+  return rules;
+}
+
+
+// ---------------------------------------------------------------------------
+// PBF / Firewall Filter Round-Trip Parser
+// ---------------------------------------------------------------------------
+
+/**
+ * Parses SRX firewall filter terms into PBF rules for round-trip conversion.
+ *
+ * Source config:
+ *   set firewall filter <name> term <term> from source-address <addr>
+ *   set firewall filter <name> term <term> from destination-address <addr>
+ *   set firewall filter <name> term <term> then routing-instance <inst>
+ *   set firewall filter <name> term <term> then discard
+ *   set firewall filter <name> term <term> then accept
+ */
+function parseSrxPbfRules(tree, warnings) {
+  const rules = [];
+  const filterNode = tree.firewall?.filter;
+  if (!filterNode || typeof filterNode !== 'object') return rules;
+
+  let ruleIndex = 0;
+
+  for (const [filterName, filterData] of Object.entries(filterNode)) {
+    if (typeof filterData !== 'object' || !filterData.term) continue;
+
+    for (const [termName, termData] of Object.entries(filterData.term)) {
+      if (typeof termData !== 'object') continue;
+      if (termName === 'default') continue; // skip default accept term
+
+      const fromClause = termData.from || {};
+      const thenClause = termData.then || {};
+
+      const srcAddrs = collectKeys(fromClause['source-address']);
+      const dstAddrs = collectKeys(fromClause['destination-address']);
+
+      // Determine action from then clause
+      let action = 'forward';
+      let nextHop = '';
+      let routingInstance = '';
+
+      if (thenClause.discard === true || thenClause.discard !== undefined) {
+        action = 'discard';
+      } else if (thenClause.accept === true || thenClause.accept !== undefined) {
+        action = 'no-pbf';
+      } else if (thenClause['routing-instance']) {
+        action = 'forward';
+        routingInstance = extractStringValue(thenClause['routing-instance']);
+
+        // Try to resolve next-hop from the routing-instance config
+        const instData = tree['routing-instances']?.[routingInstance];
+        if (instData?.['routing-options']?.static?.route) {
+          const routes = instData['routing-options'].static.route;
+          for (const [, rData] of Object.entries(routes)) {
+            if (typeof rData === 'object' && rData['next-hop']) {
+              nextHop = extractStringValue(rData['next-hop']);
+              break;
+            }
+          }
+        }
+      }
+
+      ruleIndex++;
+      rules.push({
+        name: termName,
+        src_zones: [],
+        dst_zones: [],
+        src_addresses: srcAddrs.length > 0 ? srcAddrs : ['any'],
+        dst_addresses: dstAddrs.length > 0 ? dstAddrs : ['any'],
+        services: ['any'],
+        action,
+        next_hop_type: nextHop ? 'ip-address' : '',
+        next_hop_value: nextHop,
+        egress_interface: '',
+        from_type: 'zone',
+        from_value: [],
+        forward_vsys: '',
+        enforce_symmetric_return: false,
+        disabled: false,
+        description: `Round-trip from SRX filter "${filterName}" term "${termName}"`,
+        _rule_index: ruleIndex,
+        _source_filter: filterName,
+        _routing_instance: routingInstance,
+      });
+    }
+  }
+
+  if (rules.length > 0) {
+    warnings.push(createWarning('info', 'pbf',
+      `Parsed ${rules.length} firewall filter term(s) as PBF rules`,
+      'Firewall filter-based forwarding detected for round-trip'));
+  }
+
+  return rules;
+}
+
+
+// ---------------------------------------------------------------------------
+// Flow Monitoring Round-Trip Parser
+// ---------------------------------------------------------------------------
+
+/**
+ * Parses SRX flow monitoring configuration for round-trip.
+ *
+ * Source config:
+ *   set forwarding-options sampling instance <name> input rate <rate>
+ *   set forwarding-options sampling instance <name> family inet output flow-server <addr> port <port>
+ *   set forwarding-options sampling instance <name> family inet output inline-jflow source-address <src>
+ *   set services flow-monitoring version-ipfix template <name> flow-active-timeout <sec>
+ *   set services flow-monitoring version-ipfix template <name> template-refresh-rate packets <num>
+ */
+function parseSrxFlowMonitoring(tree, warnings) {
+  const result = { collectors: [], sampling: { input_rate: 1000, run_length: 0, interfaces: [] }, templates: [] };
+
+  // Parse forwarding-options > sampling
+  const samplingNode = tree['forwarding-options']?.sampling;
+  if (!samplingNode) return result;
+
+  // Can be instance-based or flat
+  const instances = samplingNode.instance || { _default: samplingNode };
+
+  for (const [instName, instData] of Object.entries(instances)) {
+    if (typeof instData !== 'object') continue;
+
+    // Input rate
+    const inputNode = instData.input || {};
+    if (inputNode.rate) {
+      result.sampling.input_rate = parseInt(extractStringValue(inputNode.rate)) || 1000;
+    }
+    if (inputNode['run-length']) {
+      result.sampling.run_length = parseInt(extractStringValue(inputNode['run-length'])) || 0;
+    }
+
+    // Family inet output
+    const inetOutput = instData.family?.inet?.output || {};
+
+    // Flow servers
+    const flowServer = inetOutput['flow-server'];
+    if (flowServer && typeof flowServer === 'object') {
+      for (const [addr, serverData] of Object.entries(flowServer)) {
+        if (addr.startsWith('_') || typeof serverData !== 'object') continue;
+        const port = parseInt(extractStringValue(serverData.port)) || 2055;
+        const versionIpfix = serverData['version-ipfix'];
+        const version9 = serverData['version9'];
+        const protocol = versionIpfix ? 'ipfix' : version9 ? 'netflow-v9' : 'ipfix';
+
+        // Extract template name from version-ipfix > template
+        let templateName = '';
+        if (versionIpfix && typeof versionIpfix === 'object' && versionIpfix.template) {
+          templateName = extractStringValue(versionIpfix.template);
+        }
+
+        result.collectors.push({
+          address: addr,
+          port,
+          protocol,
+          source_address: '',
+          _template: templateName,
+        });
+      }
+    }
+
+    // Inline jflow source address
+    const inlineJflow = inetOutput['inline-jflow'];
+    if (inlineJflow && typeof inlineJflow === 'object') {
+      const srcAddr = extractStringValue(inlineJflow['source-address']);
+      if (srcAddr) {
+        for (const c of result.collectors) c.source_address = srcAddr;
+      }
+    }
+  }
+
+  // Parse services > flow-monitoring templates
+  const flowMon = tree.services?.['flow-monitoring'];
+  if (flowMon) {
+    const ipfixNode = flowMon['version-ipfix'] || flowMon['version9'] || {};
+    const templateNode = ipfixNode.template;
+    if (templateNode && typeof templateNode === 'object') {
+      for (const [tplName, tplData] of Object.entries(templateNode)) {
+        if (tplName.startsWith('_') || typeof tplData !== 'object') continue;
+        result.templates.push({
+          name: tplName,
+          flow_type: tplData['ipv6-template'] ? 'ipv6' : 'ipv4',
+          active_timeout: parseInt(extractStringValue(tplData['flow-active-timeout'])) || 60,
+          refresh_rate: parseInt(extractStringValue(tplData['template-refresh-rate']?.packets)) || 1000,
+        });
+      }
+    }
+  }
+
+  if (result.collectors.length > 0) {
+    warnings.push(createWarning('info', 'flow-monitoring',
+      `Parsed ${result.collectors.length} flow collector(s) and ${result.templates.length} template(s)`,
+      'SRX flow monitoring configuration detected for round-trip'));
+  }
+
+  return result;
 }

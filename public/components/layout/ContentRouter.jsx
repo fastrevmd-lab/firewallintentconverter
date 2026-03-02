@@ -18,6 +18,7 @@ const ScreenEditor = React.lazy(() => import('../ScreenEditor.jsx'));
 const SyslogEditor = React.lazy(() => import('../SyslogEditor.jsx'));
 const DHCPEditor = React.lazy(() => import('../DHCPEditor.jsx'));
 const QoSEditor = React.lazy(() => import('../QoSEditor.jsx'));
+const FlowMonitoringEditor = React.lazy(() => import('../FlowMonitoringEditor.jsx'));
 const GreenfieldChat = React.lazy(() => import('../GreenfieldChat.jsx'));
 const SRXOutput = React.lazy(() => import('../SRXOutput.jsx'));
 const WarningsPanel = React.lazy(() => import('../WarningsPanel.jsx'));
@@ -538,6 +539,10 @@ export default function ContentRouter({
 
   if (editTab === 'qos') {
     return <div className="center-content" style={{ flex: 1, overflow: 'auto' }}><QoSEditor qosConfig={activeConfig?.qos_config || []} onQoSUpdate={config.handleQoSUpdate} viewMode={effectiveViewMode} /></div>;
+  }
+
+  if (editTab === 'flow-monitoring') {
+    return <div className="center-content" style={{ flex: 1, overflow: 'auto' }}><FlowMonitoringEditor flowConfig={activeConfig?.flow_monitoring_config} onFlowUpdate={(flowConfig) => config.handleConfigUpdate('flow_monitoring_config', flowConfig)} viewMode={effectiveViewMode} /></div>;
   }
 
   // --- Output / Warnings / Diff ---

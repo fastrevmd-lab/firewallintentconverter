@@ -136,6 +136,19 @@ Source FortiGate security profiles MUST be translated to SRX equivalents.
   "ssl_proxy": "ssl-profile-name"
 }
 
+### SSL Inspection (ssl-ssh-profile)
+- FortiGate "deep-inspection" profiles → set `_srx_decrypt: true` on the translated allow rule
+- FortiGate "certificate-inspection" → no decryption (note in _translation_notes)
+- SRX SSL Proxy profiles are generated automatically from the decryption rules — just set the flag
+
+### Policy Routing (config router policy)
+- FortiGate policy routing is converted separately to SRX filter-based forwarding
+- Do NOT convert policy routes as security policies
+
+### NetFlow / sFlow
+- Flow monitoring is converted separately to SRX inline-jflow
+- Do NOT include flow config in security policy translation
+
 ## Important
 - Translate ALL FortiGate rules — do not skip any
 - Preserve the intent of each source rule

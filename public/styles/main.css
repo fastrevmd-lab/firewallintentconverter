@@ -2505,12 +2505,32 @@ html, body, #root {
   border-right: none;
 }
 
-.platform-view-btn + .btn-translate + .platform-view-btn {
-  border-radius: 0 var(--radius) var(--radius) 0;
+.platform-view-btn + .platform-view-btn {
+  border-right: none;
 }
 
-.platform-view-btn:last-child {
+.platform-view-btn + .btn-translate + .platform-view-btn {
   border-radius: 0 var(--radius) var(--radius) 0;
+  border-right: 1px solid var(--border-color);
+}
+
+.platform-view-btn:last-of-type {
+  border-radius: 0 var(--radius) var(--radius) 0;
+  border-right: 1px solid var(--border-color);
+}
+
+.platform-bar-badge {
+  display: inline-block;
+  min-width: 16px;
+  padding: 0 4px;
+  margin-left: 4px;
+  border-radius: 8px;
+  font-size: 10px;
+  font-weight: 700;
+  background: var(--warning, #f59e0b);
+  color: #fff;
+  text-align: center;
+  line-height: 16px;
 }
 
 .platform-view-btn.active {

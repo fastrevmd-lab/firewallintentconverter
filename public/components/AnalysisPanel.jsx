@@ -236,7 +236,7 @@ export default function AnalysisPanel({ findings, onApply, onRunAnalysis, isLoad
                   value={finding.selected || actions[0].value}
                   onChange={(e) => { e.stopPropagation(); handleBulkAction(finding.id, e.target.value); }}
                   onClick={(e) => e.stopPropagation()}
-                  style={{ fontSize: 12, padding: '4px 8px', borderRadius: 4, border: '1px solid var(--border-color)', background: 'var(--bg-secondary)' }}
+                  style={{ fontSize: 12, padding: '4px 8px', borderRadius: 4, border: '1px solid var(--border-color)', background: 'var(--bg-secondary)', color: 'var(--caution)' }}
                 >
                   {actions.map(a => (
                     <option key={a.value} value={a.value}>{a.label}</option>

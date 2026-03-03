@@ -249,6 +249,26 @@
 - [x] **NetFlow / Flow Monitoring** — End-to-end support: PAN-OS ip-flow-export, FortiGate netflow/sflow, Cisco ASA flow-export, Huawei NetStream, SRX inline-jflow round-trip. Converter generates `forwarding-options sampling` + `services flow-monitoring`. New FlowMonitoringEditor UI with collectors, sampling, and template sections. Nav sidebar shows Flow Monitoring under Network
 - [x] **SSL B&I and PBF nav items** — Added missing sidebar navigation entries for SSL B&I (decryption) and PBF tabs under Security section
 
+### Rev16 — No-AI Deterministic Mode & Analysis Engine
+- [x] **No-AI / Deterministic mode** — Third LLM risk acceptance mode ("No AI Mode") bypasses all LLM calls entirely. Clickable "No AI" badge in TopBar returns to risk disclaimer to switch modes. Greenfield and SRX Health Check hidden in deterministic mode. Auto-Group button hidden when no LLM configured
+- [x] **Configuration Analysis Engine** — 7-check pre-conversion analysis engine (ported from fatcat-converter, credited):
+  - Unused objects: address/service objects not referenced by any policy
+  - Shadowed policies: rules fully covered by earlier rules (never matched)
+  - Duplicate policies: rules with identical match criteria and action
+  - Disabled rules: policies marked disabled in source config
+  - Logging disabled: permit rules with no logging enabled
+  - Overly permissive: rules with `any` source, destination, and application
+  - Empty groups: address/service groups with zero members
+  - AnalysisApplicator for one-click remediation (remove/disable flagged items)
+- [x] **L7 application mapping table** — 236-entry vendor-to-Junos application mapping database (from fatcat-converter, credited). Covers PAN-OS, FortiGate, Cisco ASA/FTD, Check Point, SonicWall, Huawei USG → Junos predefined apps with confidence scores. Runtime injection pattern (`setMapVendorApp`) for async-loaded data in synchronous parser pipeline
+- [x] **Deterministic security profile mapping** — Built-in profile-to-SRX mapping table for converting security profiles without LLM. Maps source vendor profile types (AV, IPS, URL filtering, etc.) to SRX subscription features (flow-based AV, IDP, content-security, ATP)
+- [x] **Descriptive SRX rule naming** — `generateDescriptiveName()` creates human-readable policy names from zone pairs, addresses, apps, and action (e.g., `trust-to-untrust_webservers_http-permit`) when source rule names are generic or missing
+- [x] **4-button platform bar on all tabs** — Redesigned platform bar with From-XXX, Analysis, Review w/LLM, and To-SRX buttons visible on all 16+ editor tabs (not just rules/decryption/PBF). Analysis button shows finding count badge, runs analysis on first click, navigates to results on subsequent clicks. Review w/LLM greyed out with tooltip in deterministic mode
+- [x] **Analysis → SRX view population** — "Apply Analysis" copies cleaned policies into `srxTranslatedPolicies` and auto-switches to SRX rules view for review before export. Deterministic SRX fallback shows source policies when no LLM translation exists
+- [x] **LLM prompt enhancement** — App mapping hints injected into LLM translation prompts (vendor app → Junos app at confidence >= 0.7). Pre-filter unused objects before sending to LLM to reduce token usage
+- [x] **Analysis findings in inspector** — Right panel shows clickable analysis finding badges when on rules tab, linking to full analysis view
+- [x] **MCP → PyEZ Bridge documentation** — README updated to replace all MCP Server references with PyEZ Bridge terminology throughout
+
 ### Blocked — Waiting on Vendor APIs
 - [ ] **Push to SDC / SD On-Prem / Mist** — Direct deployment to Juniper management platforms. Requires HPE Juniper public REST APIs
 
@@ -263,4 +283,4 @@
 - **User Identity** — User-ID / FSSO / IDFW parsed and converted to SRX `source-identity` — requires manual JIMS server configuration
 - **Virtual-Wire** — SRX maps vwire to bridge-domain; auto-assigns interfaces when mapped in Interface Mapper
 - **MNHA** — Only 2-node configurations supported
-- **Application Mapping** — ~120 apps mapped; unmapped apps get `Customfwic` suffix + warning
+- **Application Mapping** — ~120 built-in + 236 extended mappings (from fatcat-converter); unmapped apps get `Customfwic` suffix + warning

@@ -89,6 +89,7 @@ export default function ConfigInput({
   targetModel,
   onOpenModels,
   deterministicMode,
+  llmLocalOnly,
   // Merge mode props
   mergeMode,
   configSlots = [],
@@ -155,6 +156,10 @@ export default function ConfigInput({
           value={selectedVendor}
           onChange={(e) => setSelectedVendor(e.target.value)}
           disabled={greenfieldMode || isParsed}
+          style={isGreenfield ? {
+            borderColor: llmLocalOnly ? 'var(--llm-local)' : 'var(--llm-cloud)',
+            color: llmLocalOnly ? 'var(--llm-local)' : 'var(--llm-cloud)',
+          } : undefined}
         >
           {!deterministicMode && <option value="greenfield">Greenfield (New Config)</option>}
           {!deterministicMode && <option value="srx_healthcheck">Junos SRX Best Practice</option>}

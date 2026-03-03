@@ -151,6 +151,7 @@ export default function ContentRouter({
           targetModel={targetModel}
           onOpenModels={() => uiDispatch({ type: 'SHOW_MODAL', name: 'modelSelector' })}
           deterministicMode={isDeterministicMode(ui.llmRiskAcceptance)}
+          llmLocalOnly={ui.llmRiskAcceptance === 'local-only'}
           mergeMode={mergeMode}
           configSlots={configSlots}
           activeSlotIndex={activeSlotIndex}
@@ -263,6 +264,7 @@ export default function ContentRouter({
   // --- Platform view bar + tab content ---
   const analysisCount = activeConfig?._analysisFindings?.reduce((s, f) => s + f.count, 0) || 0;
   const detMode = isDeterministicMode(ui.llmRiskAcceptance);
+  const localOnly = ui.llmRiskAcceptance === 'local-only';
 
   const renderPlatformBar = () => (
     <div className="platform-view-bar">
@@ -294,7 +296,7 @@ export default function ContentRouter({
         {analysisCount > 0 && <span className="platform-bar-badge">{analysisCount}</span>}
       </button>
       <button
-        className="btn btn-translate"
+        className={`btn btn-translate${localOnly ? ' llm-local' : ''}`}
         onClick={llm.handleTranslateWithLLM}
         disabled={detMode || isTranslating || !intermediateConfig?.security_policies?.length}
         title={detMode ? 'Disabled in No-AI mode' : isHealthCheckMode ? 'Check best practices using LLM' : 'Translate source policies to SRX format using LLM'}
@@ -406,7 +408,7 @@ export default function ContentRouter({
               </svg>
               <h3>No translated policies yet</h3>
               <p>Click "{greenfieldMode ? 'Import LLM Config' : 'Translate with LLM'}" to send the source ruleset to the LLM for translation to SRX format.</p>
-              <button className="btn btn-translate" onClick={llm.handleTranslateWithLLM} disabled={isTranslating || !intermediateConfig?.security_policies?.length} style={{ marginTop: 12 }}>
+              <button className={`btn btn-translate${localOnly ? ' llm-local' : ''}`} onClick={llm.handleTranslateWithLLM} disabled={isTranslating || !intermediateConfig?.security_policies?.length} style={{ marginTop: 12 }}>
                 {isTranslating ? (greenfieldMode ? 'Importing...' : 'Translating...') : (greenfieldMode ? 'Import LLM Config' : 'Translate with LLM')}
               </button>
             </div>
@@ -440,6 +442,7 @@ export default function ContentRouter({
           onUpdateGroups={(groups) => cfgDispatch({ type: 'SET_RULE_GROUPS', groups })}
           onGroupWithAI={detMode ? null : llm.handleGroupWithAI}
           groupingInProgress={ui.groupingInProgress}
+          llmColor={localOnly ? 'var(--llm-local)' : 'var(--llm-cloud)'}
           suggestionsData={suggestionsData}
         />
         <BulkActionBar

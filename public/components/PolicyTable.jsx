@@ -32,6 +32,7 @@ export default function PolicyTable({
   onUpdateGroups,
   onGroupWithAI,
   groupingInProgress = false,
+  llmColor,
   suggestionsData,
 }) {
   const [sortField, setSortField] = useState('_rule_index');
@@ -1487,9 +1488,9 @@ export default function PolicyTable({
             onClick={onGroupWithAI}
             disabled={groupingInProgress || policies.length === 0}
             title="Use AI to organize rules into logical groups"
-            style={{ background: hasGroups ? 'var(--accent)' : undefined, color: hasGroups ? '#fff' : undefined }}
+            style={{ background: llmColor || 'var(--llm-cloud)', color: '#1a1a2e', borderColor: llmColor || 'var(--llm-cloud)' }}
           >
-            {groupingInProgress ? 'Grouping...' : hasGroups ? `Grouped (${displayGroups.length})` : 'Auto-Group'}
+            {groupingInProgress ? 'Grouping...' : hasGroups ? `Grouped (${displayGroups.length})` : 'Auto-group w/LLM'}
           </button>
         )}
         {hasGroups && (

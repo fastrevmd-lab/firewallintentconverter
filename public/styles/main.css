@@ -36,6 +36,10 @@
   --error: #f87171;
   --info: #60a5fa;
 
+  /* LLM mode colors */
+  --llm-cloud: #f59e0b;
+  --llm-local: #84cc16;
+
   /* Status badges */
   --status-clean: #34d399;
   --status-warning: #fbbf24;
@@ -1203,8 +1207,8 @@ html, body, #root {
   flex-wrap: wrap;
 }
 .risk-btn-accept {
-  background: var(--success) !important;
-  color: #fff !important;
+  background: var(--llm-cloud) !important;
+  color: #1a1a2e !important;
   font-weight: 600;
   padding: 10px 20px !important;
   border-radius: var(--radius) !important;
@@ -1213,7 +1217,7 @@ html, body, #root {
   filter: brightness(1.1);
 }
 .risk-btn-local {
-  background: var(--warning) !important;
+  background: var(--llm-local) !important;
   color: #1a1a2e !important;
   font-weight: 600;
   padding: 10px 20px !important;
@@ -2551,9 +2555,9 @@ html, body, #root {
   font-size: 12px;
   font-weight: 600;
   font-family: var(--font-mono);
-  background: var(--accent);
-  color: var(--bg-primary);
-  border: 1px solid var(--accent);
+  background: var(--llm-cloud);
+  color: #1a1a2e;
+  border: 1px solid var(--llm-cloud);
   border-radius: var(--radius);
   cursor: pointer;
   display: flex;
@@ -2563,14 +2567,22 @@ html, body, #root {
   transition: all 0.15s;
 }
 
+.btn-translate.llm-local {
+  background: var(--llm-local);
+  border-color: var(--llm-local);
+}
+
 .btn-translate:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
 
 .btn-translate:hover:not(:disabled) {
-  background: var(--accent-hover);
-  border-color: var(--accent-hover);
+  filter: brightness(1.1);
+}
+
+.btn-translate.llm-local:hover:not(:disabled) {
+  filter: brightness(1.1);
 }
 
 .btn-translate .spinner {

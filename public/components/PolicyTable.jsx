@@ -1487,7 +1487,7 @@ export default function PolicyTable({
             className="btn btn-secondary btn-sm"
             onClick={onGroupWithAI}
             disabled={groupingInProgress || policies.length === 0}
-            title="Use AI to organize rules into logical groups"
+            title={llmColor === 'var(--llm-local)' ? 'Note: sending info to Local LLM' : 'Warning: sending info to a Public LLM'}
             style={{ background: llmColor || 'var(--llm-cloud)', color: '#1a1a2e', borderColor: llmColor || 'var(--llm-cloud)' }}
           >
             {groupingInProgress ? 'Grouping...' : hasGroups ? `Grouped (${displayGroups.length})` : 'Auto-group w/LLM'}

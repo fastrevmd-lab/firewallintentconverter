@@ -299,7 +299,7 @@ export default function ContentRouter({
         className={`btn btn-translate${localOnly ? ' llm-local' : ''}`}
         onClick={llm.handleTranslateWithLLM}
         disabled={detMode || isTranslating || !intermediateConfig?.security_policies?.length}
-        title={detMode ? 'Disabled in No-AI mode' : isHealthCheckMode ? 'Check best practices using LLM' : 'Translate source policies to SRX format using LLM'}
+        title={detMode ? 'Disabled in No-AI mode' : localOnly ? 'Note: sending info to Local LLM' : 'Warning: sending info to a Public LLM'}
         style={detMode ? { opacity: 0.4, cursor: 'not-allowed' } : undefined}
       >
         {isTranslating
@@ -408,7 +408,7 @@ export default function ContentRouter({
               </svg>
               <h3>No translated policies yet</h3>
               <p>Click "{greenfieldMode ? 'Import LLM Config' : 'Translate with LLM'}" to send the source ruleset to the LLM for translation to SRX format.</p>
-              <button className={`btn btn-translate${localOnly ? ' llm-local' : ''}`} onClick={llm.handleTranslateWithLLM} disabled={isTranslating || !intermediateConfig?.security_policies?.length} style={{ marginTop: 12 }}>
+              <button className={`btn btn-translate${localOnly ? ' llm-local' : ''}`} onClick={llm.handleTranslateWithLLM} disabled={isTranslating || !intermediateConfig?.security_policies?.length} style={{ marginTop: 12 }} title={localOnly ? 'Note: sending info to Local LLM' : 'Warning: sending info to a Public LLM'}>
                 {isTranslating ? (greenfieldMode ? 'Importing...' : 'Translating...') : (greenfieldMode ? 'Import LLM Config' : 'Translate with LLM')}
               </button>
             </div>

@@ -156,6 +156,7 @@ export default function ConfigInput({
           value={selectedVendor}
           onChange={(e) => setSelectedVendor(e.target.value)}
           disabled={greenfieldMode || isParsed}
+          title={isGreenfield ? (llmLocalOnly ? 'Note: sending info to Local LLM' : 'Warning: sending info to a Public LLM') : undefined}
           style={isGreenfield ? {
             borderColor: llmLocalOnly ? 'var(--llm-local)' : 'var(--llm-cloud)',
             color: llmLocalOnly ? 'var(--llm-local)' : 'var(--llm-cloud)',

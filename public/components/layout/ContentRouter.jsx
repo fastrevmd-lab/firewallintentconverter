@@ -633,7 +633,7 @@ export default function ContentRouter({
     return (
       <div className="center-content" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
         {renderPlatformBar()}
-        <div style={{ flex: 1, overflow: 'auto' }}><ScreenEditor screenConfig={activeConfig?.screen_config || []} onScreenUpdate={config.handleScreenUpdate} viewMode={effectiveViewMode} /></div>
+        <div style={{ flex: 1, overflow: 'auto' }}><ScreenEditor screenConfig={activeConfig?.screen_config || []} onScreenUpdate={config.handleScreenUpdate} viewMode={effectiveViewMode} zones={activeConfig?.zones || []} staticRoutes={activeConfig?.static_routes || []} interfaces={activeConfig?.interfaces || []} targetModel={targetModel} /></div>
       </div>
     );
   }

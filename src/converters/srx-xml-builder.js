@@ -1574,7 +1574,8 @@ function buildScreenXml(screens, lines) {
         lines.push('        <tcp>');
         if (screen.tcp.syn_flood_threshold) {
           lines.push('          <syn-flood>');
-          lines.push(`            <alarm-threshold>${Math.round(screen.tcp.syn_flood_threshold * 5) || 1024}</alarm-threshold>`);
+          const alarmVal = screen.tcp.syn_flood_alarm_threshold || Math.round(screen.tcp.syn_flood_threshold * 5) || 1024;
+          lines.push(`            <alarm-threshold>${alarmVal}</alarm-threshold>`);
           lines.push(`            <attack-threshold>${screen.tcp.syn_flood_threshold}</attack-threshold>`);
           if (screen.tcp.syn_flood_timeout) lines.push(`            <timeout>${screen.tcp.syn_flood_timeout}</timeout>`);
           lines.push('          </syn-flood>');

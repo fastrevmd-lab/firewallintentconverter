@@ -2137,7 +2137,8 @@ function convertScreenConfig(screens, commands, warnings, summary) {
     // TCP protections
     if (screen.tcp) {
       if (screen.tcp.syn_flood_threshold) {
-        commands.push(`${prefix} tcp syn-flood alarm-threshold ${Math.round(screen.tcp.syn_flood_threshold * 5) || 1024}`);
+        const alarmVal = screen.tcp.syn_flood_alarm_threshold || Math.round(screen.tcp.syn_flood_threshold * 5) || 1024;
+        commands.push(`${prefix} tcp syn-flood alarm-threshold ${alarmVal}`);
         commands.push(`${prefix} tcp syn-flood attack-threshold ${screen.tcp.syn_flood_threshold}`);
       }
       if (screen.tcp.syn_flood_timeout) commands.push(`${prefix} tcp syn-flood timeout ${screen.tcp.syn_flood_timeout}`);

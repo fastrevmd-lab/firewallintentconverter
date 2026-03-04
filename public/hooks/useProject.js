@@ -43,6 +43,7 @@ export default function useProject() {
       warningStatuses: configState.warningStatuses,
       srxTranslatedPolicies: configState.srxTranslatedPolicies,
       ruleGroups: configState.ruleGroups,
+      sectionAcceptance: configState.sectionAcceptance,
       greenfieldMode: configState.greenfieldMode,
       greenfieldTemplate: configState.greenfieldTemplate,
 
@@ -135,6 +136,7 @@ export default function useProject() {
         warningStatuses: s.warningStatuses ?? {},
         srxTranslatedPolicies: s.srxTranslatedPolicies ?? null,
         ruleGroups: s.ruleGroups ?? [],
+        sectionAcceptance: s.sectionAcceptance ?? {},
         greenfieldMode: s.greenfieldMode ?? false,
         greenfieldTemplate: s.greenfieldTemplate ?? null,
         selectedRuleKeys: [],

@@ -12,11 +12,17 @@ import {
   detectInternetZones, resolveZoneSpeedTiers, generateScreenConfig,
 } from '../utils/screen-presets.js';
 import { SRX_MODELS, getSrx4700Ports } from '../data/hardware-db.js';
+import { useConfigContext } from '../contexts/ConfigContext.jsx';
+import { useUIContext } from '../contexts/UIContext.jsx';
 
 export default function ScreenEditor({
   screenConfig, onScreenUpdate, viewMode,
   zones, staticRoutes, interfaces, targetModel, interfaceMappings,
 }) {
+
+  const { state: cfgState, dispatch: cfgDispatch } = useConfigContext();
+  const { state: uiState } = useUIContext();
+  const isSrxView = uiState.platformView === 'srx';
 
   // Preset panel state
   const [showPresetPanel, setShowPresetPanel] = useState(false);
@@ -85,6 +91,10 @@ export default function ScreenEditor({
       return clone;
     });
     onScreenUpdate(updated);
+    // Auto-revoke acceptance for this screen's zone
+    if (isSrxView && screenConfig[index]?.zone) {
+      cfgDispatch({ type: 'REVOKE_SECTION', sectionId: `screen:${screenConfig[index].zone}` });
+    }
   };
 
   const handleAdd = () => {
@@ -124,6 +134,21 @@ export default function ScreenEditor({
         <button className="btn btn-primary btn-sm" onClick={handleOpenPresetPanel}>
           {showPresetPanel ? 'Close Presets' : 'Apply Best Practice'}
         </button>
+        {isSrxView && screenConfig && screenConfig.length > 0 && (
+          (() => {
+            const allAccepted = screenConfig.every(s => s.zone && cfgState.sectionAcceptance[`screen:${s.zone}`]);
+            return allAccepted ? (
+              <button className="btn btn-sm btn-accepted" disabled>All Screens Accepted</button>
+            ) : (
+              <button className="btn btn-sm btn-accept" onClick={() => {
+                cfgDispatch({
+                  type: 'ACCEPT_SECTIONS',
+                  sectionIds: screenConfig.filter(s => s.zone).map(s => `screen:${s.zone}`),
+                });
+              }}>Accept All Screens</button>
+            );
+          })()
+        )}
         {detection.confidence === 'low' && detection.allZones.length > 0 && !showPresetPanel && (
           <span style={{ fontSize: 11, color: 'var(--caution)' }}>
             No internet-facing zones auto-detected — select zones manually
@@ -167,7 +192,7 @@ export default function ScreenEditor({
                 onChange={e => setSelectedSpeed(e.target.value)}
                 style={{ width: '100%' }}>
                 {speedInfo.validTiers.map(key => (
-                  <option key={key} value={key}>{SPEED_TIERS[key].label}</option>
+                  <option key={key} value={key}>{speedInfo.tierLabels?.[key] || SPEED_TIERS[key].label}</option>
                 ))}
               </select>
             </div>
@@ -273,6 +298,16 @@ export default function ScreenEditor({
                     onChange={(e) => handleChange(index, 'zone', e.target.value)}
                     placeholder="Zone" />
                 </div>
+                {isSrxView && screen.zone && (
+                  cfgState.sectionAcceptance[`screen:${screen.zone}`] ? (
+                    <button className="btn btn-sm btn-accepted" disabled style={{ marginLeft: 'auto' }}>Accepted</button>
+                  ) : (
+                    <button className="btn btn-sm btn-accept" style={{ marginLeft: 'auto' }}
+                      onClick={() => cfgDispatch({ type: 'ACCEPT_SECTION', sectionId: `screen:${screen.zone}` })}>
+                      Accept
+                    </button>
+                  )
+                )}
                 <button className="btn-icon btn-icon-danger" onClick={() => handleDelete(index)} title="Delete">x</button>
               </div>
 

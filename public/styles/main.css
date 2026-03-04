@@ -732,6 +732,34 @@ html, body, #root {
 .warning-status-badge.ignored { background: var(--surface-2); color: var(--text-secondary); }
 .warning-status-badge:hover { filter: brightness(1.15); }
 
+/* --- Section Accept Bar --- */
+.section-accept-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 16px;
+  background: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+
+.btn-accept {
+  background: var(--juniper-green);
+  color: white;
+  border: none;
+  cursor: pointer;
+  font-weight: 600;
+}
+.btn-accept:hover { filter: brightness(1.1); }
+
+.btn-accepted {
+  background: var(--bg-elevated);
+  color: var(--juniper-green);
+  border: 1px solid var(--juniper-green);
+  cursor: default;
+  font-weight: 600;
+}
+
 /* --- Conversion Summary --- */
 .conversion-summary {
   display: grid;

@@ -571,6 +571,8 @@ export async function getLLMSuggestion(userPrompt, systemPrompt = '') {
       return callClaude(settings, userPrompt, systemPrompt);
     case 'openai':
       return callOpenAI(settings, userPrompt, systemPrompt);
+    case 'gemini':
+      return callGemini(settings, userPrompt, systemPrompt);
     case 'ollama':
       return callOllama(settings, userPrompt, systemPrompt);
     case 'lmstudio':
@@ -601,6 +603,8 @@ export async function getLLMChatResponse(messages, systemPrompt = '') {
       return callClaudeChat(settings, messages, systemPrompt);
     case 'openai':
       return callOpenAIChat(settings, messages, systemPrompt);
+    case 'gemini':
+      return callGeminiChat(settings, messages, systemPrompt);
     case 'ollama':
       return callOllamaChat(settings, messages, systemPrompt);
     case 'lmstudio':
@@ -618,7 +622,7 @@ export async function getLLMChatResponse(messages, systemPrompt = '') {
  */
 export function getLLMStatus() {
   const settings = loadSettings();
-  const needsKey = !['ollama', 'lmstudio'].includes(settings.provider);
+  const needsKey = !['ollama', 'lmstudio'].includes(settings.provider);  // claude, openai, gemini, custom
   const configured = settings.provider && (!needsKey || settings.apiKey);
   return {
     configured: !!configured,
@@ -696,6 +700,37 @@ async function callOpenAI(settings, userPrompt, systemPrompt) {
 
   const data = await response.json();
   return data.choices?.[0]?.message?.content || 'No response from OpenAI.';
+}
+
+async function callGemini(settings, userPrompt, systemPrompt) {
+  if (!settings.apiKey) {
+    throw new Error('Gemini API key not configured. Open Settings to add your Google AI API key.');
+  }
+
+  const model = settings.model || 'gemini-3-flash-preview';
+  const body = {
+    contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
+    generationConfig: {
+      temperature: settings.temperature ?? 0.2,
+      maxOutputTokens: settings.maxTokens || 1024,
+    },
+  };
+  if (systemPrompt) {
+    body.systemInstruction = { parts: [{ text: systemPrompt }] };
+  }
+
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${settings.apiKey}`,
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
+  );
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.error?.message || `Gemini API error: ${response.status}`);
+  }
+
+  const data = await response.json();
+  return data.candidates?.[0]?.content?.parts?.[0]?.text || 'No response from Gemini.';
 }
 
 function validateBaseUrl(url) {
@@ -870,6 +905,42 @@ async function callOpenAIChat(settings, messages, systemPrompt) {
   return data.choices?.[0]?.message?.content || 'No response from OpenAI.';
 }
 
+async function callGeminiChat(settings, messages, systemPrompt) {
+  if (!settings.apiKey) {
+    throw new Error('Gemini API key not configured. Open Settings to add your Google AI API key.');
+  }
+
+  const model = settings.model || 'gemini-3-flash-preview';
+  const contents = messages.map(m => ({
+    role: m.role === 'assistant' ? 'model' : 'user',
+    parts: [{ text: m.content }],
+  }));
+
+  const body = {
+    contents,
+    generationConfig: {
+      temperature: settings.temperature ?? 0.2,
+      maxOutputTokens: settings.maxTokens || 2048,
+    },
+  };
+  if (systemPrompt) {
+    body.systemInstruction = { parts: [{ text: systemPrompt }] };
+  }
+
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${settings.apiKey}`,
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
+  );
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.error?.message || `Gemini API error: ${response.status}`);
+  }
+
+  const data = await response.json();
+  return data.candidates?.[0]?.content?.parts?.[0]?.text || 'No response from Gemini.';
+}
+
 async function callOllamaChat(settings, messages, systemPrompt) {
   const baseUrl = validateBaseUrl(settings.baseUrl || 'http://localhost:11434');
 
@@ -983,6 +1054,7 @@ async function _callLLM(userPrompt, systemPrompt, maxTokensOverride) {
   switch (settings.provider) {
     case 'claude': return callClaude(settings, userPrompt, systemPrompt);
     case 'openai': return callOpenAI(settings, userPrompt, systemPrompt);
+    case 'gemini': return callGemini(settings, userPrompt, systemPrompt);
     case 'ollama': return callOllama(settings, userPrompt, systemPrompt);
     case 'lmstudio': return callLMStudio(settings, userPrompt, systemPrompt);
     case 'custom': return callCustom(settings, userPrompt, systemPrompt);

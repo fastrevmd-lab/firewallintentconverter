@@ -140,6 +140,7 @@ export default function useConfig() {
       });
       configDispatch({ type: 'SET_FIELD', field: 'warningStatuses', value: {} });
       configDispatch({ type: 'SET_FIELD', field: 'ruleGroups', value: [] });
+      configDispatch({ type: 'SET_FIELD', field: 'sectionAcceptance', value: {} });
 
       // Auto-open model selector after successful parse
       uiDispatch({ type: 'SHOW_MODAL', name: 'modelSelector' });
@@ -222,21 +223,38 @@ export default function useConfig() {
   // Field-level config update handlers
   // -----------------------------------------------------------------------
 
+  // Field-to-section mapping for generic handleConfigUpdate
+  const FIELD_TO_SECTION = {
+    address_objects: 'obj:addresses', address_groups: 'obj:groups',
+    service_objects: 'obj:services', service_groups: 'obj:services',
+    applications: 'obj:applications', application_groups: 'obj:applications',
+    security_profile_objects: 'obj:profiles', schedules: 'obj:schedules',
+    flow_monitoring_config: 'flow-monitoring',
+    static_routes: 'routing', interfaces: 'routing',
+    bgp_config: 'routing', ospf_config: 'routing',
+    ospf3_config: 'routing', evpn_config: 'routing', vxlan_config: 'routing',
+    bridge_domains: 'routing', l2_interfaces: 'routing', vwire_pairs: 'routing',
+  };
+
   const handleZonesUpdate = useCallback((zones) => {
     updateConfig(prev => ({ ...prev, zones }));
-  }, [updateConfig]);
+    configDispatch({ type: 'REVOKE_SECTION', sectionId: 'zones' });
+  }, [updateConfig, configDispatch]);
 
   const handleNATUpdate = useCallback((natRules) => {
     updateConfig(prev => ({ ...prev, nat_rules: natRules }));
-  }, [updateConfig]);
+    configDispatch({ type: 'REVOKE_SECTION', sectionId: 'nat' });
+  }, [updateConfig, configDispatch]);
 
   const handleVPNUpdate = useCallback((vpnTunnels) => {
     updateConfig(prev => ({ ...prev, vpn_tunnels: vpnTunnels }));
-  }, [updateConfig]);
+    configDispatch({ type: 'REVOKE_SECTION', sectionId: 'vpn' });
+  }, [updateConfig, configDispatch]);
 
   const handleHAUpdate = useCallback((haConfig) => {
     updateConfig(prev => ({ ...prev, ha_config: haConfig }));
-  }, [updateConfig]);
+    configDispatch({ type: 'REVOKE_SECTION', sectionId: 'ha' });
+  }, [updateConfig, configDispatch]);
 
   const handleScreenUpdate = useCallback((screenConfig) => {
     updateConfig(prev => ({ ...prev, screen_config: screenConfig }));
@@ -244,19 +262,24 @@ export default function useConfig() {
 
   const handleSyslogUpdate = useCallback((syslogConfig) => {
     updateConfig(prev => ({ ...prev, syslog_config: syslogConfig }));
-  }, [updateConfig]);
+    configDispatch({ type: 'REVOKE_SECTION', sectionId: 'syslog' });
+  }, [updateConfig, configDispatch]);
 
   const handleDHCPUpdate = useCallback((dhcpConfig) => {
     updateConfig(prev => ({ ...prev, dhcp_config: dhcpConfig }));
-  }, [updateConfig]);
+    configDispatch({ type: 'REVOKE_SECTION', sectionId: 'dhcp' });
+  }, [updateConfig, configDispatch]);
 
   const handleQoSUpdate = useCallback((qosConfig) => {
     updateConfig(prev => ({ ...prev, qos_config: qosConfig }));
-  }, [updateConfig]);
+    configDispatch({ type: 'REVOKE_SECTION', sectionId: 'qos' });
+  }, [updateConfig, configDispatch]);
 
   const handleConfigUpdate = useCallback((field, items) => {
     updateConfig(prev => ({ ...prev, [field]: items }));
-  }, [updateConfig]);
+    const sectionId = FIELD_TO_SECTION[field];
+    if (sectionId) configDispatch({ type: 'REVOKE_SECTION', sectionId });
+  }, [updateConfig, configDispatch]);
 
   // -----------------------------------------------------------------------
   // Analysis engine

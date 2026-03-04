@@ -24,6 +24,7 @@ const GreenfieldChat = React.lazy(() => import('../GreenfieldChat.jsx'));
 const SRXOutput = React.lazy(() => import('../SRXOutput.jsx'));
 const WarningsPanel = React.lazy(() => import('../WarningsPanel.jsx'));
 const DiffPanel = React.lazy(() => import('../DiffPanel.jsx'));
+import SectionAcceptBar from '../shared/SectionAcceptBar.jsx';
 
 const LoadingTab = () => (
   <div className="center-content" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 1, color: 'var(--text-muted)' }}>
@@ -463,6 +464,7 @@ export default function ContentRouter({
     return (
       <div className="center-content" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
         {renderPlatformBar()}
+        <SectionAcceptBar sectionId="decryption" label="SSL B&I" />
         <div className="panel-body" style={{ overflow: 'auto', flex: 1 }}>
           <table className="policy-table">
             <thead><tr><th>#</th><th>Name</th><th>Src Zone</th><th>Dst Zone</th><th>Source</th><th>Destination</th><th>Service</th><th>URL Category</th><th>Type</th><th>Action</th><th>Profile</th><th>Description</th></tr></thead>
@@ -494,6 +496,7 @@ export default function ContentRouter({
     return (
       <div className="center-content" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
         {renderPlatformBar()}
+        <SectionAcceptBar sectionId="pbf" label="PBF" />
         <div className="panel-body" style={{ overflow: 'auto', flex: 1 }}>
           <table className="policy-table">
             <thead><tr><th>#</th><th>Name</th><th>From (type)</th><th>Source</th><th>Destination</th><th>Application</th><th>Service</th><th>Action</th><th>Egress Intf</th><th>Next Hop</th><th>Monitor</th><th>Description</th></tr></thead>
@@ -558,6 +561,7 @@ export default function ContentRouter({
     return (
       <div className="center-content" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
         {renderPlatformBar()}
+        <SectionAcceptBar sectionId="zones" label="Zones" />
         <div style={{ flex: 1, overflow: 'auto' }}><ZoneEditor zones={activeConfig?.zones || []} onZonesUpdate={config.handleZonesUpdate} viewMode={effectiveViewMode} interfaceMappings={interfaceMappings} /></div>
       </div>
     );
@@ -576,6 +580,7 @@ export default function ContentRouter({
     return (
       <div className="center-content" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
         {renderPlatformBar()}
+        <SectionAcceptBar sectionId="nat" label="NAT Rules" />
         <div style={{ flex: 1, overflow: 'auto' }}><NATEditor natRules={activeConfig?.nat_rules || []} onNATUpdate={config.handleNATUpdate} viewMode={effectiveViewMode} /></div>
       </div>
     );
@@ -585,6 +590,7 @@ export default function ContentRouter({
     return (
       <div className="center-content" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
         {renderPlatformBar()}
+        <SectionAcceptBar sectionId="routing" label="Routing" />
         <div style={{ flex: 1, overflow: 'auto' }}>
           <RoutingEditor
             routingContexts={activeConfig?.routing_contexts || []}
@@ -593,18 +599,18 @@ export default function ContentRouter({
             bridgeDomains={activeConfig?.bridge_domains || []}
             l2Interfaces={activeConfig?.l2_interfaces || []}
             vwirePairs={activeConfig?.vwire_pairs || []}
-            onRoutesUpdate={(routes) => config.updateConfig(prev => ({ ...prev, static_routes: routes }))}
-            onInterfacesUpdate={(ifs) => config.updateConfig(prev => ({ ...prev, interfaces: ifs }))}
-            onBridgeDomainsUpdate={(bd) => config.updateConfig(prev => ({ ...prev, bridge_domains: bd }))}
-            onL2InterfacesUpdate={(l2) => config.updateConfig(prev => ({ ...prev, l2_interfaces: l2 }))}
-            onVwirePairsUpdate={(vw) => config.updateConfig(prev => ({ ...prev, vwire_pairs: vw }))}
+            onRoutesUpdate={(routes) => { config.updateConfig(prev => ({ ...prev, static_routes: routes })); cfgDispatch({ type: 'REVOKE_SECTION', sectionId: 'routing' }); }}
+            onInterfacesUpdate={(ifs) => { config.updateConfig(prev => ({ ...prev, interfaces: ifs })); cfgDispatch({ type: 'REVOKE_SECTION', sectionId: 'routing' }); }}
+            onBridgeDomainsUpdate={(bd) => { config.updateConfig(prev => ({ ...prev, bridge_domains: bd })); cfgDispatch({ type: 'REVOKE_SECTION', sectionId: 'routing' }); }}
+            onL2InterfacesUpdate={(l2) => { config.updateConfig(prev => ({ ...prev, l2_interfaces: l2 })); cfgDispatch({ type: 'REVOKE_SECTION', sectionId: 'routing' }); }}
+            onVwirePairsUpdate={(vw) => { config.updateConfig(prev => ({ ...prev, vwire_pairs: vw })); cfgDispatch({ type: 'REVOKE_SECTION', sectionId: 'routing' }); }}
             bgpConfig={activeConfig?.bgp_config || []}
             ospfConfig={activeConfig?.ospf_config || []}
             ospf3Config={activeConfig?.ospf3_config || []}
             evpnConfig={activeConfig?.evpn_config || []}
             vxlanConfig={activeConfig?.vxlan_config || []}
-            onBgpConfigUpdate={(bgp) => config.updateConfig(prev => ({ ...prev, bgp_config: bgp }))}
-            onOspfConfigUpdate={(ospf) => config.updateConfig(prev => ({ ...prev, ospf_config: ospf }))}
+            onBgpConfigUpdate={(bgp) => { config.updateConfig(prev => ({ ...prev, bgp_config: bgp })); cfgDispatch({ type: 'REVOKE_SECTION', sectionId: 'routing' }); }}
+            onOspfConfigUpdate={(ospf) => { config.updateConfig(prev => ({ ...prev, ospf_config: ospf })); cfgDispatch({ type: 'REVOKE_SECTION', sectionId: 'routing' }); }}
           />
         </div>
       </div>
@@ -615,6 +621,7 @@ export default function ContentRouter({
     return (
       <div className="center-content" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
         {renderPlatformBar()}
+        <SectionAcceptBar sectionId="vpn" label="VPN" />
         <div style={{ flex: 1, overflow: 'auto' }}><VPNEditor vpnTunnels={activeConfig?.vpn_tunnels || []} onVPNUpdate={config.handleVPNUpdate} viewMode={effectiveViewMode} /></div>
       </div>
     );
@@ -624,6 +631,7 @@ export default function ContentRouter({
     return (
       <div className="center-content" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
         {renderPlatformBar()}
+        <SectionAcceptBar sectionId="ha" label="HA" />
         <div style={{ flex: 1, overflow: 'auto' }}><HAEditor haConfig={activeConfig?.ha_config} onHAUpdate={config.handleHAUpdate} viewMode={effectiveViewMode} targetModel={targetModel} /></div>
       </div>
     );
@@ -633,6 +641,7 @@ export default function ContentRouter({
     return (
       <div className="center-content" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
         {renderPlatformBar()}
+        {/* Screen acceptance is handled per-zone inside ScreenEditor */}
         <div style={{ flex: 1, overflow: 'auto' }}><ScreenEditor screenConfig={activeConfig?.screen_config || []} onScreenUpdate={config.handleScreenUpdate} viewMode={effectiveViewMode} zones={activeConfig?.zones || []} staticRoutes={activeConfig?.static_routes || []} interfaces={activeConfig?.interfaces || []} targetModel={targetModel} interfaceMappings={interfaceMappings} /></div>
       </div>
     );
@@ -642,6 +651,7 @@ export default function ContentRouter({
     return (
       <div className="center-content" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
         {renderPlatformBar()}
+        <SectionAcceptBar sectionId="syslog" label="Syslog" />
         <div style={{ flex: 1, overflow: 'auto' }}><SyslogEditor syslogConfig={activeConfig?.syslog_config || []} onSyslogUpdate={config.handleSyslogUpdate} viewMode={effectiveViewMode} /></div>
       </div>
     );
@@ -651,6 +661,7 @@ export default function ContentRouter({
     return (
       <div className="center-content" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
         {renderPlatformBar()}
+        <SectionAcceptBar sectionId="dhcp" label="DHCP" />
         <div style={{ flex: 1, overflow: 'auto' }}><DHCPEditor dhcpConfig={activeConfig?.dhcp_config || []} onDHCPUpdate={config.handleDHCPUpdate} viewMode={effectiveViewMode} /></div>
       </div>
     );
@@ -660,6 +671,7 @@ export default function ContentRouter({
     return (
       <div className="center-content" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
         {renderPlatformBar()}
+        <SectionAcceptBar sectionId="qos" label="QoS" />
         <div style={{ flex: 1, overflow: 'auto' }}><QoSEditor qosConfig={activeConfig?.qos_config || []} onQoSUpdate={config.handleQoSUpdate} viewMode={effectiveViewMode} /></div>
       </div>
     );
@@ -669,6 +681,7 @@ export default function ContentRouter({
     return (
       <div className="center-content" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
         {renderPlatformBar()}
+        <SectionAcceptBar sectionId="flow-monitoring" label="Flow Monitoring" />
         <div style={{ flex: 1, overflow: 'auto' }}><FlowMonitoringEditor flowConfig={activeConfig?.flow_monitoring_config} onFlowUpdate={(flowConfig) => config.handleConfigUpdate('flow_monitoring_config', flowConfig)} viewMode={effectiveViewMode} /></div>
       </div>
     );

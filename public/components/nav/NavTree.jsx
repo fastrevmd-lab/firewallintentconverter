@@ -2,6 +2,7 @@ import React, { useState, useCallback } from 'react';
 import { useConfigContext } from '../../contexts/ConfigContext.jsx';
 import { useConversionContext } from '../../contexts/ConversionContext.jsx';
 import { useUIContext } from '../../contexts/UIContext.jsx';
+import useSectionAcceptance from '../../hooks/useSectionAcceptance.js';
 
 /* ── Inline SVG Icons (16x16, stroke-based) ──────────────────────── */
 const ICONS = {
@@ -127,6 +128,7 @@ export default function NavTree({ collapsed }) {
   }, [uiDispatch]);
 
   const warnCount = convertWarnings?.length || 0;
+  const acceptance = useSectionAcceptance();
 
   return (
     <ul className="nav-tree">
@@ -155,11 +157,14 @@ export default function NavTree({ collapsed }) {
 
         // Group with children
         const isExpanded = expandedGroups.has(group.id);
+        const groupReviewClass = acceptance.groups?.[group.id] === true ? ' nav-review-done'
+          : acceptance.groups?.[`_${group.id}HasContent`] ? ' nav-review-pending'
+          : '';
 
         return (
           <li key={group.id} className={`nav-group${isExpanded ? '' : ' collapsed'}`}>
             <button
-              className="nav-group-header"
+              className={`nav-group-header${groupReviewClass}`}
               onClick={() => toggleGroup(group.id)}
             >
               <span className="arrow">{'\u25BC'}</span>
@@ -169,10 +174,13 @@ export default function NavTree({ collapsed }) {
             <ul className="nav-group-items">
               {group.children.map(child => {
                 const count = child.warnCount ? warnCount : getCount(child, intermediateConfig);
+                const reviewClass = acceptance.items?.[child.id] === true ? ' nav-review-done'
+                  : acceptance.hasContent?.[child.id] ? ' nav-review-pending'
+                  : '';
                 return (
                   <li
                     key={child.id}
-                    className={`nav-item${editTab === child.id ? ' active' : ''}`}
+                    className={`nav-item${editTab === child.id ? ' active' : ''}${reviewClass}`}
                     onClick={() => setTab(child.id)}
                   >
                     <span>{child.label}</span>

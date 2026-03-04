@@ -16,7 +16,7 @@ import {
 import { safeJsonParse } from '../utils/safe-json.js';
 import { useUIContext } from '../contexts/UIContext.jsx';
 
-const CLOUD_PROVIDER_IDS = ['claude', 'openai'];
+const CLOUD_PROVIDER_IDS = ['claude', 'openai', 'gemini'];
 
 const VENDOR_LABELS = {
   '': 'Default (Generic)',
@@ -44,6 +44,13 @@ const PROVIDERS = [
     { id: 'gpt-4.1-nano', name: 'GPT-4.1 Nano (Fastest)' },
     { id: 'o3', name: 'o3 (Reasoning)' },
     { id: 'o4-mini', name: 'o4-mini (Reasoning, Fast)' },
+  ]},
+  { id: 'gemini', name: 'Gemini (Google)', defaultModel: 'gemini-3-flash-preview', models: [
+    { id: 'gemini-3-flash-preview', name: 'Gemini 3 Flash (Recommended)' },
+    { id: 'gemini-3.1-flash-lite-preview', name: 'Gemini 3.1 Flash-Lite (Fastest)' },
+    { id: 'gemini-3.1-pro-preview', name: 'Gemini 3.1 Pro (Most Capable)' },
+    { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash (Stable)' },
+    { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro (Stable)' },
   ]},
   { id: 'ollama', name: 'Ollama (Local)', defaultModel: 'llama3', models: [] },
   { id: 'lmstudio', name: 'LM Studio (Local)', defaultModel: 'local-model', models: [] },

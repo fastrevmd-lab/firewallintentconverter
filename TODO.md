@@ -287,6 +287,15 @@
   - Separate SYN alarm threshold field (optional, falls back to 5x attack threshold)
   - Generated screens appear as fully editable cards with zone bindings
 
+### Rev18 — Section Acceptance Workflow & Speed Tier Fix
+- [x] **Section acceptance workflow** — Review & accept tracking extended from policies to all config sections (NAT, Zones, Objects, Screens, Routing, VPN, DHCP, Flow Monitoring, HA, QoS, Syslog, SSL B&I, PBF). `sectionAcceptance` state in ConfigContext with `ACCEPT_SECTION`, `ACCEPT_SECTIONS`, `REVOKE_SECTION` actions
+- [x] **Nav tree color-coded review progress** — Left nav items colored teal (needs review) or lime-green (accepted) when in SRX view. `useSectionAcceptance` hook derives per-item and parent-group rollup state. Parent groups (Security, Objects, Network, System) only go green when all children with content are accepted
+- [x] **Accept buttons in every section** — Shared `SectionAcceptBar` component rendered above each editor section in SRX view. "Accept [Section]" button with lime-green styling, "Accepted" disabled state. Wired into 12 editor tabs via ContentRouter
+- [x] **Per-zone screen acceptance** — Screen cards each have individual Accept/Accepted button per zone. "Accept All Screens" toolbar button for bulk acceptance. Auto-revoke on screen edit
+- [x] **Auto-revoke on edit** — Editing any section automatically revokes its acceptance (reverts to teal). All `useConfig` update handlers dispatch `REVOKE_SECTION`. Routing inline callbacks in ContentRouter also revoke. Reset all acceptance on re-parse
+- [x] **Speed tier label fix** — `resolveZoneSpeedTiers()` now returns `tierLabels` map with accurate labels based on actual port speeds. 1/10/25G SFP28 ports show "25G" instead of "25G/40G". Tracks raw speed numbers from hardware DB port strings
+- [x] **Project save/load** — `sectionAcceptance` included in `.fpic.json` project save/load
+
 ### Blocked — Waiting on Vendor APIs
 - [ ] **Push to SDC / SD On-Prem / Mist** — Direct deployment to Juniper management platforms. Requires HPE Juniper public REST APIs
 

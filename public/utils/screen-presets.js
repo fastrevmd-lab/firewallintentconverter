@@ -143,11 +143,15 @@ function parsePortSpeedTiers(speedStr) {
  * @returns {{ validTiers: string[], maxTier: string, portDetails: string }}
  */
 export function resolveZoneSpeedTiers(zoneNames, zones, interfaceMappings, targetPorts) {
+  const defaultLabels = {};
+  for (const key of Object.keys(SPEED_TIERS)) defaultLabels[key] = SPEED_TIERS[key].label;
+
   if (!targetPorts?.length || !interfaceMappings) {
-    return { validTiers: Object.keys(SPEED_TIERS), maxTier: '1g', portDetails: '' };
+    return { validTiers: Object.keys(SPEED_TIERS), maxTier: '1g', portDetails: '', tierLabels: defaultLabels };
   }
 
   const allTiers = new Set();
+  const allRawSpeeds = new Set(); // Track actual port speed numbers for accurate labels
   const portInfos = [];
 
   for (const zoneName of zoneNames) {
@@ -166,13 +170,20 @@ export function resolveZoneSpeedTiers(zoneNames, zones, interfaceMappings, targe
       if (port) {
         const tiers = parsePortSpeedTiers(port.speed);
         for (const t of tiers) allTiers.add(t);
+        // Collect raw speed numbers for accurate tier labeling
+        if (port.speed && port.speed !== 'virtual') {
+          for (const p of port.speed.replace(/G$/i, '').split('/')) {
+            const num = parseFloat(p);
+            if (!isNaN(num)) allRawSpeeds.add(num);
+          }
+        }
         portInfos.push(`${baseName} (${port.speed})`);
       }
     }
   }
 
   if (allTiers.size === 0) {
-    return { validTiers: Object.keys(SPEED_TIERS), maxTier: '1g', portDetails: '' };
+    return { validTiers: Object.keys(SPEED_TIERS), maxTier: '1g', portDetails: '', tierLabels: defaultLabels };
   }
 
   // Sort tiers by rank
@@ -180,10 +191,23 @@ export function resolveZoneSpeedTiers(zoneNames, zones, interfaceMappings, targe
   const validTiers = tierOrder.filter(t => allTiers.has(t));
   const maxTier = validTiers[validTiers.length - 1] || '1g';
 
+  // Build accurate labels from actual port speeds
+  const tierLabels = {};
+  for (const tier of validTiers) tierLabels[tier] = SPEED_TIERS[tier].label;
+  // Override 25g label based on actual raw speeds
+  if (allTiers.has('25g')) {
+    const has25 = allRawSpeeds.has(25);
+    const has40 = allRawSpeeds.has(40);
+    if (has25 && !has40) tierLabels['25g'] = '25G';
+    else if (!has25 && has40) tierLabels['25g'] = '40G';
+    // else both or neither: keep '25G/40G'
+  }
+
   return {
     validTiers,
     maxTier,
     portDetails: [...new Set(portInfos)].join(', '),
+    tierLabels,
   };
 }
 

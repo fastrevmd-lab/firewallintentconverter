@@ -156,6 +156,45 @@
   color: var(--caution);
 }
 
+/* --- Review workflow colors (SRX view) --- */
+.nav-item.nav-review-pending {
+  color: var(--accent);
+}
+.nav-item.nav-review-pending:hover {
+  color: var(--accent);
+}
+
+.nav-item.nav-review-done {
+  color: var(--juniper-green);
+}
+.nav-item.nav-review-done:hover {
+  color: var(--juniper-green);
+}
+
+.nav-item.nav-review-done .nav-badge {
+  color: var(--juniper-green);
+  background: rgba(144, 198, 65, 0.12);
+}
+
+.nav-item.nav-review-pending .nav-badge {
+  color: var(--accent);
+  background: rgba(77, 208, 200, 0.12);
+}
+
+.nav-group-header.nav-review-done {
+  color: var(--juniper-green);
+}
+.nav-group-header.nav-review-done .group-icon {
+  color: var(--juniper-green);
+}
+
+.nav-group-header.nav-review-pending {
+  color: var(--accent);
+}
+.nav-group-header.nav-review-pending .group-icon {
+  color: var(--accent);
+}
+
 /* --- Collapsed Sidebar State --- */
 .app-sidebar.collapsed .nav-tree .nav-group-header span:not(.group-icon) {
   display: none;

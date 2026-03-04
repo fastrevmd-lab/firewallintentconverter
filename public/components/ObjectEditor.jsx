@@ -12,6 +12,16 @@
 import React, { useState } from 'react';
 import { ChipEditor } from './ZoneEditor.jsx';
 import { mapAppToJunos } from '../../src/parsers/parser-utils.js';
+import SectionAcceptBar from './shared/SectionAcceptBar.jsx';
+
+const SUB_TAB_ACCEPT = {
+  addresses:    { sectionId: 'obj:addresses',    label: 'Addresses' },
+  groups:       { sectionId: 'obj:groups',        label: 'Address Sets' },
+  services:     { sectionId: 'obj:services',      label: 'Services' },
+  applications: { sectionId: 'obj:applications',  label: 'Applications' },
+  profiles:     { sectionId: 'obj:profiles',      label: 'Security Profiles' },
+  schedules:    { sectionId: 'obj:schedules',     label: 'Schedulers' },
+};
 
 export default function ObjectEditor({ intermediateConfig, onConfigUpdate, viewMode }) {
   const [subTab, setSubTab] = useState('addresses');
@@ -78,6 +88,14 @@ export default function ObjectEditor({ intermediateConfig, onConfigUpdate, viewM
           {isSrx ? 'Schedulers' : 'Schedules'} ({schedules.length})
         </button>
       </div>
+
+      {/* Accept bar for current sub-tab */}
+      {SUB_TAB_ACCEPT[subTab] && (
+        <SectionAcceptBar
+          sectionId={SUB_TAB_ACCEPT[subTab].sectionId}
+          label={SUB_TAB_ACCEPT[subTab].label}
+        />
+      )}
 
       {/* Content */}
       <div style={{ flex: 1, overflow: 'auto' }}>

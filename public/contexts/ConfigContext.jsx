@@ -32,6 +32,7 @@ const initialState = {
   selectedRuleKeys: new Set(),
   lastClickedKey: null,
   warningStatuses: {},
+  sectionAcceptance: {},
 };
 
 // ---------------------------------------------------------------------------
@@ -173,6 +174,28 @@ function configReducer(state, action) {
         },
       };
 
+    // --- Section acceptance workflow ---
+    case 'ACCEPT_SECTION':
+      return {
+        ...state,
+        sectionAcceptance: { ...state.sectionAcceptance, [action.sectionId]: true },
+      };
+
+    case 'ACCEPT_SECTIONS':
+      return {
+        ...state,
+        sectionAcceptance: {
+          ...state.sectionAcceptance,
+          ...Object.fromEntries(action.sectionIds.map(id => [id, true])),
+        },
+      };
+
+    case 'REVOKE_SECTION':
+      return {
+        ...state,
+        sectionAcceptance: { ...state.sectionAcceptance, [action.sectionId]: false },
+      };
+
     // --- Full reset ---
     case 'RESET':
       return { ...initialState };
@@ -187,6 +210,7 @@ function configReducer(state, action) {
         selectedRuleKeys: s.selectedRuleKeys
           ? new Set(s.selectedRuleKeys)
           : new Set(),
+        sectionAcceptance: s.sectionAcceptance || {},
       };
     }
 

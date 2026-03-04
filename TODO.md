@@ -269,6 +269,24 @@
 - [x] **Analysis findings in inspector** — Right panel shows clickable analysis finding badges when on rules tab, linking to full analysis view
 - [x] **MCP → PyEZ Bridge documentation** — README updated to replace all MCP Server references with PyEZ Bridge terminology throughout
 
+### Rev17 — UX Polish & SRX Screen Best Practices
+- [x] **Color-coded LLM risk indicators** — Orange (`--llm-cloud`) for cloud LLM features, lime (`--llm-local`) for local LLM, green for No AI. Applied to risk disclaimer buttons, Review w/LLM, Auto-group w/LLM, Greenfield dropdown. Hover tooltips warn about data sharing
+- [x] **Violet caution color for warnings/analysis** — New `--caution: #a78bfa` (violet) CSS variable distinguishes warnings and analysis badges from orange LLM indicators. Applied to platform bar, nav tree, TopBar, RightPanel findings, AnalysisPanel, WarningsPanel, SRXOutput
+- [x] **TopBar stat badge improvements** — Per-status warning counters (ack/fix/ign) with matching colors and teal arrows. Policies badge: `Policies N → Accepted N` with violet labels and green accepted count. Improved contrast (white text on dark backgrounds)
+- [x] **Juniper brand green** — `--juniper-green: #90C641` (from SRX datasheet) applied to target model names in TopBar, platform bar, StatusBar, ConfigInput, and ModelSelector
+- [x] **5-button platform bar workflow** — Redesigned from 3 buttons to seamless 5-button strip: From-XXX › Analysis › Review w/LLM › To-SRX › Convert to SRX. Chevrons between buttons, inline Convert button in Juniper green. Removed Push SDC/Mist buttons
+- [x] **Log count enabled by default** — `_srx_log_count` defaults to true for all SRX policies. Outputs `then count` in set commands and `<count/>` in XML. Toggle still available per-rule
+- [x] **Sanitized Objects blank screen fix** — Fixed temporal dead zone bug where `renderPlatformBar` (const arrow function) was called before its declaration in early-return code paths. Hoisted above all early returns
+- [x] **SRX Screen Best Practice Presets** — "Apply Best Practice" toolbar in ScreenEditor with Standard/Strict presets:
+  - Auto-detect internet-facing zones (name matching: untrust/outside/wan/dmz + default route analysis)
+  - Interface speed inference from naming (ge=1G, xe=10G, et=25G+)
+  - Speed-scaled thresholds: 1G/10G/25G-40G/100G tiers (1x/10x/25x/100x multipliers)
+  - Standard: balanced protection (SYN attack 200pps, UDP 5000pps, core boolean protections)
+  - Strict: aggressive protection (lower thresholds, all boolean screens enabled including spoofing/winnuke/tcp-no-flag)
+  - Preset/speed/zone selection panel with threshold preview, replace vs merge toggle
+  - Separate SYN alarm threshold field (optional, falls back to 5x attack threshold)
+  - Generated screens appear as fully editable cards with zone bindings
+
 ### Blocked — Waiting on Vendor APIs
 - [ ] **Push to SDC / SD On-Prem / Mist** — Direct deployment to Juniper management platforms. Requires HPE Juniper public REST APIs
 

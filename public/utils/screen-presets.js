@@ -112,8 +112,83 @@ export function detectInternetZones(zones, routes, interfaces) {
   return { detected: [], confidence: 'low', allZones: allZoneNames };
 }
 
+// Maps hardware DB speed strings like "1/10/25G" to our speed tier keys
+const SPEED_TO_TIERS = {
+  '1': '1g', '2.5': '1g', '5': '10g', '10': '10g',
+  '25': '25g', '40': '25g', '50': '25g', '100': '100g', '400': '100g',
+};
+
 /**
- * Infer speed tier from SRX interface naming convention:
+ * Parse a hardware DB speed string (e.g., "1/10/25G") into valid speed tier keys.
+ * Returns a Set of tier keys like {'1g', '10g', '25g'}.
+ */
+function parsePortSpeedTiers(speedStr) {
+  if (!speedStr || speedStr === 'virtual') return new Set(Object.keys(SPEED_TIERS));
+  const tiers = new Set();
+  const parts = speedStr.replace(/G$/i, '').split('/');
+  for (const p of parts) {
+    const tier = SPEED_TO_TIERS[p];
+    if (tier) tiers.add(tier);
+  }
+  return tiers.size > 0 ? tiers : new Set(['1g']);
+}
+
+/**
+ * Resolve valid speed tiers for zones based on interface mappings and hardware port data.
+ *
+ * @param {string[]} zoneNames - Selected zone names
+ * @param {Array} zones - intermediateConfig.zones[]
+ * @param {Object} interfaceMappings - { "ethernet1/1": "ge-0/0/0", ... }
+ * @param {Array} targetPorts - SRX_MODELS[targetModel].ports[] with {name, speed}
+ * @returns {{ validTiers: string[], maxTier: string, portDetails: string }}
+ */
+export function resolveZoneSpeedTiers(zoneNames, zones, interfaceMappings, targetPorts) {
+  if (!targetPorts?.length || !interfaceMappings) {
+    return { validTiers: Object.keys(SPEED_TIERS), maxTier: '1g', portDetails: '' };
+  }
+
+  const allTiers = new Set();
+  const portInfos = [];
+
+  for (const zoneName of zoneNames) {
+    const zone = (zones || []).find(z => z.name === zoneName);
+    if (!zone) continue;
+
+    for (const srcIface of (zone.interfaces || [])) {
+      const ifName = typeof srcIface === 'string' ? srcIface : srcIface?.name || '';
+      // Resolve source interface → SRX interface via mappings
+      const srxIface = interfaceMappings[ifName] || interfaceMappings[ifName.split('.')[0]];
+      if (!srxIface) continue;
+
+      // Strip .unit to get base port name
+      const baseName = srxIface.split('.')[0];
+      const port = targetPorts.find(p => p.name === baseName);
+      if (port) {
+        const tiers = parsePortSpeedTiers(port.speed);
+        for (const t of tiers) allTiers.add(t);
+        portInfos.push(`${baseName} (${port.speed})`);
+      }
+    }
+  }
+
+  if (allTiers.size === 0) {
+    return { validTiers: Object.keys(SPEED_TIERS), maxTier: '1g', portDetails: '' };
+  }
+
+  // Sort tiers by rank
+  const tierOrder = ['1g', '10g', '25g', '100g'];
+  const validTiers = tierOrder.filter(t => allTiers.has(t));
+  const maxTier = validTiers[validTiers.length - 1] || '1g';
+
+  return {
+    validTiers,
+    maxTier,
+    portDetails: [...new Set(portInfos)].join(', '),
+  };
+}
+
+/**
+ * Infer speed tier from SRX interface naming convention (fallback when no hardware DB).
  * ge-* = 1G, xe-* = 10G, et-* = 25G+
  */
 export function inferSpeedFromInterfaces(zoneInterfaces, interfaces) {
@@ -127,7 +202,6 @@ export function inferSpeedFromInterfaces(zoneInterfaces, interfaces) {
     else if (ifName.startsWith('xe-')) speed = '10g';
     else if (ifName.startsWith('ge-')) speed = '1g';
 
-    // Check interfaces[] for explicit speed field
     const ifObj = (interfaces || []).find(i => i.name === ifName);
     if (ifObj?.speed) {
       const s = ifObj.speed.toLowerCase();

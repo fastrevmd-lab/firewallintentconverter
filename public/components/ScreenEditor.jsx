@@ -9,12 +9,13 @@
 import React, { useState, useMemo } from 'react';
 import {
   SCREEN_PRESETS, SPEED_TIERS,
-  detectInternetZones, inferSpeedFromInterfaces, generateScreenConfig,
+  detectInternetZones, resolveZoneSpeedTiers, generateScreenConfig,
 } from '../utils/screen-presets.js';
+import { SRX_MODELS, getSrx4700Ports } from '../data/hardware-db.js';
 
 export default function ScreenEditor({
   screenConfig, onScreenUpdate, viewMode,
-  zones, staticRoutes, interfaces, targetModel,
+  zones, staticRoutes, interfaces, targetModel, interfaceMappings,
 }) {
 
   // Preset panel state
@@ -29,19 +30,31 @@ export default function ScreenEditor({
     return detectInternetZones(zones, staticRoutes, interfaces);
   }, [zones, staticRoutes, interfaces]);
 
+  // Resolve target model ports
+  const targetPorts = useMemo(() => {
+    const model = SRX_MODELS?.[targetModel];
+    if (!model) return [];
+    if (model.hasPortProfiles) {
+      // SRX4700 — use default profile
+      const profileKey = Object.keys(model.portProfiles || {})[0];
+      return profileKey ? getSrx4700Ports(profileKey) : [];
+    }
+    return model.ports || [];
+  }, [targetModel]);
+
+  // Resolve valid speed tiers for selected zones
+  const speedInfo = useMemo(() => {
+    return resolveZoneSpeedTiers(selectedZones, zones, interfaceMappings, targetPorts);
+  }, [selectedZones, zones, interfaceMappings, targetPorts]);
+
   const handleOpenPresetPanel = () => {
     // Pre-select detected zones
     const preSelected = detection.confidence === 'high' ? detection.detected : detection.allZones;
     setSelectedZones(preSelected);
 
-    // Infer speed from first detected zone's interfaces
-    if (preSelected.length > 0) {
-      const zone = (zones || []).find(z => z.name === preSelected[0]);
-      if (zone) {
-        const inferred = inferSpeedFromInterfaces(zone.interfaces, interfaces);
-        setSelectedSpeed(inferred);
-      }
-    }
+    // Resolve speed from hardware DB + interface mappings
+    const info = resolveZoneSpeedTiers(preSelected, zones, interfaceMappings, targetPorts);
+    setSelectedSpeed(info.maxTier);
 
     setShowPresetPanel(true);
   };
@@ -142,14 +155,19 @@ export default function ScreenEditor({
               </select>
             </div>
 
-            {/* Speed selector */}
-            <div style={{ minWidth: 120 }}>
-              <label style={{ fontSize: 10, textTransform: 'uppercase', color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Interface Speed</label>
+            {/* Speed selector — filtered to valid port speeds */}
+            <div style={{ minWidth: 140 }}>
+              <label style={{ fontSize: 10, textTransform: 'uppercase', color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>
+                Interface Speed
+                {speedInfo.portDetails && (
+                  <span style={{ color: 'var(--accent)', marginLeft: 6, textTransform: 'none' }}>{speedInfo.portDetails}</span>
+                )}
+              </label>
               <select className="cell-input" value={selectedSpeed}
                 onChange={e => setSelectedSpeed(e.target.value)}
                 style={{ width: '100%' }}>
-                {Object.entries(SPEED_TIERS).map(([key, t]) => (
-                  <option key={key} value={key}>{t.label}</option>
+                {speedInfo.validTiers.map(key => (
+                  <option key={key} value={key}>{SPEED_TIERS[key].label}</option>
                 ))}
               </select>
             </div>
@@ -171,9 +189,15 @@ export default function ScreenEditor({
                       <input type="checkbox"
                         checked={selectedZones.includes(z)}
                         onChange={e => {
-                          setSelectedZones(prev =>
-                            e.target.checked ? [...prev, z] : prev.filter(x => x !== z)
-                          );
+                          const next = e.target.checked
+                            ? [...selectedZones, z]
+                            : selectedZones.filter(x => x !== z);
+                          setSelectedZones(next);
+                          // Auto-update speed to match new zone selection
+                          const info = resolveZoneSpeedTiers(next, zones, interfaceMappings, targetPorts);
+                          if (!info.validTiers.includes(selectedSpeed)) {
+                            setSelectedSpeed(info.maxTier);
+                          }
                         }} />
                       <span style={detection.detected.includes(z) ? { color: 'var(--warning)', fontWeight: 600 } : undefined}>{z}</span>
                     </label>

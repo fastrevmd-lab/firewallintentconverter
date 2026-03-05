@@ -252,6 +252,9 @@ function AddressObjectTable({ items, onUpdate }) {
               </td>
             </tr>
           ))}
+          {items.length === 0 && (
+            <tr><td colSpan={5} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 20, fontSize: 12 }}>No address objects defined</td></tr>
+          )}
         </tbody>
       </table>
       <div style={{ padding: '8px 12px' }}>
@@ -338,6 +341,9 @@ function AddressGroupTable({ items, onUpdate }) {
               </td>
             </tr>
           ))}
+          {items.length === 0 && (
+            <tr><td colSpan={4} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 20, fontSize: 12 }}>No address groups defined</td></tr>
+          )}
         </tbody>
       </table>
       <div style={{ padding: '8px 12px' }}>
@@ -413,6 +419,9 @@ function ServiceObjectTable({ items, onUpdate }) {
               </td>
             </tr>
           ))}
+          {items.length === 0 && (
+            <tr><td colSpan={6} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 20, fontSize: 12 }}>No service objects defined</td></tr>
+          )}
         </tbody>
       </table>
       <div style={{ padding: '8px 12px' }}>
@@ -561,6 +570,9 @@ function SecurityProfileTable({ items, onUpdate }) {
               </td>
             </tr>
           ))}
+          {items.length === 0 && (
+            <tr><td colSpan={8} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 20, fontSize: 12 }}>No security profiles defined</td></tr>
+          )}
         </tbody>
       </table>
       <div style={{ padding: '8px 12px' }}>
@@ -1019,6 +1031,9 @@ function ScheduleTable({ items, policies, onUpdate, isSrx }) {
               </td>
             </tr>
           ))}
+          {items.length === 0 && (
+            <tr><td colSpan={7} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 20, fontSize: 12 }}>No schedules defined</td></tr>
+          )}
         </tbody>
       </table>
       <div style={{ padding: '8px 12px' }}>

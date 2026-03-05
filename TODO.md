@@ -296,6 +296,20 @@
 - [x] **Speed tier label fix** — `resolveZoneSpeedTiers()` now returns `tierLabels` map with accurate labels based on actual port speeds. 1/10/25G SFP28 ports show "25G" instead of "25G/40G". Tracks raw speed numbers from hardware DB port strings
 - [x] **Project save/load** — `sectionAcceptance` included in `.fpic.json` project save/load
 
+### Rev19 — UX Polish & Accessibility
+- [x] **Form input hover & focus states** — Added `:hover` border highlights to `.editor-inline-input`, `.cell-input`, `.chip-editor`. Added `:focus-visible` outlines on all buttons, sub-tabs, and modal close for keyboard accessibility
+- [x] **OS-aware keyboard shortcut labels** — StatusBar detects macOS and shows `Cmd+P` instead of `Ctrl+P`
+- [x] **Section accept bar polish** — Checkmark icon on accepted state, smooth transition between accept/accepted states
+- [x] **Empty state messages** — All 6 ObjectEditor sub-tab tables show "No [items] defined" when empty instead of blank table
+- [x] **NavTree group state persistence** — Collapsed/expanded nav groups saved to localStorage and restored on reload
+- [x] **SRX output filename timestamp** — Download filename includes time (`srx-config-YYYY-MM-DD_HHmmss.txt`) to avoid overwrites
+- [x] **Copy-to-clipboard feedback** — Copy button flashes green with checkmark for 2 seconds on success
+- [x] **TopBar warning label tooltips** — `ack`/`fix`/`ign` shorthand labels show full words on hover (Acknowledged, Fixed, Ignored)
+- [x] **TopBar model badge hover** — Clickable stat badges show hover background to indicate interactivity
+- [x] **StatusBar progress percentage** — Policy review progress bar shows percentage value
+- [x] **Transition consistency** — Standardized all CSS transitions to 0.15s (was mixed 0.1s/0.2s/0.15s)
+- [x] **Gemini LLM provider** — Added Google Gemini as LLM provider with Flash 3, Flash-Lite 3.1, Pro 3.1, and 2.5 stable models
+
 ### Blocked — Waiting on Vendor APIs
 - [ ] **Push to SDC / SD On-Prem / Mist** — Direct deployment to Juniper management platforms. Requires HPE Juniper public REST APIs
 

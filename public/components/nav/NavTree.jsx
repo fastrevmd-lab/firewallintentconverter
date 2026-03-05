@@ -109,16 +109,21 @@ export default function NavTree({ collapsed }) {
   const { editTab } = ui;
   const sanitizedCount = (isSanitized && sanitizationTable?.length) || 0;
 
-  // All groups expanded by default
-  const [expandedGroups, setExpandedGroups] = useState(
-    () => new Set(NAV_STRUCTURE.filter(g => g.children).map(g => g.id))
-  );
+  // Restore expanded groups from localStorage, default to all expanded
+  const [expandedGroups, setExpandedGroups] = useState(() => {
+    try {
+      const saved = localStorage.getItem('nav-expanded-groups');
+      if (saved) return new Set(JSON.parse(saved));
+    } catch { /* ignore */ }
+    return new Set(NAV_STRUCTURE.filter(g => g.children).map(g => g.id));
+  });
 
   const toggleGroup = useCallback((groupId) => {
     setExpandedGroups(prev => {
       const next = new Set(prev);
       if (next.has(groupId)) next.delete(groupId);
       else next.add(groupId);
+      try { localStorage.setItem('nav-expanded-groups', JSON.stringify([...next])); } catch { /* ignore */ }
       return next;
     });
   }, []);

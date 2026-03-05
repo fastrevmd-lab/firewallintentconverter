@@ -33,6 +33,9 @@ export default function StatusBar() {
   // Undo depth
   const undoDepth = undo.past?.length || 0;
 
+  // OS-aware modifier key
+  const modKey = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform) ? 'Cmd' : 'Ctrl';
+
   // Vendor display name
   const VENDOR_NAMES = {
     panos: 'PAN-OS',
@@ -80,6 +83,7 @@ export default function StatusBar() {
             <div className="status-progress">
               <div className="status-progress-fill" style={{ width: `${reviewPct}%` }} />
             </div>
+            <span style={{ fontSize: 10, color: 'var(--text-muted)', minWidth: 28, textAlign: 'right' }}>{reviewPct}%</span>
           </div>
           <div className="status-separator" />
         </>
@@ -120,7 +124,7 @@ export default function StatusBar() {
         title="Open command palette"
         style={{ fontFamily: 'var(--font-mono)' }}
       >
-        Ctrl+P Commands
+        {modKey}+P Commands
       </div>
     </div>
   );

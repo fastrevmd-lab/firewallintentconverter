@@ -67,7 +67,9 @@ export default function SRXOutput({ output, format, summary, isParsed, sanitizat
     const text = restoreForExport(getOutputText());
     const extension = format === 'xml' ? 'xml' : 'txt';
     const mimeType = format === 'xml' ? 'application/xml' : 'text/plain';
-    const filename = `srx-config-${new Date().toISOString().slice(0, 10)}.${extension}`;
+    const now = new Date();
+    const ts = now.toISOString().slice(0, 10) + '_' + now.toTimeString().slice(0, 8).replace(/:/g, '');
+    const filename = `srx-config-${ts}.${extension}`;
 
     const blob = new Blob([text], { type: mimeType });
     const url = URL.createObjectURL(blob);
@@ -123,8 +125,12 @@ export default function SRXOutput({ output, format, summary, isParsed, sanitizat
           </svg>
           Download .{format === 'xml' ? 'xml' : 'txt'}
         </button>
-        <button className="btn btn-secondary btn-sm" onClick={handleCopy}>
-          {copied ? 'Copied!' : 'Copy to Clipboard'}
+        <button
+          className="btn btn-secondary btn-sm"
+          onClick={handleCopy}
+          style={copied ? { borderColor: 'var(--juniper-green)', color: 'var(--juniper-green)', transition: 'all 0.15s' } : { transition: 'all 0.15s' }}
+        >
+          {copied ? '\u2713 Copied!' : 'Copy to Clipboard'}
         </button>
         <button
           className="btn btn-secondary btn-sm push-btn"

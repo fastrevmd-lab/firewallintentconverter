@@ -111,17 +111,17 @@ export default function TopBar() {
                 <span style={{ color: 'var(--accent)', margin: '0 2px' }}>&rarr;</span>
               )}
               {ackCount > 0 && (
-                <span style={{ color: 'var(--accent)', fontWeight: 600, fontSize: 11 }}>
+                <span style={{ color: 'var(--accent)', fontWeight: 600, fontSize: 11 }} title="Acknowledged">
                   {ackCount} ack
                 </span>
               )}
               {fixedCount > 0 && (
-                <span style={{ color: 'var(--success)', fontWeight: 600, fontSize: 11 }}>
+                <span style={{ color: 'var(--success)', fontWeight: 600, fontSize: 11 }} title="Fixed">
                   {fixedCount} fix
                 </span>
               )}
               {ignoredCount > 0 && (
-                <span style={{ color: 'var(--text-muted)', fontWeight: 600, fontSize: 11 }}>
+                <span style={{ color: 'var(--text-muted)', fontWeight: 600, fontSize: 11 }} title="Ignored">
                   {ignoredCount} ign
                 </span>
               )}

@@ -159,6 +159,11 @@ html, body, #root {
   color: var(--accent);
   font-weight: 600;
 }
+.stat-badge[style*="cursor: pointer"]:hover,
+.stat-badge.model-badge:hover {
+  background: var(--bg-hover);
+  border-color: var(--accent-dim);
+}
 
 /* --- Main Content Area --- */
 .main-content {
@@ -237,7 +242,7 @@ html, body, #root {
   padding: 12px;
   resize: none;
   outline: none;
-  transition: border-color 0.2s;
+  transition: border-color 0.15s;
 }
 
 .config-textarea:focus {
@@ -292,7 +297,7 @@ html, body, #root {
   padding: 20px;
   text-align: center;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all 0.15s;
   margin-bottom: 12px;
 }
 
@@ -348,6 +353,14 @@ html, body, #root {
 .btn-secondary:hover {
   background: var(--bg-hover);
   border-color: var(--accent-dim);
+}
+
+/* --- Global focus-visible for keyboard accessibility --- */
+.btn:focus-visible, .btn-primary:focus-visible, .btn-secondary:focus-visible,
+.btn-sm:focus-visible, .sub-tab-btn:focus-visible, .modal-close:focus-visible,
+.btn-icon:focus-visible, .btn-accept:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .btn-sm {
@@ -749,6 +762,7 @@ html, body, #root {
   border: none;
   cursor: pointer;
   font-weight: 600;
+  transition: all 0.15s;
 }
 .btn-accept:hover { filter: brightness(1.1); }
 
@@ -758,6 +772,7 @@ html, body, #root {
   border: 1px solid var(--juniper-green);
   cursor: default;
   font-weight: 600;
+  transition: all 0.15s;
 }
 
 /* --- Conversion Summary --- */
@@ -1109,6 +1124,10 @@ html, body, #root {
   color: var(--error);
   background: rgba(248, 113, 113, 0.1);
 }
+.modal-close:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
 
 .modal-subheader {
   display: flex;
@@ -1348,7 +1367,7 @@ html, body, #root {
   border: 1.5px solid var(--border-color);
   color: var(--text-muted);
   flex-shrink: 0;
-  transition: all 0.2s ease;
+  transition: all 0.15s ease;
 }
 
 .step-number.complete {
@@ -1591,6 +1610,9 @@ html, body, #root {
   transition: border-color 0.15s;
 }
 
+.editor-inline-input:hover {
+  border-color: var(--accent-dim);
+}
 .editor-inline-input:focus {
   border-color: var(--accent);
 }
@@ -1612,6 +1634,10 @@ html, body, #root {
   border: 1px solid var(--border-color);
   border-radius: 4px;
   min-height: 30px;
+  transition: border-color 0.15s;
+}
+.chip-editor:hover {
+  border-color: var(--accent-dim);
 }
 
 .chip {
@@ -1729,6 +1755,9 @@ html, body, #root {
   transition: border-color 0.15s;
 }
 
+.cell-input:hover {
+  border-color: var(--accent-dim);
+}
 .cell-input:focus {
   border-color: var(--accent);
 }
@@ -2976,7 +3005,7 @@ html, body, #root {
   background: var(--bg-elevated);
   border-radius: 10px;
   cursor: pointer;
-  transition: background 0.2s;
+  transition: background 0.15s;
   border: 1px solid var(--border-color);
 }
 .srx-toggle-track::after {
@@ -2988,7 +3017,7 @@ html, body, #root {
   height: 14px;
   border-radius: 50%;
   background: var(--text-muted);
-  transition: transform 0.2s, background 0.2s;
+  transition: transform 0.15s, background 0.15s;
 }
 .srx-toggle input:checked + .srx-toggle-track {
   background: var(--accent-dim);
@@ -3387,7 +3416,7 @@ html, body, #root {
   align-items: center;
   gap: 8px;
   padding: 8px 16px;
-  transition: background 0.1s;
+  transition: background 0.15s;
 }
 
 .diff-item-header:hover {

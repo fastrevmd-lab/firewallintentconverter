@@ -21,7 +21,7 @@ export default function SectionAcceptBar({ sectionId, label }) {
         onClick={() => dispatch({ type: 'ACCEPT_SECTION', sectionId })}
         disabled={isAccepted}
       >
-        {isAccepted ? `${label} Accepted` : `Accept ${label}`}
+        {isAccepted ? <><span style={{ marginRight: 4 }}>&#10003;</span>{label} Accepted</> : `Accept ${label}`}
       </button>
     </div>
   );

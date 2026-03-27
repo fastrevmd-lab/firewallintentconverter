@@ -338,6 +338,8 @@
 
 ### Planned — Additional Improvements
 - [ ] **Responsive layout for tablet/small screens** — Add breakpoints below 1280px: auto-collapse sidebar and inspector at 1024px, stack panels vertically at 768px. Desktop-first tool but should be functional on smaller viewports without horizontal scroll
+- [ ] **Config validation v2: license gating, conflict detection, best practices** — After validation MVP ships (syntax + references + zone consistency), add: SRX subscription tier feature gating (IDP/UTM rules require P1/P2 — data source: `hardware-db.js`), conflicting policy detection (overlapping rules with different actions), and best-practice recommendations (deny-all final rule, logging on permits). Depends on: validation engine v1
+- [ ] **Force-directed topology layout** — Upgrade the radial zone topology map to d3-force with dynamic node positioning based on connection density, drag-to-rearrange, and pan/zoom. Better for complex configs with 10+ zones. Depends on: zone topology map v1
 - [ ] **Hardware capacity validation** — Compare converted config against target SRX model limits (max policies, NAT rules, address objects, zones, interfaces) from hardware-db. Warn when approaching or exceeding capacity
 - [ ] **Rollback plan generation** — Auto-generate `delete` commands for every `set` command in the SRX output, producing a ready-to-paste rollback script. Include in migration report
 - [ ] **Policy dependency graph** — Visual graph showing rule dependencies: which address objects feed which policies, zone-pair groupings, NAT→policy relationships. Interactive SVG/canvas with click-to-navigate

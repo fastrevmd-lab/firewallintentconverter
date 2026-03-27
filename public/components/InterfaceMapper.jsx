@@ -168,16 +168,63 @@ export default function InterfaceMapper({
     return s;
   }, [intermediateConfig]);
 
-  // Get all PAN-OS interfaces from zones
+  // Build LAG member lookup: source_member → { lagName, lagSourceName }
+  const lagMemberMap = useMemo(() => {
+    const m = {};
+    for (const lag of (intermediateConfig?.lag_interfaces || [])) {
+      for (const member of (lag.source_members || [])) {
+        m[member] = { lagName: lag.name, lagSourceName: lag.source_name, lacpMode: lag.lacp_mode };
+      }
+    }
+    return m;
+  }, [intermediateConfig]);
+
+  // Build LAG parent lookup: source_name → lag object
+  const lagParentMap = useMemo(() => {
+    const m = {};
+    for (const lag of (intermediateConfig?.lag_interfaces || [])) {
+      m[lag.source_name] = lag;
+    }
+    return m;
+  }, [intermediateConfig]);
+
+  // Get all PAN-OS interfaces from zones, with LAG grouping
   const zoneInterfaces = useMemo(() => {
     const result = [];
     for (const zone of (intermediateConfig?.zones || [])) {
       for (const iface of (zone.interfaces || [])) {
-        result.push({ zoneName: zone.name, panosIface: iface, isL2: l2InterfaceSet.has(iface) || zone.zone_type === 'layer2' || zone.zone_type === 'virtual-wire' });
+        const isL2 = l2InterfaceSet.has(iface) || zone.zone_type === 'layer2' || zone.zone_type === 'virtual-wire';
+        const lagParent = lagParentMap[iface];
+        const lagMember = lagMemberMap[iface];
+        result.push({ zoneName: zone.name, panosIface: iface, isL2, isLagParent: !!lagParent, isLagMember: !!lagMember, lagInfo: lagParent || lagMember || null });
       }
     }
-    return result;
-  }, [intermediateConfig, l2InterfaceSet]);
+
+    // Inject LAG member rows beneath their parent if members aren't already zone interfaces
+    const expanded = [];
+    for (const entry of result) {
+      expanded.push(entry);
+      if (entry.isLagParent) {
+        const lag = lagParentMap[entry.panosIface];
+        if (lag) {
+          for (const member of (lag.source_members || [])) {
+            // Only add if this member isn't already in zone interfaces
+            if (!result.some(r => r.panosIface === member)) {
+              expanded.push({
+                zoneName: entry.zoneName,
+                panosIface: member,
+                isL2: false,
+                isLagParent: false,
+                isLagMember: true,
+                lagInfo: { lagName: lag.name, lagSourceName: lag.source_name, lacpMode: lag.lacp_mode },
+              });
+            }
+          }
+        }
+      }
+    }
+    return expanded;
+  }, [intermediateConfig, l2InterfaceSet, lagParentMap, lagMemberMap]);
 
   // Track which SRX ports are already assigned (only physical ones)
   const assignedSrxPorts = useMemo(() => {
@@ -209,12 +256,23 @@ export default function InterfaceMapper({
     return targetModelData.ports.find(p => p.name === base) || null;
   };
 
-  /** Update a single physical mapping */
+  /** Update a single physical mapping; auto-map LAG members when parent is mapped */
   const handleMappingChange = (panosIface, srxIface) => {
-    setMappings(prev => ({
-      ...prev,
-      [panosIface]: srxIface,
-    }));
+    setMappings(prev => {
+      const updated = { ...prev, [panosIface]: srxIface };
+
+      // If this is a LAG parent, auto-map its members to the ae interface
+      const lag = lagParentMap[panosIface];
+      if (lag) {
+        for (const member of (lag.source_members || [])) {
+          // Members get mapped to individual ports by the user, but clear stale mappings
+          // The parent ae mapping signals that LAG is configured
+          updated[`_lag_parent:${panosIface}`] = srxIface;
+        }
+      }
+
+      return updated;
+    });
   };
 
   /** Update tunnel type for a tunnel interface */
@@ -321,7 +379,7 @@ export default function InterfaceMapper({
                 </tr>
               </thead>
               <tbody>
-                {zoneInterfaces.map(({ zoneName, panosIface, isL2 }) => {
+                {zoneInterfaces.map(({ zoneName, panosIface, isL2, isLagParent, isLagMember, lagInfo }) => {
                   const isTunnel = isTunnelInterface(panosIface);
                   const isLoopback = isLoopbackInterface(panosIface);
                   const currentSrx = mappings[panosIface] || '';
@@ -329,15 +387,36 @@ export default function InterfaceMapper({
                   const tgtPort = currentSrx ? getTargetPortInfo(currentSrx) : null;
                   const compat = getCompatibility(srcPort, tgtPort);
 
+                  const rowClass = isTunnel ? 'tunnel-row'
+                    : isLoopback ? 'loopback-row'
+                    : isLagParent ? 'lag-parent-row'
+                    : isLagMember ? 'lag-member-row'
+                    : '';
+
                   return (
-                    <tr key={`${zoneName}-${panosIface}`} className={isTunnel ? 'tunnel-row' : isLoopback ? 'loopback-row' : ''}>
+                    <tr key={`${zoneName}-${panosIface}`} className={rowClass}>
                       <td>
-                        <span style={{ fontWeight: 600, color: 'var(--accent)' }}>{zoneName}</span>
+                        <span style={{ fontWeight: 600, color: 'var(--accent)' }}>
+                          {isLagMember ? '' : zoneName}
+                        </span>
                       </td>
                       <td>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, paddingLeft: isLagMember ? 18 : 0 }}>
+                          {isLagMember && (
+                            <span style={{ color: 'var(--text-muted)', fontSize: 12, marginRight: 2 }}>&#x2514;</span>
+                          )}
                           <code>{panosIface}</code>
-                          {srcPort && (
+                          {isLagParent && (
+                            <span className="port-badge" style={{ background: '#4c1d95', color: '#c4b5fd', fontSize: 10, padding: '1px 5px' }}>
+                              LAG
+                            </span>
+                          )}
+                          {isLagMember && (
+                            <span className="port-badge" style={{ background: '#3b0764', color: '#a78bfa', fontSize: 10, padding: '1px 5px' }}>
+                              member
+                            </span>
+                          )}
+                          {srcPort && !isLagParent && (
                             <span className={`port-badge ${speedClass(srcPort.speed)}`}>
                               {srcPort.type === 'tunnel' ? 'Tunnel' : srcPort.type === 'loopback' ? 'Loopback' : `${srcPort.speed} ${srcPort.type}`}
                             </span>
@@ -348,7 +427,12 @@ export default function InterfaceMapper({
                             </span>
                           )}
                         </div>
-                        {(() => {
+                        {isLagParent && lagInfo && (
+                          <div style={{ fontSize: 10, color: '#a78bfa', marginTop: 2 }}>
+                            LACP: {lagInfo.lacp_mode || 'static'} | {lagInfo.source_members?.length || 0} member(s) → {lagInfo.name}
+                          </div>
+                        )}
+                        {!isLagParent && (() => {
                           const pIface = parsedIfaceMap[panosIface];
                           if (!pIface) return null;
                           return (
@@ -363,7 +447,41 @@ export default function InterfaceMapper({
                         -&gt;
                       </td>
                       <td>
-                        {isTunnel ? (
+                        {isLagParent ? (
+                          /* LAG parent — show auto-generated ae name */
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <code style={{ color: '#c4b5fd', fontWeight: 600 }}>{lagInfo?.name || 'ae0'}</code>
+                            <span className="port-badge" style={{ background: '#4c1d95', color: '#c4b5fd', fontSize: 10, padding: '1px 5px' }}>
+                              Aggregate
+                            </span>
+                          </div>
+                        ) : isLagMember ? (
+                          /* LAG member — show physical port dropdown + ae membership note */
+                          <>
+                            <select
+                              className="mapping-select"
+                              value={currentSrx}
+                              onChange={(e) => handleMappingChange(panosIface, e.target.value)}
+                            >
+                              <option value="">-- Select SRX Port --</option>
+                              {targetPorts.map(port => {
+                                const isAssigned = assignedSrxPorts.has(port.name) && mappings[panosIface] !== port.name;
+                                return (
+                                  <option
+                                    key={port.name}
+                                    value={port.name}
+                                    disabled={isAssigned}
+                                  >
+                                    {port.name} ({port.speed} {port.type}){isAssigned ? ' [assigned]' : ''}
+                                  </option>
+                                );
+                              })}
+                            </select>
+                            <div style={{ fontSize: 10, color: '#a78bfa', marginTop: 2 }}>
+                              802.3ad → {lagInfo?.lagName || 'ae0'}
+                            </div>
+                          </>
+                        ) : isTunnel ? (
                           /* Tunnel interface builder */
                           <div className="tunnel-builder">
                             <select
@@ -429,25 +547,31 @@ export default function InterfaceMapper({
                         )}
                       </td>
                       <td>
+                        {isLagParent && (
+                          <span style={{ color: '#c4b5fd', fontSize: 12 }}>LAG parent</span>
+                        )}
+                        {isLagMember && (
+                          <span style={{ color: '#a78bfa', fontSize: 12 }}>LAG member</span>
+                        )}
                         {isTunnel && (
                           <span style={{ color: 'var(--info)', fontSize: 12 }}>Create tunnel</span>
                         )}
                         {isLoopback && (
                           <span style={{ color: 'var(--info)', fontSize: 12 }}>Auto-mapped</span>
                         )}
-                        {!isTunnel && !isLoopback && !currentSrx && (
+                        {!isTunnel && !isLoopback && !isLagParent && !isLagMember && !currentSrx && (
                           <span style={{ color: 'var(--warning)', fontSize: 12 }}>Unmapped</span>
                         )}
-                        {!isTunnel && !isLoopback && currentSrx && compat === 'match' && (
+                        {!isTunnel && !isLoopback && !isLagParent && !isLagMember && currentSrx && compat === 'match' && (
                           <span style={{ color: 'var(--success)', fontSize: 12 }}>Match</span>
                         )}
-                        {!isTunnel && !isLoopback && currentSrx && compat === 'upgrade' && (
+                        {!isTunnel && !isLoopback && !isLagParent && !isLagMember && currentSrx && compat === 'upgrade' && (
                           <span style={{ color: 'var(--info)', fontSize: 12 }}>Upgrade</span>
                         )}
-                        {!isTunnel && !isLoopback && currentSrx && compat === 'downgrade' && (
+                        {!isTunnel && !isLoopback && !isLagParent && !isLagMember && currentSrx && compat === 'downgrade' && (
                           <span style={{ color: 'var(--warning)', fontSize: 12 }}>Speed down</span>
                         )}
-                        {!isTunnel && !isLoopback && currentSrx && compat === 'virtual' && (
+                        {!isTunnel && !isLoopback && !isLagParent && !isLagMember && currentSrx && compat === 'virtual' && (
                           <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>Virtual</span>
                         )}
                         {isL2 && !isTunnel && !isLoopback && (

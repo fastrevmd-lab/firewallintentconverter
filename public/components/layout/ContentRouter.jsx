@@ -571,6 +571,18 @@ export default function ContentRouter({
     );
   }
 
+  if (editTab === 'dependency-graph') {
+    const PolicyDependencyGraph = React.lazy(() => import('../PolicyDependencyGraph.jsx'));
+    return (
+      <div className="center-content" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
+        {renderPlatformBar()}
+        <Suspense fallback={<LoadingTab />}>
+          <PolicyDependencyGraph intermediateConfig={activeConfig} />
+        </Suspense>
+      </div>
+    );
+  }
+
   // --- Editor components (all wrapped with platform bar) ---
   if (editTab === 'zones') {
     return (

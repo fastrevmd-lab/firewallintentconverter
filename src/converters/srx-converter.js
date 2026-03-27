@@ -96,6 +96,7 @@ export function convertToSrxSetCommands(config, interfaceMappings = {}, targetCo
     bgp_neighbors_converted: 0,
     ospf_areas_converted: 0,
     ospf_interfaces_converted: 0,
+    lag_interfaces_converted: 0,
     total_warnings: 0,
     unsupported_items: 0,
   };
@@ -120,6 +121,7 @@ export function convertToSrxSetCommands(config, interfaceMappings = {}, targetCo
   convertSystemConfig(config.system_config, commands, warnings, summary);
   convertZones(config.zones, commands, warnings, summary, interfaceMappings);
   convertInterfaceAddresses(config.interfaces, commands, warnings, summary, interfaceMappings);
+  convertLagInterfaces(config.lag_interfaces, commands, warnings, summary, interfaceMappings);
   convertAddressObjects(config.address_objects, commands, warnings, summary);
   convertAddressGroups(config.address_groups, commands, warnings, summary);
   convertServiceObjects(config.service_objects, commands, warnings, summary);
@@ -407,6 +409,87 @@ function convertInterfaceAddresses(interfaces, commands, warnings, summary, inte
   }
 
   commands.push('');
+}
+
+// ---------------------------------------------------------------------------
+// LAG / Aggregate Ethernet Converter
+// ---------------------------------------------------------------------------
+
+/**
+ * Generates SRX ae (aggregate ethernet) interface configuration from parsed
+ * LAG data in the intermediate config.
+ *
+ * Output:
+ *   set chassis aggregated-devices ethernet device-count {N}
+ *   set interfaces ae{N} aggregated-ether-options lacp {active|passive}
+ *   set interfaces ae{N} description "{description}"
+ *   set interfaces {member} ether-options 802.3ad ae{N}
+ *
+ * @param {Object[]} lagInterfaces - Array of lag_interfaces from intermediate config
+ * @param {string[]} commands - Output commands array
+ * @param {Object[]} warnings - Warnings array
+ * @param {Object} summary - Summary counters
+ * @param {Object} interfaceMappings - User-defined interface mappings
+ */
+function convertLagInterfaces(lagInterfaces, commands, warnings, summary, interfaceMappings = {}) {
+  if (!lagInterfaces || lagInterfaces.length === 0) return;
+
+  commands.push('# =============================================');
+  commands.push('# LAG / Aggregate Ethernet Interfaces');
+  commands.push('# =============================================');
+
+  // Device count must accommodate the highest ae index
+  let maxAeIndex = 0;
+  for (const lag of lagInterfaces) {
+    const aeMatch = lag.name.match(/^ae(\d+)$/);
+    if (aeMatch) {
+      const idx = parseInt(aeMatch[1], 10);
+      if (idx >= maxAeIndex) maxAeIndex = idx + 1;
+    }
+  }
+
+  commands.push(`set chassis aggregated-devices ethernet device-count ${maxAeIndex}`);
+
+  for (const lag of lagInterfaces) {
+    const aeName = lag.name;
+
+    // LACP mode
+    if (lag.lacp_mode === 'active' || lag.lacp_mode === 'passive') {
+      commands.push(`set interfaces ${aeName} aggregated-ether-options lacp ${lag.lacp_mode}`);
+    }
+
+    // LACP system priority
+    if (lag.lacp_priority) {
+      commands.push(`set interfaces ${aeName} aggregated-ether-options lacp system-priority ${lag.lacp_priority}`);
+    }
+
+    // Description
+    if (lag.description) {
+      const escaped = lag.description.replace(/"/g, '\\"');
+      commands.push(`set interfaces ${aeName} description "${escaped}"`);
+    }
+
+    // Member interface bindings
+    for (const member of lag.members) {
+      // Apply interface mapping if available
+      const mappedMember = mapInterfaceName(member, interfaceMappings);
+      const memberBase = mappedMember.split('.')[0];
+      commands.push(`set interfaces ${memberBase} ether-options 802.3ad ${aeName}`);
+    }
+
+    summary.lag_interfaces_converted++;
+
+    // Source name annotation for traceability
+    if (lag.source_name && lag.source_name !== aeName) {
+      commands.push(`# Source: ${lag.source_name} (${lag.source_members.join(', ')})`);
+    }
+  }
+
+  commands.push('');
+
+  warnings.push(createWarning('info', 'lag',
+    `Converted ${lagInterfaces.length} LAG interface(s) to SRX ae configuration`,
+    'Verify ae interface settings and member port assignments'));
 }
 
 // ---------------------------------------------------------------------------

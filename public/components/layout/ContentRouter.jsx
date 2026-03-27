@@ -384,8 +384,6 @@ export default function ContentRouter({
             <div className="panel-body">
               <div className="empty-state">
                 <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" opacity="0.3">
-                  <path d="M12 2a4 4 0 0 1 4 4c0 1.95-1.4 3.58-3.25 3.93" />
-                  <path d="M8.24 8.24A4 4 0 0 1 12 2" opacity="0" />
                   <circle cx="12" cy="12" r="10" />
                   <line x1="4.93" y1="4.93" x2="19.07" y2="19.07" />
                 </svg>

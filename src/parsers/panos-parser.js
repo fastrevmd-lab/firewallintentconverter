@@ -279,6 +279,7 @@ export function parsePanosConfig(configText) {
 
   // Parse interface configurations
   const interfaces = parseInterfaceConfig(config, allZones, warnings);
+  const lagInterfaces = parsePanosLagInterfaces(config, warnings);
   const vwirePairs = parseVwirePairs(config, warnings);
   const hasL2 = allZones.some(z => z.zone_type === 'layer2' || z.zone_type === 'virtual-wire');
 
@@ -311,6 +312,7 @@ export function parsePanosConfig(configText) {
     qos_config: qosConfig,
     flow_monitoring_config: parseNetflowConfig(config, warnings),
     interfaces,
+    lag_interfaces: lagInterfaces,
     transparent_mode: hasL2,
     bridge_domains: [],
     l2_interfaces: [],
@@ -2700,4 +2702,113 @@ function parseNetflowConfig(config, warnings) {
 
 function sanitizeName(name) {
   return name.replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 63);
+}
+
+// ---------------------------------------------------------------------------
+// LAG / Aggregate-Ethernet Interface Parser
+// ---------------------------------------------------------------------------
+
+/**
+ * Parses PAN-OS aggregate-ethernet interfaces and their member assignments.
+ *
+ * PAN-OS XML structure:
+ *   <network><interface><aggregate-ethernet><entry name="ae1">
+ *     <lacp><enable>yes</enable><mode>active</mode></lacp>
+ *   </entry></aggregate-ethernet></network>
+ *
+ * Members reference their parent via:
+ *   <ethernet><entry name="ethernet1/1"><aggregate-group>ae1</aggregate-group></entry>
+ *
+ * @param {Object} config - Parsed PAN-OS XML config root
+ * @param {Object[]} warnings - Warnings array to append to
+ * @returns {Object[]} Array of lag_interfaces in intermediate schema format
+ */
+function parsePanosLagInterfaces(config, warnings) {
+  const lagInterfaces = [];
+  const network = getNestedValue(config, 'devices.entry.network.interface');
+  if (!network) return lagInterfaces;
+
+  // Collect aggregate-ethernet entries
+  const aeContainer = network['aggregate-ethernet'];
+  if (!aeContainer) return lagInterfaces;
+
+  const aeEntries = extractEntries(aeContainer);
+  if (aeEntries.length === 0) return lagInterfaces;
+
+  // Build member map: ae name → [ethernet names]
+  const memberMap = {};
+  const ethernetContainer = network['ethernet'];
+  if (ethernetContainer) {
+    const ethEntries = extractEntries(ethernetContainer);
+    for (const eth of ethEntries) {
+      const ethName = eth['@_name'] || '';
+      const aggGroup = eth['aggregate-group'] || '';
+      if (aggGroup && ethName) {
+        if (!memberMap[aggGroup]) memberMap[aggGroup] = [];
+        memberMap[aggGroup].push(ethName);
+      }
+    }
+  }
+
+  for (const entry of aeEntries) {
+    const aeName = entry['@_name'] || '';
+    if (!aeName) continue;
+
+    // Parse LACP settings
+    const lacpNode = getNestedValue(entry, 'lacp');
+    let lacpMode = 'static';
+    if (lacpNode) {
+      const enabled = lacpNode.enable === 'yes' || lacpNode.enable === true;
+      if (enabled) {
+        lacpMode = lacpNode.mode || 'active';
+      }
+    }
+
+    const lacpPriority = lacpNode?.['system-priority']
+      ? parseInt(lacpNode['system-priority'], 10) || null
+      : null;
+
+    const sourceMembers = memberMap[aeName] || [];
+    // Normalize PAN-OS ae name to SRX ae format (ae1 → ae0, keep as-is if already ae-prefixed)
+    const srxName = aeName.startsWith('ae') ? aeName : `ae${aeName}`;
+    // Normalize member names: PAN-OS ethernet1/1 → ge-0/0/0 style
+    const srxMembers = sourceMembers.map(m => normalizePanosIfaceToSrx(m));
+
+    const description = entry.comment || '';
+
+    lagInterfaces.push({
+      name: srxName,
+      source_name: aeName,
+      members: srxMembers,
+      source_members: sourceMembers,
+      lacp_mode: lacpMode,
+      lacp_priority: lacpPriority,
+      description,
+    });
+  }
+
+  if (lagInterfaces.length > 0) {
+    warnings.push(createWarning('info', 'lag',
+      `Parsed ${lagInterfaces.length} aggregate-ethernet (LAG) interface(s) with ${lagInterfaces.reduce((s, l) => s + l.members.length, 0)} member(s)`,
+      'LAG interfaces will be converted to SRX ae interfaces'));
+  }
+
+  return lagInterfaces;
+}
+
+/**
+ * Normalizes a PAN-OS physical interface name to SRX naming convention.
+ * e.g., ethernet1/1 → ge-0/0/0, ethernet1/2 → ge-0/0/1
+ *
+ * @param {string} panosName - PAN-OS interface name
+ * @returns {string} SRX-normalized interface name
+ */
+function normalizePanosIfaceToSrx(panosName) {
+  const m = panosName.match(/^ethernet(\d+)\/(\d+)$/i);
+  if (m) {
+    const slot = parseInt(m[1], 10) - 1;
+    const port = parseInt(m[2], 10) - 1;
+    return `ge-0/${slot}/${port}`;
+  }
+  return panosName;
 }

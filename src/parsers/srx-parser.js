@@ -116,6 +116,9 @@ function parseFlatSrx(tree, setCommands, warnings) {
   // Parse interface configurations
   const interfaces = parseSrxInterfaces(tree, zones, warnings);
 
+  // Parse LAG / ae interfaces
+  const lagInterfaces = parseSrxLagInterfaces(tree, warnings);
+
   // Parse L2 / bridge-domain configuration
   const bridgeDomains = parseSrxBridgeDomains(tree, warnings);
   const l2Interfaces = detectSrxL2Interfaces(tree, interfaces, warnings);
@@ -149,6 +152,7 @@ function parseFlatSrx(tree, setCommands, warnings) {
     dhcp_config: dhcpConfig,
     qos_config: qosConfig,
     interfaces,
+    lag_interfaces: lagInterfaces,
     routing_contexts: routingContexts,
     static_routes: staticRoutes,
     bgp_config: bgpConfig,
@@ -392,6 +396,7 @@ function parseMultiContextSrx(tree, setCommands, lsNode, lsNames, tenantNode, te
     dhcp_config: allDhcpConfig,
     qos_config: allQosConfig,
     interfaces: allInterfaces,
+    lag_interfaces: parseSrxLagInterfaces(tree, []),
     routing_contexts: routingContexts,
     static_routes: allStaticRoutes,
     bgp_config: allBgpConfig,
@@ -3121,4 +3126,88 @@ function parseSrxFlowMonitoring(tree, warnings) {
   }
 
   return result;
+}
+
+
+// ---------------------------------------------------------------------------
+// LAG / ae Interface Parser
+// ---------------------------------------------------------------------------
+
+/**
+ * Parses SRX aggregate ethernet (ae) interfaces and their member assignments.
+ *
+ * SRX config patterns:
+ *   set interfaces ae0 aggregated-ether-options lacp active
+ *   set interfaces ae0 description "LAG to switch"
+ *   set interfaces ge-0/0/0 ether-options 802.3ad ae0
+ *   set chassis aggregated-devices ethernet device-count 4
+ *
+ * @param {Object} tree - Parsed set-command tree
+ * @param {Object[]} warnings - Warnings array
+ * @returns {Object[]} Array of lag_interfaces in intermediate schema format
+ */
+function parseSrxLagInterfaces(tree, warnings) {
+  const lagInterfaces = [];
+  const ifacesNode = tree?.interfaces || {};
+
+  // Collect ae interfaces
+  const aeInterfaces = {};
+  for (const [ifName, ifData] of Object.entries(ifacesNode)) {
+    if (!ifName.startsWith('ae') || typeof ifData !== 'object') continue;
+
+    const aeOpts = ifData['aggregated-ether-options'] || {};
+    const lacpNode = aeOpts.lacp || {};
+
+    let lacpMode = 'static';
+    if (lacpNode.active !== undefined) lacpMode = 'active';
+    else if (lacpNode.passive !== undefined) lacpMode = 'passive';
+
+    const lacpPriority = lacpNode['system-priority']
+      ? parseInt(extractStringValue(lacpNode['system-priority']), 10) || null
+      : null;
+
+    const description = extractStringValue(ifData?.description) || '';
+
+    aeInterfaces[ifName] = {
+      name: ifName,
+      source_name: ifName,
+      members: [],
+      source_members: [],
+      lacp_mode: lacpMode,
+      lacp_priority: lacpPriority,
+      description,
+    };
+  }
+
+  if (Object.keys(aeInterfaces).length === 0) return lagInterfaces;
+
+  // Find member assignments: ge-0/0/0 ether-options 802.3ad ae0
+  for (const [ifName, ifData] of Object.entries(ifacesNode)) {
+    if (ifName.startsWith('ae') || typeof ifData !== 'object') continue;
+
+    const etherOpts = ifData['ether-options'] || {};
+    const adRef = etherOpts['802.3ad'];
+    if (!adRef || typeof adRef !== 'object') continue;
+
+    // The ae interface name is a key under 802.3ad
+    const aeKeys = Object.keys(adRef).filter(k => k.startsWith('ae'));
+    for (const aeKey of aeKeys) {
+      if (aeInterfaces[aeKey]) {
+        aeInterfaces[aeKey].members.push(ifName);
+        aeInterfaces[aeKey].source_members.push(ifName);
+      }
+    }
+  }
+
+  for (const ae of Object.values(aeInterfaces)) {
+    lagInterfaces.push(ae);
+  }
+
+  if (lagInterfaces.length > 0) {
+    warnings.push(createWarning('info', 'lag',
+      `Parsed ${lagInterfaces.length} ae (LAG) interface(s) with ${lagInterfaces.reduce((s, l) => s + l.members.length, 0)} member(s)`,
+      'SRX ae interfaces detected for round-trip'));
+  }
+
+  return lagInterfaces;
 }

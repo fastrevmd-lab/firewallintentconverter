@@ -98,6 +98,9 @@ export function parseFortigateConfig(configText) {
     }
   }
 
+  // Parse LAG / aggregate interfaces
+  const lagInterfaces = parseFortigateLagInterfaces(tree, interfaces, warnings);
+
   // Merge zone and interface data — FortiGate can use interfaces directly as zones
   const mergedZones = mergeZonesAndInterfaces(zones, interfaces, securityPolicies);
 
@@ -239,6 +242,7 @@ export function parseFortigateConfig(configText) {
     dhcp_config: dhcpConfig,
     qos_config: qosConfig,
     interfaces: normalizedInterfaces,
+    lag_interfaces: lagInterfaces,
     transparent_mode: transparentMode,
     bridge_domains: l2BridgeDomains,
     l2_interfaces: l2Interfaces,
@@ -2561,4 +2565,78 @@ function parseFortiNetflow(tree, warnings) {
   }
 
   return result;
+}
+
+
+// ---------------------------------------------------------------------------
+// LAG / Aggregate Interface Parser
+// ---------------------------------------------------------------------------
+
+/**
+ * Parses FortiGate aggregate/redundant interfaces and their members.
+ *
+ * FortiOS config format:
+ *   config system interface
+ *       edit "agg1"
+ *           set type aggregate
+ *           set member "port1" "port2"
+ *           set lacp-mode active
+ *       next
+ *   end
+ *
+ * @param {Object} tree - Parsed FortiOS config tree
+ * @param {Object[]} interfaces - Already-parsed interface list
+ * @param {Object[]} warnings - Warnings array
+ * @returns {Object[]} Array of lag_interfaces in intermediate schema format
+ */
+function parseFortigateLagInterfaces(tree, interfaces, warnings) {
+  const lagInterfaces = [];
+  const ifaceSection = tree['system interface'] || {};
+
+  let aeIndex = 0;
+
+  for (const [name, entry] of Object.entries(ifaceSection)) {
+    if (typeof entry !== 'object') continue;
+
+    const ifType = getString(entry['type']) || '';
+    if (ifType !== 'aggregate' && ifType !== 'redundant') continue;
+
+    // Parse member interfaces
+    const memberRaw = entry['member'];
+    let sourceMembers = [];
+    if (typeof memberRaw === 'string') {
+      sourceMembers = memberRaw.split(/\s+/).map(m => m.replace(/^"|"$/g, '')).filter(Boolean);
+    } else if (Array.isArray(memberRaw)) {
+      sourceMembers = memberRaw.map(m => String(m).replace(/^"|"$/g, '')).filter(Boolean);
+    }
+
+    // Parse LACP mode
+    const lacpModeRaw = getString(entry['lacp-mode']) || '';
+    let lacpMode = 'static';
+    if (lacpModeRaw === 'active') lacpMode = 'active';
+    else if (lacpModeRaw === 'passive') lacpMode = 'passive';
+    else if (ifType === 'redundant') lacpMode = 'static';
+
+    const description = getString(entry['alias']) || '';
+    const srxName = `ae${aeIndex}`;
+    aeIndex++;
+
+    lagInterfaces.push({
+      name: srxName,
+      source_name: name,
+      members: sourceMembers.map(m => m), // FortiGate member names are preserved as-is for mapping
+      source_members: sourceMembers,
+      lacp_mode: lacpMode,
+      lacp_priority: null,
+      description,
+    });
+  }
+
+  if (lagInterfaces.length > 0) {
+    warnings.push(createWarning('info', 'lag',
+      `Parsed ${lagInterfaces.length} aggregate/redundant interface(s) with ${lagInterfaces.reduce((s, l) => s + l.members.length, 0)} member(s)`,
+      'LAG interfaces will be converted to SRX ae interfaces'));
+  }
+
+  return lagInterfaces;
 }

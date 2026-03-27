@@ -108,6 +108,9 @@ function parseJsonFormat(text, warnings) {
     speed: '',
   }));
 
+  // Parse LAG / aggregate interfaces from JSON
+  const lagInterfaces = parseSonicwallLagInterfaces(config, warnings);
+
   // Detect version if present
   const version = config.firmware_version || config.version || '';
 
@@ -132,6 +135,7 @@ function parseJsonFormat(text, warnings) {
     qos_config: [],
     flow_monitoring_config: { collectors: [], sampling: { input_rate: 1000, run_length: 0, interfaces: [] }, templates: [] },
     interfaces: normalizedInterfaces,
+    lag_interfaces: lagInterfaces,
     routing_contexts: [{ name: 'default', type: 'default', virtual_routers: [], zones: [] }],
     static_routes: staticRoutes,
     bgp_config: [],
@@ -818,6 +822,7 @@ function parseCliFormat(text, warnings) {
     dhcp_config: [],
     qos_config: [],
     interfaces: [],
+    lag_interfaces: [],
     routing_contexts: [{ name: 'default', type: 'default', virtual_routers: [], zones: [] }],
     static_routes: [],
     bgp_config: [],
@@ -1362,6 +1367,7 @@ function buildEmptyResult(warnings) {
     dhcp_config: [],
     qos_config: [],
     interfaces: [],
+    lag_interfaces: [],
     routing_contexts: [{ name: 'default', type: 'default', virtual_routers: [], zones: [] }],
     static_routes: [],
     bgp_config: [],
@@ -1402,4 +1408,93 @@ function buildEmptyResult(warnings) {
     warnings,
     parseStats: intermediateConfig.metadata,
   };
+}
+
+
+// ---------------------------------------------------------------------------
+// LAG / Aggregate Interface Parser
+// ---------------------------------------------------------------------------
+
+/**
+ * Parses SonicWall LAG/aggregate interfaces from REST API JSON config.
+ *
+ * SonicWall JSON may contain LAG configuration in interface objects:
+ *   { "interfaces": { "ipv4": [ { "name": "X0", "lag": { ... } } ] } }
+ *   or under a "lag" / "port_aggregation" / "link_aggregation" section.
+ *
+ * @param {Object} config - Parsed SonicWall JSON config
+ * @param {Object[]} warnings - Warnings array
+ * @returns {Object[]} Array of lag_interfaces in intermediate schema format
+ */
+function parseSonicwallLagInterfaces(config, warnings) {
+  const lagInterfaces = [];
+
+  // Strategy 1: Check for explicit LAG / link_aggregation section
+  const lagSection = config.lag || config.link_aggregation || config.port_aggregation || {};
+  const lagEntries = Array.isArray(lagSection) ? lagSection : (lagSection.entries || lagSection.groups || []);
+
+  let aeIndex = 0;
+  for (const entry of lagEntries) {
+    if (!entry || typeof entry !== 'object') continue;
+
+    const sourceName = entry.name || entry.id || `LAG${aeIndex}`;
+    const members = Array.isArray(entry.members || entry.interfaces)
+      ? (entry.members || entry.interfaces).map(m => typeof m === 'object' ? (m.name || m.interface || '') : String(m)).filter(Boolean)
+      : [];
+
+    const lacpMode = entry.lacp_mode || entry.mode || (entry.lacp ? 'active' : 'static');
+    const description = entry.description || entry.comment || '';
+
+    lagInterfaces.push({
+      name: `ae${aeIndex}`,
+      source_name: sourceName,
+      members,
+      source_members: [...members],
+      lacp_mode: lacpMode,
+      lacp_priority: null,
+      description,
+    });
+    aeIndex++;
+  }
+
+  // Strategy 2: Check interface objects for lag/aggregate type
+  const ifaceSections = config.interfaces || {};
+  const allIfaces = [
+    ...(Array.isArray(ifaceSections.ipv4) ? ifaceSections.ipv4 : []),
+    ...(Array.isArray(ifaceSections.ipv6) ? ifaceSections.ipv6 : []),
+    ...(Array.isArray(ifaceSections) ? ifaceSections : []),
+  ];
+
+  for (const iface of allIfaces) {
+    if (!iface || typeof iface !== 'object') continue;
+    if (!iface.lag && !iface.aggregate && iface.type !== 'lag' && iface.type !== 'aggregate') continue;
+
+    // Avoid duplicates from strategy 1
+    const sourceName = iface.name || '';
+    if (lagInterfaces.some(l => l.source_name === sourceName)) continue;
+
+    const lagData = iface.lag || iface.aggregate || {};
+    const members = Array.isArray(lagData.members || lagData.interfaces)
+      ? (lagData.members || lagData.interfaces).map(m => typeof m === 'object' ? (m.name || '') : String(m)).filter(Boolean)
+      : [];
+
+    lagInterfaces.push({
+      name: `ae${aeIndex}`,
+      source_name: sourceName,
+      members,
+      source_members: [...members],
+      lacp_mode: lagData.lacp_mode || lagData.mode || 'static',
+      lacp_priority: null,
+      description: iface.comment || iface.description || '',
+    });
+    aeIndex++;
+  }
+
+  if (lagInterfaces.length > 0) {
+    warnings.push(createWarning('info', 'lag',
+      `Parsed ${lagInterfaces.length} LAG/aggregate interface(s) with ${lagInterfaces.reduce((s, l) => s + l.members.length, 0)} member(s)`,
+      'LAG interfaces will be converted to SRX ae interfaces'));
+  }
+
+  return lagInterfaces;
 }

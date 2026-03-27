@@ -1633,6 +1633,9 @@ export function parseHuaweiConfig(configText) {
     ));
   }
 
+  // Parse LAG / Eth-Trunk interfaces
+  const lagInterfaces = parseHuaweiLagInterfaces(sections, warnings);
+
   // Summary warning
   warnings.push(createWarning(
     'info', 'parse-summary',
@@ -1663,6 +1666,7 @@ export function parseHuaweiConfig(configText) {
     qos_config: [],
     flow_monitoring_config: parseHuaweiNetstream(sections, allLines, warnings),
     interfaces: normalizedInterfaces,
+    lag_interfaces: lagInterfaces,
     routing_contexts: [{ name: 'default', type: 'default', virtual_routers: [], zones: [] }],
     static_routes: staticRoutes,
     bgp_config: bgpConfig,
@@ -1804,4 +1808,122 @@ function parseHuaweiNetstream(sections, allLines, warnings) {
   }
 
   return result;
+}
+
+
+// ---------------------------------------------------------------------------
+// LAG / Eth-Trunk Interface Parser
+// ---------------------------------------------------------------------------
+
+/**
+ * Parses Huawei USG Eth-Trunk (LAG) interfaces and their member assignments.
+ *
+ * Huawei config patterns:
+ *   interface Eth-Trunk0
+ *     description LAG to switch
+ *     mode lacp-static
+ *     trunkport GigabitEthernet0/0/1
+ *     trunkport GigabitEthernet0/0/2
+ *   #
+ *
+ * Alternative member assignment:
+ *   interface GigabitEthernet0/0/1
+ *     eth-trunk 0
+ *   #
+ *
+ * @param {Object[]} sections - Parsed config sections
+ * @param {Object[]} warnings - Warnings array
+ * @returns {Object[]} Array of lag_interfaces in intermediate schema format
+ */
+function parseHuaweiLagInterfaces(sections, warnings) {
+  const lagInterfaces = [];
+  const trunkData = {};
+  const memberFromIface = {};
+
+  for (const section of sections) {
+    if (!section.header) continue;
+    const lines = section.lines || [];
+
+    // Match Eth-Trunk interface sections
+    const trunkMatch = section.header.match(/^interface\s+Eth-Trunk(\d+)/i);
+    if (trunkMatch) {
+      const trunkNum = trunkMatch[1];
+      const trunk = {
+        source_name: `Eth-Trunk${trunkNum}`,
+        description: '',
+        members: [],
+        lacp_mode: 'static',
+      };
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed.startsWith('description ')) {
+          trunk.description = trimmed.slice(12).trim();
+        } else if (trimmed.startsWith('mode lacp-static')) {
+          trunk.lacp_mode = 'active';
+        } else if (trimmed.startsWith('mode manual')) {
+          trunk.lacp_mode = 'static';
+        } else if (trimmed.startsWith('trunkport ')) {
+          const member = trimmed.slice(10).trim().split(/\s+/)[0];
+          if (member) trunk.members.push(member);
+        }
+      }
+
+      trunkData[trunkNum] = trunk;
+      continue;
+    }
+
+    // Check for eth-trunk assignment on physical interfaces
+    const ifMatch = section.header.match(/^interface\s+(\S+)/i);
+    if (ifMatch) {
+      const ifName = ifMatch[1];
+      for (const line of lines) {
+        const etMatch = line.trim().match(/^eth-trunk\s+(\d+)/i);
+        if (etMatch) {
+          const trunkNum = etMatch[1];
+          if (!memberFromIface[trunkNum]) memberFromIface[trunkNum] = [];
+          memberFromIface[trunkNum].push(ifName);
+        }
+      }
+    }
+  }
+
+  // Merge member assignments from physical interface sections
+  for (const [trunkNum, members] of Object.entries(memberFromIface)) {
+    if (!trunkData[trunkNum]) {
+      trunkData[trunkNum] = {
+        source_name: `Eth-Trunk${trunkNum}`,
+        description: '',
+        members: [],
+        lacp_mode: 'static',
+      };
+    }
+    for (const m of members) {
+      if (!trunkData[trunkNum].members.includes(m)) {
+        trunkData[trunkNum].members.push(m);
+      }
+    }
+  }
+
+  let aeIndex = 0;
+  for (const [trunkNum, trunk] of Object.entries(trunkData)) {
+    lagInterfaces.push({
+      name: `ae${aeIndex}`,
+      source_name: trunk.source_name,
+      members: trunk.members,
+      source_members: [...trunk.members],
+      lacp_mode: trunk.lacp_mode,
+      lacp_priority: null,
+      description: trunk.description,
+    });
+    aeIndex++;
+  }
+
+  if (lagInterfaces.length > 0) {
+    warnings.push(createWarning('info', 'lag',
+      `Parsed ${lagInterfaces.length} Eth-Trunk (LAG) interface(s) with ${lagInterfaces.reduce((s, l) => s + l.members.length, 0)} member(s)`,
+      'Eth-Trunk interfaces will be converted to SRX ae interfaces'));
+  }
+
+  return lagInterfaces;
 }

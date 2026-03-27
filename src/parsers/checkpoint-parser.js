@@ -85,6 +85,9 @@ export function parseCheckPointConfig(configText) {
     speed: '',
   }));
 
+  // 10a. Parse LAG / bonding group interfaces
+  const lagInterfaces = parseCheckpointLagInterfaces(gaiaText, warnings);
+
   // 11. Build intermediate config
   const intermediateConfig = {
     zones,
@@ -107,6 +110,7 @@ export function parseCheckPointConfig(configText) {
     qos_config: [],
     flow_monitoring_config: { collectors: [], sampling: { input_rate: 1000, run_length: 0, interfaces: [] }, templates: [] },
     interfaces: normalizedInterfaces,
+    lag_interfaces: lagInterfaces,
     routing_contexts: [{ name: 'default', type: 'default', virtual_routers: [], zones: [] }],
     static_routes: gaiaRoutes,
     bgp_config: [],
@@ -1505,4 +1509,94 @@ function parseGaiaClish(gaiaText, warnings) {
   }
 
   return { interfaces, staticRoutes };
+}
+
+
+// ---------------------------------------------------------------------------
+// LAG / Bonding Group Interface Parser
+// ---------------------------------------------------------------------------
+
+/**
+ * Parses Check Point Gaia bonding group (LAG) interfaces.
+ *
+ * Gaia clish config patterns:
+ *   add bonding group 1
+ *   set bonding group 1 interface eth1
+ *   set bonding group 1 interface eth2
+ *   set bonding group 1 mode 8023AD
+ *   set bonding group 1 lacp-rate slow
+ *
+ * @param {string} gaiaText - Gaia clish configuration text
+ * @param {Object[]} warnings - Warnings array
+ * @returns {Object[]} Array of lag_interfaces in intermediate schema format
+ */
+function parseCheckpointLagInterfaces(gaiaText, warnings) {
+  const lagInterfaces = [];
+  if (!gaiaText) return lagInterfaces;
+
+  const bondGroups = {};
+  const lines = gaiaText.split('\n');
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+
+    // add bonding group {N}
+    const addMatch = trimmed.match(/^add\s+bonding\s+group\s+(\d+)/i);
+    if (addMatch) {
+      const groupNum = addMatch[1];
+      if (!bondGroups[groupNum]) {
+        bondGroups[groupNum] = { members: [], mode: 'active', description: '' };
+      }
+      continue;
+    }
+
+    // set bonding group {N} interface {member}
+    const ifMatch = trimmed.match(/^set\s+bonding\s+group\s+(\d+)\s+interface\s+(\S+)/i);
+    if (ifMatch) {
+      const groupNum = ifMatch[1];
+      const member = ifMatch[2];
+      if (!bondGroups[groupNum]) {
+        bondGroups[groupNum] = { members: [], mode: 'active', description: '' };
+      }
+      bondGroups[groupNum].members.push(member);
+      continue;
+    }
+
+    // set bonding group {N} mode {mode}
+    const modeMatch = trimmed.match(/^set\s+bonding\s+group\s+(\d+)\s+mode\s+(\S+)/i);
+    if (modeMatch) {
+      const groupNum = modeMatch[1];
+      const mode = modeMatch[2].toLowerCase();
+      if (!bondGroups[groupNum]) {
+        bondGroups[groupNum] = { members: [], mode: 'active', description: '' };
+      }
+      if (mode === '8023ad' || mode === 'lacp') {
+        bondGroups[groupNum].mode = 'active';
+      } else if (mode === 'round-robin' || mode === 'xor' || mode === 'activebackup') {
+        bondGroups[groupNum].mode = 'static';
+      }
+    }
+  }
+
+  let aeIndex = 0;
+  for (const [groupNum, group] of Object.entries(bondGroups)) {
+    lagInterfaces.push({
+      name: `ae${aeIndex}`,
+      source_name: `bond${groupNum}`,
+      members: group.members,
+      source_members: [...group.members],
+      lacp_mode: group.mode,
+      lacp_priority: null,
+      description: group.description,
+    });
+    aeIndex++;
+  }
+
+  if (lagInterfaces.length > 0) {
+    warnings.push(createWarning('info', 'lag',
+      `Parsed ${lagInterfaces.length} bonding group (LAG) interface(s) with ${lagInterfaces.reduce((s, l) => s + l.members.length, 0)} member(s)`,
+      'Bonding group interfaces will be converted to SRX ae interfaces'));
+  }
+
+  return lagInterfaces;
 }

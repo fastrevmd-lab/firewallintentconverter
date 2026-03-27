@@ -59,6 +59,9 @@ export function parseCiscoAsaConfig(configText) {
   const transparentMode = detectCiscoTransparentMode(lines);
   const { bridgeDomains, l2Interfaces } = parseBridgeGroups(blocks, interfaces, warnings);
 
+  // Parse LAG / Port-channel interfaces
+  const lagInterfaces = parseCiscoLagInterfaces(blocks, lines, warnings);
+
   // Build zones from interfaces (ASA uses nameif + security-level as zones)
   const zones = buildZones(interfaces);
 
@@ -130,6 +133,7 @@ export function parseCiscoAsaConfig(configText) {
     qos_config: qosConfig,
     flow_monitoring_config: flowMonitoringConfig,
     interfaces: normalizedInterfaces,
+    lag_interfaces: lagInterfaces,
     routing_contexts: routingContexts,
     static_routes: staticRoutes,
     bgp_config: bgpConfig,
@@ -2533,4 +2537,97 @@ function parseCiscoFlowExport(lines, warnings) {
   }
 
   return result;
+}
+
+
+// ---------------------------------------------------------------------------
+// LAG / Port-channel Interface Parser
+// ---------------------------------------------------------------------------
+
+/**
+ * Parses Cisco ASA Port-channel (LAG) interfaces and their member assignments.
+ *
+ * Port-channel interfaces are defined as:
+ *   interface Port-channel1
+ *     nameif inside-lag
+ *     ...
+ *
+ * Members are assigned via channel-group on physical interfaces:
+ *   interface GigabitEthernet0/0
+ *     channel-group 1 mode active
+ *
+ * @param {Object[]} blocks - Parsed config blocks
+ * @param {string[]} lines - Raw config lines
+ * @param {Object[]} warnings - Warnings array
+ * @returns {Object[]} Array of lag_interfaces in intermediate schema format
+ */
+function parseCiscoLagInterfaces(blocks, lines, warnings) {
+  const lagInterfaces = [];
+
+  // First pass: find Port-channel interfaces
+  const portChannels = {};
+  for (const block of blocks) {
+    const m = block.command.match(/^interface\s+Port-channel(\d+)/i);
+    if (!m) continue;
+    const pcNum = m[1];
+    let description = '';
+    for (const child of block.children) {
+      if (child.startsWith('description ')) {
+        description = child.slice(12).trim();
+      }
+    }
+    portChannels[pcNum] = {
+      source_name: `Port-channel${pcNum}`,
+      description,
+      members: [],
+      lacp_mode: 'on',
+    };
+  }
+
+  if (Object.keys(portChannels).length === 0) return lagInterfaces;
+
+  // Second pass: find channel-group memberships on physical interfaces
+  for (const block of blocks) {
+    if (!block.command.startsWith('interface ')) continue;
+    const ifaceName = block.command.slice(10).trim();
+    if (/^Port-channel/i.test(ifaceName)) continue;
+
+    for (const child of block.children) {
+      const cgMatch = child.match(/^channel-group\s+(\d+)\s+mode\s+(\S+)/i);
+      if (cgMatch) {
+        const pcNum = cgMatch[1];
+        const mode = cgMatch[2].toLowerCase();
+        if (portChannels[pcNum]) {
+          portChannels[pcNum].members.push(ifaceName);
+          // LACP mode from first member assignment wins
+          if (mode === 'active' || mode === 'passive') {
+            portChannels[pcNum].lacp_mode = mode;
+          }
+        }
+      }
+    }
+  }
+
+  // Build output
+  let aeIndex = 0;
+  for (const [pcNum, pc] of Object.entries(portChannels)) {
+    lagInterfaces.push({
+      name: `ae${aeIndex}`,
+      source_name: pc.source_name,
+      members: pc.members,
+      source_members: [...pc.members],
+      lacp_mode: pc.lacp_mode,
+      lacp_priority: null,
+      description: pc.description,
+    });
+    aeIndex++;
+  }
+
+  if (lagInterfaces.length > 0) {
+    warnings.push(createWarning('info', 'lag',
+      `Parsed ${lagInterfaces.length} Port-channel (LAG) interface(s) with ${lagInterfaces.reduce((s, l) => s + l.members.length, 0)} member(s)`,
+      'Port-channel interfaces will be converted to SRX ae interfaces'));
+  }
+
+  return lagInterfaces;
 }

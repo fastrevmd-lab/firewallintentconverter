@@ -2330,3 +2330,93 @@ export function detectHuaweiModel(intermediateConfig) {
   if (ifCount > 6) return { model: 'USG6530E', confidence: 0.4 };
   return { model: 'USG6510E', confidence: 0.3 };
 }
+
+// ---------------------------------------------------------------------------
+// Hardware Capacity Limits
+// ---------------------------------------------------------------------------
+// Approximate capacity limits per SRX model for validation warnings.
+// Sources: Juniper datasheets and technical documentation.
+// max_policies = max security policy rules
+// max_sessions = max concurrent sessions
+// max_zones = max security zones
+// max_nat_rules = max NAT rules
+// max_address_objects = max address book entries
+//
+// Values are approximate and may vary with Junos version.
+// ---------------------------------------------------------------------------
+
+/**
+ * @typedef {Object} CapacityLimits
+ * @property {number} max_policies
+ * @property {number} max_sessions
+ * @property {number} max_zones
+ * @property {number} max_nat_rules
+ * @property {number} max_address_objects
+ */
+
+/** @type {Record<string, CapacityLimits>} */
+export const SRX_CAPACITY_LIMITS = {
+  'SRX300':       { max_policies: 1024,   max_sessions: 64000,      max_zones: 16,   max_nat_rules: 1024,   max_address_objects: 2048 },
+  'SRX320':       { max_policies: 1024,   max_sessions: 64000,      max_zones: 16,   max_nat_rules: 1024,   max_address_objects: 2048 },
+  'SRX340':       { max_policies: 2048,   max_sessions: 256000,     max_zones: 32,   max_nat_rules: 2048,   max_address_objects: 4096 },
+  'SRX345':       { max_policies: 2048,   max_sessions: 256000,     max_zones: 32,   max_nat_rules: 2048,   max_address_objects: 4096 },
+  'SRX380':       { max_policies: 4096,   max_sessions: 380000,     max_zones: 64,   max_nat_rules: 4096,   max_address_objects: 8192 },
+  'SRX550M':      { max_policies: 8192,   max_sessions: 375000,     max_zones: 128,  max_nat_rules: 8192,   max_address_objects: 16384 },
+  'SRX1500':      { max_policies: 16384,  max_sessions: 2000000,    max_zones: 256,  max_nat_rules: 8192,   max_address_objects: 32768 },
+  'SRX1600':      { max_policies: 32768,  max_sessions: 4000000,    max_zones: 256,  max_nat_rules: 16384,  max_address_objects: 65536 },
+  'SRX4100':      { max_policies: 65536,  max_sessions: 10000000,   max_zones: 512,  max_nat_rules: 32768,  max_address_objects: 131072 },
+  'SRX4120':      { max_policies: 65536,  max_sessions: 10000000,   max_zones: 512,  max_nat_rules: 32768,  max_address_objects: 131072 },
+  'SRX4200':      { max_policies: 65536,  max_sessions: 10000000,   max_zones: 512,  max_nat_rules: 32768,  max_address_objects: 131072 },
+  'SRX4300':      { max_policies: 131072, max_sessions: 20000000,   max_zones: 512,  max_nat_rules: 65536,  max_address_objects: 262144 },
+  'SRX4600':      { max_policies: 131072, max_sessions: 20000000,   max_zones: 1024, max_nat_rules: 65536,  max_address_objects: 262144 },
+  'SRX4700-700':  { max_policies: 262144, max_sessions: 50000000,   max_zones: 2048, max_nat_rules: 131072, max_address_objects: 524288 },
+  'SRX4700-1400': { max_policies: 262144, max_sessions: 100000000,  max_zones: 2048, max_nat_rules: 131072, max_address_objects: 524288 },
+  'SRX5400':      { max_policies: 262144, max_sessions: 40000000,   max_zones: 2048, max_nat_rules: 131072, max_address_objects: 524288 },
+  'SRX5600':      { max_policies: 262144, max_sessions: 80000000,   max_zones: 2048, max_nat_rules: 131072, max_address_objects: 524288 },
+  'SRX5800':      { max_policies: 524288, max_sessions: 160000000,  max_zones: 2048, max_nat_rules: 262144, max_address_objects: 1048576 },
+  // vSRX models
+  'vSRX-2C':      { max_policies: 8192,   max_sessions: 512000,     max_zones: 128,  max_nat_rules: 4096,   max_address_objects: 16384 },
+  'vSRX-5C':      { max_policies: 16384,  max_sessions: 1000000,    max_zones: 256,  max_nat_rules: 8192,   max_address_objects: 32768 },
+  'vSRX-9C':      { max_policies: 32768,  max_sessions: 2000000,    max_zones: 256,  max_nat_rules: 16384,  max_address_objects: 65536 },
+  'vSRX-17C':     { max_policies: 65536,  max_sessions: 4000000,    max_zones: 512,  max_nat_rules: 32768,  max_address_objects: 131072 },
+};
+
+/**
+ * Validates config counts against hardware capacity limits.
+ * Returns an array of warning objects for items approaching (>80%) or exceeding limits.
+ * @param {string} targetModel - SRX model name
+ * @param {Object} intermediateConfig - Parsed intermediate config
+ * @returns {Array<{metric: string, current: number, limit: number, pct: number, severity: 'warning'|'error'}>}
+ */
+export function validateHardwareCapacity(targetModel, intermediateConfig) {
+  if (!targetModel || !intermediateConfig) return [];
+
+  const limits = SRX_CAPACITY_LIMITS[targetModel];
+  if (!limits) return [];
+
+  const checks = [
+    { metric: 'Security Policies', current: intermediateConfig.security_policies?.length || 0, limit: limits.max_policies },
+    { metric: 'Security Zones', current: intermediateConfig.zones?.length || 0, limit: limits.max_zones },
+    { metric: 'NAT Rules', current: intermediateConfig.nat_rules?.length || 0, limit: limits.max_nat_rules },
+    {
+      metric: 'Address Objects',
+      current: (intermediateConfig.address_objects?.length || 0) + (intermediateConfig.address_groups?.length || 0),
+      limit: limits.max_address_objects,
+    },
+  ];
+
+  const results = [];
+  for (const check of checks) {
+    if (check.limit === 0 || check.current === 0) continue;
+    const pct = Math.round((check.current / check.limit) * 100);
+    if (pct >= 80) {
+      results.push({
+        ...check,
+        pct,
+        severity: pct >= 100 ? 'error' : 'warning',
+      });
+    }
+  }
+
+  return results;
+}

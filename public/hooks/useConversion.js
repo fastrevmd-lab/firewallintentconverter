@@ -11,6 +11,7 @@ import { useConversionContext } from '../contexts/ConversionContext.jsx';
 import { useUIContext } from '../contexts/UIContext.jsx';
 import { useMergeContext } from '../contexts/MergeContext.jsx';
 import { convertConfig, mergeConvert } from '../utils/engine.js';
+import { validateHardwareCapacity } from '../data/hardware-db.js';
 
 export default function useConversion() {
   const { state: configState } = useConfigContext();
@@ -25,6 +26,7 @@ export default function useConversion() {
     interfaceMappings,
     siteName,
     siteGroup,
+    targetModel,
   } = configState;
 
   const { targetContext } = conversionState;
@@ -65,10 +67,23 @@ export default function useConversion() {
         targetContext.type !== 'none' ? targetContext : null,
       );
 
+      // Append hardware capacity warnings if target model is set
+      const convWarnings = [...(data.output.warnings || [])];
+      const capacityIssues = validateHardwareCapacity(targetModel, configForConversion);
+      for (const issue of capacityIssues) {
+        convWarnings.push({
+          type: issue.severity === 'error' ? 'unsupported' : 'warning',
+          category: 'capacity',
+          message: `${issue.metric}: ${issue.current.toLocaleString()} of ${issue.limit.toLocaleString()} (${issue.pct}%) — ${issue.severity === 'error' ? 'EXCEEDS' : 'approaching'} ${targetModel} limit`,
+          context: issue.metric,
+          subType: 'hardware_capacity',
+        });
+      }
+
       conversionDispatch({
         type: 'SET_CONVERSION_RESULT',
         output: data.output,
-        warnings: data.output.warnings || [],
+        warnings: convWarnings,
         summary: data.output.summary || null,
         format,
       });
@@ -80,7 +95,7 @@ export default function useConversion() {
     } finally {
       uiDispatch({ type: 'SET_LOADING', isLoading: false });
     }
-  }, [intermediateConfig, interfaceMappings, srxTranslatedPolicies, ruleGroups, siteName, siteGroup, targetContext, conversionDispatch, uiDispatch]);
+  }, [intermediateConfig, interfaceMappings, srxTranslatedPolicies, ruleGroups, siteName, siteGroup, targetModel, targetContext, conversionDispatch, uiDispatch]);
 
   // -----------------------------------------------------------------------
   // handleConvertClick — warn if not all rules accepted, else convert

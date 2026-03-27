@@ -238,6 +238,72 @@ export default function InterfaceMapper({
     }));
   };
 
+  // --- Template Save/Load ---
+  const [showTemplates, setShowTemplates] = useState(false);
+  const TEMPLATE_STORAGE_KEY = 'interface-mapping-templates';
+
+  /** Get all saved templates from localStorage */
+  const getSavedTemplates = () => {
+    try {
+      return JSON.parse(localStorage.getItem(TEMPLATE_STORAGE_KEY) || '{}');
+    } catch { return {}; }
+  };
+
+  /** Build a template key from source model → target model */
+  const templateKey = `${sourceModel || 'unknown'}->${targetModel || 'unknown'}`;
+
+  /** Save current mappings as a template */
+  const handleSaveTemplate = () => {
+    const templates = getSavedTemplates();
+    templates[templateKey] = {
+      mappings: { ...mappings },
+      tunnelTypes: { ...tunnelTypes },
+      tunnelUnits: { ...tunnelUnits },
+      savedAt: new Date().toISOString(),
+      sourceModel: sourceModel || 'unknown',
+      targetModel: targetModel || 'unknown',
+    };
+    try {
+      localStorage.setItem(TEMPLATE_STORAGE_KEY, JSON.stringify(templates));
+    } catch { /* ignore */ }
+    setShowTemplates(false);
+  };
+
+  /** Load a template by key */
+  const handleLoadTemplate = (key) => {
+    const templates = getSavedTemplates();
+    const tpl = templates[key];
+    if (!tpl) return;
+
+    // Apply mappings, filtering out stale port references
+    const validPortNames = targetModelData ? new Set(targetModelData.ports.map(p => p.name)) : null;
+    const cleaned = {};
+    for (const [src, dst] of Object.entries(tpl.mappings || {})) {
+      if (isTunnelInterface(src) || isLoopbackInterface(src)) {
+        cleaned[src] = dst;
+      } else if (!validPortNames || validPortNames.has(dst)) {
+        cleaned[src] = dst;
+      }
+    }
+    setMappings(cleaned);
+    if (tpl.tunnelTypes) setTunnelTypes(tpl.tunnelTypes);
+    if (tpl.tunnelUnits) setTunnelUnits(tpl.tunnelUnits);
+    setShowTemplates(false);
+  };
+
+  /** Delete a saved template */
+  const handleDeleteTemplate = (key) => {
+    const templates = getSavedTemplates();
+    delete templates[key];
+    try {
+      localStorage.setItem(TEMPLATE_STORAGE_KEY, JSON.stringify(templates));
+    } catch { /* ignore */ }
+  };
+
+  const savedTemplates = getSavedTemplates();
+  const savedTemplateKeys = Object.keys(savedTemplates);
+  const hasCurrentTemplate = !!savedTemplates[templateKey];
+
   /** Apply mappings and close */
   const handleApply = () => {
     // Ensure all tunnel mappings are built before applying
@@ -462,11 +528,70 @@ export default function InterfaceMapper({
           )}
         </div>
 
-        <div className="modal-footer">
-          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-            {Object.values(mappings).filter(v => v).length} of {zoneInterfaces.length} interfaces mapped
-          </span>
-          <div style={{ display: 'flex', gap: 8 }}>
+        <div className="modal-footer" style={{ flexDirection: 'column', gap: 8 }}>
+          {/* Template management row */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%' }}>
+            <button
+              className="btn btn-secondary btn-sm"
+              onClick={handleSaveTemplate}
+              title={`Save current mappings as template for ${templateKey}`}
+              style={{ fontSize: 11 }}
+            >
+              {hasCurrentTemplate ? 'Update' : 'Save'} Template
+            </button>
+            <button
+              className="btn btn-secondary btn-sm"
+              onClick={() => setShowTemplates(!showTemplates)}
+              disabled={savedTemplateKeys.length === 0}
+              style={{ fontSize: 11 }}
+            >
+              Load Template ({savedTemplateKeys.length})
+            </button>
+            <span style={{ flex: 1 }} />
+            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+              {Object.values(mappings).filter(v => v).length} of {zoneInterfaces.length} interfaces mapped
+            </span>
+          </div>
+
+          {/* Template list dropdown */}
+          {showTemplates && savedTemplateKeys.length > 0 && (
+            <div style={{
+              width: '100%', background: 'var(--bg-tertiary)', borderRadius: 'var(--radius)',
+              border: '1px solid var(--border-color)', padding: 8, maxHeight: 160, overflow: 'auto',
+            }}>
+              {savedTemplateKeys.map(key => {
+                const tpl = savedTemplates[key];
+                const date = tpl.savedAt ? new Date(tpl.savedAt).toLocaleDateString() : '';
+                const mappingCount = Object.keys(tpl.mappings || {}).length;
+                return (
+                  <div key={key} style={{
+                    display: 'flex', alignItems: 'center', gap: 8, padding: '4px 8px',
+                    borderRadius: 4, cursor: 'pointer', fontSize: 12,
+                    background: key === templateKey ? 'var(--accent-glow)' : 'transparent',
+                  }}>
+                    <span
+                      onClick={() => handleLoadTemplate(key)}
+                      style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 6 }}
+                    >
+                      <strong style={{ color: 'var(--accent)' }}>{key}</strong>
+                      <span style={{ color: 'var(--text-muted)' }}>
+                        {mappingCount} mappings {date && `\u00b7 ${date}`}
+                      </span>
+                    </span>
+                    <button
+                      className="btn-icon btn-icon-danger"
+                      onClick={(e) => { e.stopPropagation(); handleDeleteTemplate(key); }}
+                      title="Delete template"
+                      style={{ fontSize: 10 }}
+                    >x</button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Action buttons */}
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', width: '100%' }}>
             <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
             <button className="btn btn-primary" onClick={handleApply}>
               Apply Mappings

@@ -337,6 +337,7 @@
 - [ ] **Interface Mapper LAG support** — Display aggregate interfaces with member link expansion, map source LAG → SRX ae with member auto-mapping, visual grouping of member ports under parent ae
 
 ### Planned — Additional Improvements
+- [ ] **Responsive layout for tablet/small screens** — Add breakpoints below 1280px: auto-collapse sidebar and inspector at 1024px, stack panels vertically at 768px. Desktop-first tool but should be functional on smaller viewports without horizontal scroll
 - [ ] **Hardware capacity validation** — Compare converted config against target SRX model limits (max policies, NAT rules, address objects, zones, interfaces) from hardware-db. Warn when approaching or exceeding capacity
 - [ ] **Rollback plan generation** — Auto-generate `delete` commands for every `set` command in the SRX output, producing a ready-to-paste rollback script. Include in migration report
 - [ ] **Policy dependency graph** — Visual graph showing rule dependencies: which address objects feed which policies, zone-pair groupings, NAT→policy relationships. Interactive SVG/canvas with click-to-navigate

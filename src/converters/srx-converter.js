@@ -1950,7 +1950,8 @@ function convertOspfConfig(ospfConfig, commands, warnings, summary) {
 
       // Interfaces
       for (const iface of area.interfaces || []) {
-        const ifBase = `${prefix}protocols ospf area ${areaId} interface ${iface.name}`;
+        const mappedIfName = mapInterfaceName(iface.name, interfaceMappings);
+        const ifBase = `${prefix}protocols ospf area ${areaId} interface ${mappedIfName}`;
         commands.push(ifBase);
 
         if (iface.cost != null) {
@@ -2048,7 +2049,8 @@ function convertOspf3Config(ospf3Config, commands, warnings, summary) {
       }
 
       for (const iface of area.interfaces || []) {
-        const ifBase = `${prefix}protocols ospf3 area ${areaId} interface ${iface.name}`;
+        const mappedIf3Name = mapInterfaceName(iface.name, interfaceMappings);
+        const ifBase = `${prefix}protocols ospf3 area ${areaId} interface ${mappedIf3Name}`;
         commands.push(ifBase);
 
         if (iface.cost != null) {

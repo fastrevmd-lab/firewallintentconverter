@@ -114,7 +114,13 @@ FILTER_PATTERNS = [
     # vSRX only has FPC 0, slots 0-9 — filter out-of-range interfaces
     re.compile(r"^set\s+(?:interfaces|security\s+zones\s+\S+\s+interfaces)\s+\S*[1-9]+/"),
     # Filter unmapped vendor interface names (FortiGate wan/dmz/port, Cisco Gig/Eth, etc.)
-    re.compile(r"^set\s+(?:interfaces|security\s+zones\s+\S+\s+interfaces)\s+(?:wan|dmz|port|internal|mgmt|ha|Gig|Eth|Ten|Hundred|Vlan|Management|X\d)"),
+    re.compile(r"^set\s+(?:interfaces|security\s+zones\s+\S+\s+interfaces)\s+(?:wan|dmz|port|internal|mgmt|ha|Gig|Eth|Ten|Hundred|Vlan|Management|X\d|tunnel|guest|global)"),
+    # Filter VPN/IKE commands that reference unmapped external interfaces
+    re.compile(r"^set\s+security\s+ike\s+gateway\s+\S+\s+external-interface\s+(?:wan|dmz|Gig|Eth|tunnel|global)"),
+    # Filter routing protocols referencing unmapped interfaces
+    re.compile(r"^set\s+protocols\s+\S+\s+.*interface\s+(?:wan|dmz|Gig|Eth|tunnel|global|loopback)"),
+    # Filter any command with interface names containing vendor-specific patterns
+    re.compile(r"^set\s+.*(?:external-interface|bind-interface)\s+(?:wan|dmz|Gig|Eth|tunnel)"),
 ]
 
 

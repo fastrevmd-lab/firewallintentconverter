@@ -1,0 +1,156 @@
+[
+  {
+    "sample_key": "basic",
+    "label": "Basic (6 rules)",
+    "vendor": "panos",
+    "total_commands": 398,
+    "filtered_commands": 235,
+    "device_result": {
+      "status": "fail",
+      "commit_warnings": 0,
+      "commit_errors": 1,
+      "error_details": "{'severity': 'error', 'source': None, 'edit_path': None, 'bad_element': None, 'message': \"interface-range 'loopback.1' is not defined\"}",
+      "load_warnings": []
+    }
+  },
+  {
+    "sample_key": "medium",
+    "label": "Medium (12 rules)",
+    "vendor": "panos",
+    "total_commands": 249,
+    "filtered_commands": 178,
+    "device_result": {
+      "status": "fail",
+      "commit_warnings": 0,
+      "commit_errors": 1,
+      "error_details": "{'severity': 'error', 'source': None, 'edit_path': '[edit applications application tcp-443-8443 destination-port]', 'bad_element': 'destination-port 443,8443', 'message': 'Invalid range 443,8443'}",
+      "load_warnings": []
+    }
+  },
+  {
+    "sample_key": "complex",
+    "label": "Complex (19 rules)",
+    "vendor": "panos",
+    "total_commands": 442,
+    "filtered_commands": 337,
+    "device_result": {
+      "status": "fail",
+      "commit_warnings": 0,
+      "commit_errors": 1,
+      "error_details": "Config load error:   error: Length 30 is not within range (1..29)\n  error: Length 30 is not within range (1..29)\n  error: syntax error",
+      "load_warnings": []
+    }
+  },
+  {
+    "sample_key": "edgeCases",
+    "label": "Edge Cases (8 rules)",
+    "vendor": "panos",
+    "total_commands": 167,
+    "filtered_commands": 112,
+    "device_result": {
+      "status": "fail",
+      "commit_warnings": 0,
+      "commit_errors": 1,
+      "error_details": "{'severity': 'error', 'source': None, 'edit_path': '[edit security policies from-zone outside to-zone inside policy drop-inbound-scanners match application]', 'bad_element': 'tcp-9090', 'message': \"Entries in addition to 'any' is invalid\"}",
+      "load_warnings": []
+    }
+  },
+  {
+    "sample_key": "realworld",
+    "label": "Real-World (23 rules)",
+    "vendor": "panos",
+    "total_commands": 788,
+    "filtered_commands": 645,
+    "device_result": {
+      "status": "fail",
+      "commit_warnings": 0,
+      "commit_errors": 1,
+      "error_details": "Config load error:   error: invalid interface type in 'tunnel'\n  error: syntax error\n  error: could not resolve name: Server-Delta\n  error: could not resolve name: Server-Delta",
+      "load_warnings": []
+    }
+  },
+  {
+    "sample_key": "srx_basic",
+    "label": "SRX Basic (6 rules)",
+    "vendor": "srx",
+    "total_commands": 317,
+    "filtered_commands": 198,
+    "device_result": {
+      "status": "fail",
+      "commit_warnings": 0,
+      "commit_errors": 1,
+      "error_details": "Config load error:   error: syntax error, expecting '[' or <data>\n  error: syntax error\n  error: syntax error\n  error: fpc value outside range 0..3 for '5/0/5' in 'ge-5/0/5'\n  error: invalid value\n  error: invalid value\n  error: invalid value\n  error: invalid value\n  error: invalid value\n  error: syntax error, expecting <data>",
+      "load_warnings": []
+    }
+  },
+  {
+    "sample_key": "fortigate_basic",
+    "label": "FortiGate Basic (8 rules)",
+    "vendor": "fortigate",
+    "total_commands": 435,
+    "filtered_commands": 261,
+    "device_result": {
+      "status": "fail",
+      "commit_warnings": 0,
+      "commit_errors": 1,
+      "error_details": "Config load error:   error: invalid interface type in 'wan1'\n  error: invalid interface type in 'wan2'\n  error: invalid interface type in 'dmz'\n  error: invalid interface type in 'guest-wifi'\n  error: invalid interface type in 'guest-wifi'\n  error: interface-name: 'port1': Prefix must be lo\n  error: invalid value",
+      "load_warnings": []
+    }
+  },
+  {
+    "sample_key": "cisco_basic",
+    "label": "Basic (8 rules)",
+    "vendor": "cisco_asa",
+    "total_commands": 291,
+    "filtered_commands": 173,
+    "device_result": {
+      "status": "fail",
+      "commit_warnings": 0,
+      "commit_errors": 1,
+      "error_details": "Config load error:   error: syntax error\n  error: gateway: '203.0.113.50': Must be a string beginning with a number or letter and consisting of letters, numbers, dashes and underscores.\n  error: invalid value\n  error: invalid interface type in 'global'",
+      "load_warnings": []
+    }
+  },
+  {
+    "sample_key": "checkpoint_basic",
+    "label": "Basic (6 rules)",
+    "vendor": "checkpoint",
+    "total_commands": 137,
+    "filtered_commands": 75,
+    "device_result": {
+      "status": "fail",
+      "commit_warnings": 0,
+      "commit_errors": 1,
+      "error_details": "Config load error:   error: could not resolve name: CP-GW-01",
+      "load_warnings": []
+    }
+  },
+  {
+    "sample_key": "sonicwall_basic",
+    "label": "Basic (6 rules)",
+    "vendor": "sonicwall",
+    "total_commands": 156,
+    "filtered_commands": 94,
+    "device_result": {
+      "status": "fail",
+      "commit_warnings": 0,
+      "commit_errors": 1,
+      "error_details": "Config load error:   error: could not resolve name: Web-Server",
+      "load_warnings": []
+    }
+  },
+  {
+    "sample_key": "huawei_basic",
+    "label": "Basic (6 rules)",
+    "vendor": "huawei_usg",
+    "total_commands": 189,
+    "filtered_commands": 106,
+    "device_result": {
+      "status": "fail",
+      "commit_warnings": 0,
+      "commit_errors": 1,
+      "error_details": "{'severity': 'error', 'source': None, 'edit_path': '[edit security policies from-zone trust to-zone untrust policy Allow-LAN-Web match application]', 'bad_element': 'service-set', 'message': 'application or application-set must be defined'}",
+      "load_warnings": []
+    }
+  }
+]

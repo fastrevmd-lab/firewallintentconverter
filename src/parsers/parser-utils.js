@@ -593,8 +593,8 @@ export function mapProfileToSrx(profileType, profileName) {
   const safeName = sanitizeJunosName(profileName);
   const mapping = {
     // PAN-OS originated
-    'virus':              { srxFeature: 'utm', srxType: 'anti-virus',        srxProfile: `junos-av-${safeName}` },
-    'wildfire-analysis':  { srxFeature: 'utm', srxType: 'anti-virus',        srxProfile: `junos-av-${safeName}` },
+    'virus':              { srxFeature: 'utm', srxType: 'anti-virus',        srxProfile: `custom-av-${safeName}` },
+    'wildfire-analysis':  { srxFeature: 'utm', srxType: 'anti-virus',        srxProfile: `custom-av-${safeName}` },
     'url-filtering':      { srxFeature: 'utm', srxType: 'web-filtering',     srxProfile: `junos-wf-${safeName}` },
     'file-blocking':      { srxFeature: 'unsupported', srxType: 'content-filtering', srxProfile: `junos-cf-${safeName}` },
     'spyware':            { srxFeature: 'idp', srxType: 'idp-policy',        srxProfile: `idp-${safeName}` },

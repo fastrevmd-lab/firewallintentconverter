@@ -157,7 +157,7 @@ export function convertToSrxSetCommands(config, interfaceMappings = {}, targetCo
   convertDhcpConfig(config.dhcp_config, commands, warnings, summary);
   convertQosConfig(config.qos_config, commands, warnings, summary);
   convertL2Config(config, commands, warnings, summary, interfaceMappings);
-  convertPbfConfig(config.pbf_rules, commands, warnings, summary, interfaceMappings);
+  convertPbfConfig(config.pbf_rules, commands, warnings, summary, interfaceMappings, config.address_objects);
   convertSslProxyConfig(config, commands, warnings, summary);
   convertFlowMonitoringConfig(config.flow_monitoring_config, commands, warnings, summary, interfaceMappings);
   convertUserIdentification(config.security_policies, commands, warnings);
@@ -868,12 +868,12 @@ function convertUtmPolicies(policies, warnings, profileDefs = {}) {
           utmCommands.push(`set security utm feature-profile anti-virus profile ${mapped.srxProfile} scan-options content-size-limit ${sizeLimit}`);
           utmCommands.push(`set security utm feature-profile anti-virus profile ${mapped.srxProfile} scan-options timeout 180`);
         } else if (mapped.srxType === 'web-filtering') {
-          utmCommands.push(`set security utm feature-profile web-filtering profile ${mapped.srxProfile} type juniper-enhanced`);
+          utmCommands.push(`set security utm feature-profile web-filtering juniper-enhanced profile ${mapped.srxProfile}`);
           if (profileDef && profileDef.blockCategories && profileDef.blockCategories.length > 0) {
             utmCommands.push(`# Block categories from source: ${profileDef.blockCategories.join(', ')}`);
-            utmCommands.push(`set security utm feature-profile web-filtering profile ${mapped.srxProfile} default block`);
+            utmCommands.push(`set security utm feature-profile web-filtering juniper-enhanced profile ${mapped.srxProfile} default block`);
           } else {
-            utmCommands.push(`set security utm feature-profile web-filtering profile ${mapped.srxProfile} default log-and-permit`);
+            utmCommands.push(`set security utm feature-profile web-filtering juniper-enhanced profile ${mapped.srxProfile} default log-and-permit`);
           }
         } else if (mapped.srxType === 'content-filtering') {
           if (profileDef && profileDef.blockedExtensions && profileDef.blockedExtensions.length > 0) {
@@ -903,8 +903,7 @@ function convertUtmPolicies(policies, warnings, profileDefs = {}) {
       // Attach to utm-policy
       if (mapped.srxType === 'anti-virus') {
         utmCommands.push(`set security utm utm-policy ${pName} anti-virus http-profile ${mapped.srxProfile}`);
-        utmCommands.push(`set security utm utm-policy ${pName} anti-virus ftp-upload-profile ${mapped.srxProfile}`);
-        utmCommands.push(`set security utm utm-policy ${pName} anti-virus ftp-download-profile ${mapped.srxProfile}`);
+        utmCommands.push(`set security utm utm-policy ${pName} anti-virus smtp-profile ${mapped.srxProfile}`);
       } else if (mapped.srxType === 'web-filtering') {
         utmCommands.push(`set security utm utm-policy ${pName} web-filtering http-profile ${mapped.srxProfile}`);
       } else if (mapped.srxType === 'content-filtering') {
@@ -2319,6 +2318,26 @@ function convertScreenConfig(screens, commands, warnings, summary) {
 /**
  * Converts VPN/IPsec tunnel configuration to SRX set commands.
  */
+/**
+ * Maps common authentication algorithm names to valid Junos IKE/IPsec identifiers.
+ * @param {string} algo - The source authentication algorithm name
+ * @returns {string} Valid Junos authentication-algorithm value
+ */
+function mapAuthAlgorithm(algo) {
+  const map = {
+    'sha256': 'hmac-sha-256-128',
+    'sha-256': 'hmac-sha-256-128',
+    'sha1': 'hmac-sha1-96',
+    'sha-1': 'hmac-sha1-96',
+    'sha384': 'hmac-sha-384',
+    'sha-384': 'hmac-sha-384',
+    'sha512': 'hmac-sha-512',
+    'sha-512': 'hmac-sha-512',
+    'md5': 'hmac-md5-96',
+  };
+  return map[algo.toLowerCase()] || algo;
+}
+
 function convertVpnTunnels(tunnels, commands, warnings, summary) {
   if (!tunnels || tunnels.length === 0) return;
 
@@ -2340,7 +2359,7 @@ function convertVpnTunnels(tunnels, commands, warnings, summary) {
       commands.push(`set security ike proposal ${propName} authentication-method ${vpn.ike_proposal.auth_method || 'pre-shared-keys'}`);
       commands.push(`set security ike proposal ${propName} dh-group ${vpn.ike_proposal.dh_group || 'group14'}`);
       commands.push(`set security ike proposal ${propName} encryption-algorithm ${vpn.ike_proposal.encryption || 'aes-256-cbc'}`);
-      commands.push(`set security ike proposal ${propName} authentication-algorithm ${vpn.ike_proposal.authentication || 'sha-256'}`);
+      commands.push(`set security ike proposal ${propName} authentication-algorithm ${mapAuthAlgorithm(vpn.ike_proposal.authentication || 'sha-256')}`);
       if (vpn.ike_proposal.lifetime) {
         commands.push(`set security ike proposal ${propName} lifetime-seconds ${vpn.ike_proposal.lifetime}`);
       }
@@ -2378,7 +2397,7 @@ function convertVpnTunnels(tunnels, commands, warnings, summary) {
       emittedProposals.add('ipsec-' + vpn.ipsec_proposal.name);
       commands.push(`set security ipsec proposal ${ipropName} protocol ${vpn.ipsec_proposal.protocol || 'esp'}`);
       commands.push(`set security ipsec proposal ${ipropName} encryption-algorithm ${vpn.ipsec_proposal.encryption || 'aes-256-cbc'}`);
-      commands.push(`set security ipsec proposal ${ipropName} authentication-algorithm ${vpn.ipsec_proposal.authentication || 'hmac-sha-256-128'}`);
+      commands.push(`set security ipsec proposal ${ipropName} authentication-algorithm ${mapAuthAlgorithm(vpn.ipsec_proposal.authentication || 'hmac-sha-256-128')}`);
       if (vpn.ipsec_proposal.lifetime) {
         commands.push(`set security ipsec proposal ${ipropName} lifetime-seconds ${vpn.ipsec_proposal.lifetime}`);
       }
@@ -2772,8 +2791,17 @@ function convertL2Config(config, commands, warnings, summary, interfaceMappings 
  * Discard rules → firewall filter term with "then discard"
  * No-PBF rules → firewall filter term with "then accept" (default routing)
  */
-function convertPbfConfig(pbfRules, commands, warnings, summary, interfaceMappings = {}) {
+function convertPbfConfig(pbfRules, commands, warnings, summary, interfaceMappings = {}, addressObjects = []) {
   if (!pbfRules || pbfRules.length === 0) return;
+
+  // Build lookup map from address object names to their IP values
+  const addrLookup = new Map();
+  for (const obj of (addressObjects || [])) {
+    if (obj.name && obj.value && (obj.type === 'host' || obj.type === 'subnet')) {
+      addrLookup.set(obj.name, obj.value);
+      addrLookup.set(sanitizeJunosName(obj.name), obj.value);
+    }
+  }
 
   commands.push('# =============================================');
   commands.push('# Policy-Based Forwarding (Filter-Based Forwarding)');
@@ -2810,13 +2838,33 @@ function convertPbfConfig(pbfRules, commands, warnings, summary, interfaceMappin
     const termName = sanitizeJunosName(rule.name);
     const termBase = `set firewall filter ${filterName} term ${termName}`;
 
-    // Match: source addresses
+    // Match: source addresses (resolve named objects to IP values for firewall filters)
     for (const src of (rule.src_addresses || []).filter(a => a !== 'any')) {
-      commands.push(`${termBase} from source-address ${src}`);
+      const isIp = /^[\d.:\/]+$/.test(src);
+      if (isIp) {
+        commands.push(`${termBase} from source-address ${src}`);
+      } else if (addrLookup.has(src)) {
+        commands.push(`${termBase} from source-address ${addrLookup.get(src)}`);
+      } else {
+        commands.push(`# WARNING: skipping source-address "${src}" — named object not resolvable to IP for firewall filter`);
+        warnings.push(createWarning('warning', `pbf/${rule.name}`,
+          `PBF filter term "${rule.name}" references named address "${src}" which could not be resolved to an IP`,
+          'Firewall filters require raw IP addresses — add the address manually'));
+      }
     }
-    // Match: destination addresses
+    // Match: destination addresses (resolve named objects to IP values for firewall filters)
     for (const dst of (rule.dst_addresses || []).filter(a => a !== 'any')) {
-      commands.push(`${termBase} from destination-address ${dst}`);
+      const isIp = /^[\d.:\/]+$/.test(dst);
+      if (isIp) {
+        commands.push(`${termBase} from destination-address ${dst}`);
+      } else if (addrLookup.has(dst)) {
+        commands.push(`${termBase} from destination-address ${addrLookup.get(dst)}`);
+      } else {
+        commands.push(`# WARNING: skipping destination-address "${dst}" — named object not resolvable to IP for firewall filter`);
+        warnings.push(createWarning('warning', `pbf/${rule.name}`,
+          `PBF filter term "${rule.name}" references named address "${dst}" which could not be resolved to an IP`,
+          'Firewall filters require raw IP addresses — add the address manually'));
+      }
     }
     // Match: applications/services (map to protocol/port if possible)
     for (const svc of (rule.services || []).filter(s => s !== 'any' && s !== 'application-default')) {

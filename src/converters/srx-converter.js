@@ -1397,7 +1397,11 @@ function convertSecurityPolicies(policies, commands, warnings, summary, profileM
         }
 
         // Match criteria: applications
-        const apps = resolveApplications(policy.applications, policy.services, warnings, policyName, appGroups, sourceVendor);
+        let apps = resolveApplications(policy.applications, policy.services, warnings, policyName, appGroups, sourceVendor);
+        // Junos: if 'any' is present, it must be the only application entry
+        if (apps.includes('any')) {
+          apps = ['any'];
+        }
         for (const app of apps) {
           commands.push(`set ${policyPath} match application ${app}`);
         }

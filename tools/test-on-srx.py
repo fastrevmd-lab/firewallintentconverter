@@ -121,6 +121,16 @@ FILTER_PATTERNS = [
     re.compile(r"^set\s+protocols\s+\S+\s+.*interface\s+(?:wan|dmz|Gig|Eth|tunnel|global|loopback)"),
     # Filter any command with interface names containing vendor-specific patterns
     re.compile(r"^set\s+.*(?:external-interface|bind-interface)\s+(?:wan|dmz|Gig|Eth|tunnel)"),
+    # vSRX limitations: no CoS real-time, no VxLAN/switch-options, no bridge-domains
+    re.compile(r"^set\s+class-of-service\b"),
+    re.compile(r"^set\s+switch-options\b"),
+    re.compile(r"^set\s+vlans\b"),
+    re.compile(r"^set\s+bridge-domains\b"),
+    # Skip VPN config entirely (requires matching interfaces)
+    re.compile(r"^set\s+security\s+ike\b"),
+    re.compile(r"^set\s+security\s+ipsec\b"),
+    # Skip DHCP (access pools reference vendor interfaces)
+    re.compile(r"^set\s+access\b"),
 ]
 
 

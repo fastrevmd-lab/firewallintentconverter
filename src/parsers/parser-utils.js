@@ -219,6 +219,28 @@ export const JUNOS_PREDEFINED_APPS = new Set([
  * @returns {string|null} - Junos application name or null
  */
 const APP_MAP = {
+  // ── Uppercase vendor names (Huawei, FortiGate, etc.) ─────
+  'HTTP': 'junos-http',
+  'HTTPS': 'junos-https',
+  'DNS': 'junos-dns-udp',
+  'SSH': 'junos-ssh',
+  'FTP': 'junos-ftp',
+  'TELNET': 'junos-telnet',
+  'SMTP': 'junos-smtp',
+  'NTP': 'junos-ntp',
+  'SNMP': 'junos-snmp',
+  'ICMP': 'junos-icmp-all',
+  'PING': 'junos-ping',
+  'TRACEROUTE': 'junos-traceroute',
+  'RDP': 'junos-rdp',
+  'POP3': 'junos-pop3',
+  'IMAP': 'junos-imap',
+  'TFTP': 'junos-tftp',
+  'SYSLOG': 'junos-syslog',
+  'DHCP': 'junos-dhcp-client',
+  'LDAP': 'junos-ldap',
+  'BGP': 'junos-bgp',
+  'SIP': 'junos-sip',
   // ── PAN-OS Application Names ──────────────────────────────
   // Web
   'web-browsing': 'junos-http',

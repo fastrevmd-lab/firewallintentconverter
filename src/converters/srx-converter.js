@@ -207,6 +207,13 @@ export function convertToSrxSetCommands(config, interfaceMappings = {}, targetCo
   }
 
   commands.push(...policyCommands);
+
+  // Fix 1: When global policies exist, Junos requires a default-policy statement
+  const hasGlobalPolicy = policyCommands.some(cmd => cmd.includes('security policies global policy'));
+  if (hasGlobalPolicy) {
+    commands.push('set security policies default-policy permit-all');
+  }
+
   convertNatRules(config.nat_rules, commands, warnings, summary, config.address_objects);
   convertStaticRoutes(config.static_routes, commands, warnings, summary);
   convertBgpConfig(config.bgp_config, commands, warnings, summary);
@@ -225,6 +232,13 @@ export function convertToSrxSetCommands(config, interfaceMappings = {}, targetCo
   convertSslProxyConfig(config, commands, warnings, summary);
   convertFlowMonitoringConfig(config.flow_monitoring_config, commands, warnings, summary, interfaceMappings);
   convertUserIdentification(config.security_policies, commands, warnings);
+
+  // Fix 4: Post-process all commands to replace remaining vendor interface names
+  sanitizeAllInterfaceNames(commands, interfaceMappings);
+
+  // Fix 7: Final pass — auto-generate definitions for any application referenced
+  // in policy match but never defined as a custom or predefined application
+  autoGenerateMissingAppDefinitions(commands);
 
   // Unsupported feature notices
   commands.push('# =============================================');
@@ -422,6 +436,41 @@ function mapInterfaceName(panosIface, interfaceMappings = {}) {
     return `xe-0/${slot}/${port}.${u}`;
   }
 
+  // Cisco ASA/IOS: GigabitEthernet1/1 (2-segment) → ge-0/0/0.0
+  const ciscoGe2 = panosIface.match(/^GigabitEthernet(\d+)\/(\d+)(\.(\d+))?$/i);
+  if (ciscoGe2) {
+    const slot = parseInt(ciscoGe2[1]);
+    const port = parseInt(ciscoGe2[2]);
+    const u = ciscoGe2[4] || '0';
+    return `ge-0/${slot}/${port}.${u}`;
+  }
+
+  // Cisco: TenGigabitEthernet1/1 → xe-0/1/1.0
+  const ciscoXe = panosIface.match(/^TenGigabitEthernet(\d+)\/(\d+)(\.(\d+))?$/i);
+  if (ciscoXe) {
+    const slot = parseInt(ciscoXe[1]);
+    const port = parseInt(ciscoXe[2]);
+    const u = ciscoXe[4] || '0';
+    return `xe-0/${slot}/${port}.${u}`;
+  }
+
+  // FortiGate named interfaces: internal/dmz/wan → ge-0/0/N.0
+  const fortiNamed = panosIface.match(/^(internal|dmz|wan|lan)(\d*)(\.(\d+))?$/i);
+  if (fortiNamed) {
+    const nameMap = { internal: 1, dmz: 2, wan: 3, lan: 4 };
+    const basePort = nameMap[fortiNamed[1].toLowerCase()] || 0;
+    const idx = fortiNamed[2] ? parseInt(fortiNamed[2]) : 0;
+    const u = fortiNamed[4] || '0';
+    return `ge-0/0/${basePort + idx}.${u}`;
+  }
+
+  // Cisco: Tunnel interfaces → st0.N
+  const tunnelMatch = panosIface.match(/^tunnel(\d+)(\.(\d+))?$/i);
+  if (tunnelMatch) {
+    const u = tunnelMatch[1] || '0';
+    return `st0.${u}`;
+  }
+
   // Bug 1 fix: Map vendor "loopback" interfaces to SRX lo0 naming.
   // Vendor configs use "loopback.X" but SRX expects "lo0.X". Without this,
   // the zone references an undefined interface-range 'loopback.X'.
@@ -433,6 +482,134 @@ function mapInterfaceName(panosIface, interfaceMappings = {}) {
 
   // If it doesn't match any known format, return as-is
   return panosIface;
+}
+
+/**
+ * Checks if an interface name is a valid SRX interface (not a leftover vendor name).
+ * Valid SRX interfaces: ge-/xe-/et-/lo0/st0/irb/ae/fxp/em/reth/vlan/me
+ */
+function isValidSrxInterface(ifName) {
+  if (!ifName) return false;
+  return /^(ge-|xe-|et-|lo0|st0|irb|ae\d|fxp|em\d|reth|vlan|me\d)/i.test(ifName);
+}
+
+/**
+ * Post-processes all commands to replace remaining vendor interface names
+ * that leaked through sections not using mapInterfaceName() (syslog, routing, NAT, etc.).
+ * Modifies the commands array in-place.
+ */
+function sanitizeAllInterfaceNames(commands, interfaceMappings = {}) {
+  // Patterns for vendor interfaces that should never appear in SRX config
+  const vendorPatterns = [
+    // Cisco 3-segment: GigabitEthernet0/0/1
+    { re: /GigabitEthernet(\d+)\/(\d+)\/(\d+)(\.(\d+))?/gi, replace: (m, s1, s2, s3, _, u) => `ge-0/${s2}/${s3}.${u || '0'}` },
+    // Cisco 2-segment: GigabitEthernet1/1
+    { re: /GigabitEthernet(\d+)\/(\d+)(\.(\d+))?/gi, replace: (m, s1, s2, _, u) => `ge-0/${s1}/${s2}.${u || '0'}` },
+    // Cisco TenGig
+    { re: /TenGigabitEthernet(\d+)\/(\d+)(\.(\d+))?/gi, replace: (m, s1, s2, _, u) => `xe-0/${s1}/${s2}.${u || '0'}` },
+    // Huawei XGigabitEthernet
+    { re: /XGigabitEthernet(\d+)\/(\d+)\/(\d+)(\.(\d+))?/gi, replace: (m, s1, s2, s3, _, u) => `xe-0/${s2}/${s3}.${u || '0'}` },
+    // FortiGate: port1 → ge-0/0/0 (only match standalone "portN" not inside other words)
+    { re: /\bport(\d+)(\.(\d+))?\b/gi, replace: (m, p, _, u) => `ge-0/0/${parseInt(p) - 1}.${u || '0'}` },
+    // PAN-OS: ethernet1/2
+    { re: /\bethernet(\d+)\/(\d+)(\.(\d+))?\b/gi, replace: (m, s, p, _, u) => `ge-0/${parseInt(s) - 1}/${parseInt(p) - 1}.${u || '0'}` },
+    // Check Point: eth0 (only when followed by typical interface context)
+    { re: /\beth(\d+)(\.(\d+))?\b/gi, replace: (m, p, _, u) => `ge-0/0/${p}.${u || '0'}` },
+    // Tunnel → st0
+    { re: /\btunnel(\d+)(\.(\d+))?\b/gi, replace: (m, n) => `st0.${n}` },
+    // Loopback
+    { re: /\bloopback(\d*)(\.(\d+))?\b/gi, replace: (m, n, _, u) => `lo0.${u || n || '0'}` },
+  ];
+
+  for (let i = 0; i < commands.length; i++) {
+    const cmd = commands[i];
+    if (!cmd.startsWith('set ') && !cmd.startsWith('deactivate ')) continue;
+
+    let updated = cmd;
+    for (const { re, replace } of vendorPatterns) {
+      // Reset lastIndex for global regexes
+      re.lastIndex = 0;
+      updated = updated.replace(re, replace);
+    }
+    // Also apply user-defined mappings
+    for (const [vendor, srx] of Object.entries(interfaceMappings)) {
+      if (updated.includes(vendor)) {
+        const srxName = srx.includes('.') ? srx : `${srx}.0`;
+        updated = updated.split(vendor).join(srxName);
+      }
+    }
+    if (updated !== cmd) {
+      commands[i] = updated;
+    }
+  }
+}
+
+/**
+ * Final pass: scan all `match application` commands, collect app names,
+ * check against `set applications application` commands, and auto-generate
+ * definitions for any missing ones.
+ */
+function autoGenerateMissingAppDefinitions(commands) {
+  const referencedApps = new Set();
+  const definedApps = new Set();
+
+  for (const cmd of commands) {
+    const matchApp = cmd.match(/^set .* match application (\S+)/);
+    if (matchApp && matchApp[1] !== 'any') {
+      referencedApps.add(matchApp[1]);
+    }
+    const defApp = cmd.match(/^set applications application (\S+)/);
+    if (defApp) {
+      definedApps.add(defApp[1]);
+    }
+    const defSet = cmd.match(/^set applications application-set (\S+)/);
+    if (defSet) {
+      definedApps.add(defSet[1]);
+    }
+  }
+
+  // Check against predefined Junos apps
+  const missing = [];
+  for (const app of referencedApps) {
+    if (definedApps.has(app)) continue;
+    if (JUNOS_PREDEFINED_APPS.has(app)) continue;
+    missing.push(app);
+  }
+
+  if (missing.length === 0) return;
+
+  // Find insertion point: before the first policy command (so definitions come first)
+  // Or append at end before unsupported notices
+  const insertionCmds = [];
+  insertionCmds.push('# =============================================');
+  insertionCmds.push('# Auto-generated Missing Application Definitions');
+  insertionCmds.push('# (referenced in policies but not yet defined)');
+  insertionCmds.push('# =============================================');
+
+  for (const appName of missing) {
+    // Try to infer protocol/port from name
+    const protoPortMatch = appName.match(/^(tcp|udp|sctp)-(\d[\d-]*)$/i);
+    if (protoPortMatch) {
+      const proto = protoPortMatch[1].toLowerCase();
+      const port = protoPortMatch[2];
+      insertionCmds.push(`set applications application ${appName} protocol ${proto}`);
+      insertionCmds.push(`set applications application ${appName} destination-port ${port}`);
+    } else {
+      insertionCmds.push(`# WARNING: "${appName}" — could not infer port, set to placeholder`);
+      insertionCmds.push(`set applications application ${appName} protocol tcp`);
+      insertionCmds.push(`set applications application ${appName} destination-port 1`);
+      insertionCmds.push(`set applications application ${appName} description "Placeholder - REQUIRES MANUAL CONFIGURATION"`);
+    }
+  }
+  insertionCmds.push('');
+
+  // Insert before the first policy command so definitions precede references
+  const firstPolicyIdx = commands.findIndex(cmd => cmd.includes('security policies'));
+  if (firstPolicyIdx >= 0) {
+    commands.splice(firstPolicyIdx, 0, ...insertionCmds);
+  } else {
+    commands.push(...insertionCmds);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -615,6 +792,7 @@ function convertAddressObjects(objects, commands, warnings, summary) {
     switch (obj.type) {
       case 'host':
       case 'subnet':
+      case 'network':
         if (!addrValue) {
           commands.push(`# WARNING: Address "${obj.name}" has no IP value — skipping`);
           warnings.push(createWarning('warning', `address/${name}`,
@@ -1788,7 +1966,13 @@ function convertNatRules(natRules, commands, warnings, summary, addressObjects) 
           } else if (rule.translated_src.type === 'static') {
             commands.push(`set ${rulePath} then source-nat pool ${sanitizeJunosName(rule.name)}-static`);
             commands.push(`set security nat source pool ${sanitizeJunosName(rule.name)}-static address ${rule.translated_src.address}`);
+          } else {
+            // Unknown translation type — default to interface NAT (e.g., Check Point hide NAT)
+            commands.push(`set ${rulePath} then source-nat interface`);
           }
+        } else {
+          // No translated_src specified — default to interface NAT (hide/masquerade)
+          commands.push(`set ${rulePath} then source-nat interface`);
         }
 
         // U-turn/hairpin NAT: add persistent-nat for return traffic
@@ -2071,11 +2255,10 @@ function convertOspfConfig(ospfConfig, commands, warnings, summary, interfaceMap
     for (const area of ospf.areas || []) {
       const areaId = area.area_id;
 
-      // Fix 7: Check if area has any mapped interfaces — skip if empty
+      // Fix 7: Check if area has any valid SRX interfaces after mapping — skip if empty
       const mappedInterfaces = (area.interfaces || []).filter(iface => {
         const mapped = mapInterfaceName(iface.name, interfaceMappings);
-        // Skip if interface mapping resulted in an unmappable vendor-specific name
-        return mapped && mapped !== iface.name || Object.keys(interfaceMappings).length === 0;
+        return isValidSrxInterface(mapped);
       });
       const hasNetworks = (area.networks || []).length > 0;
       if (mappedInterfaces.length === 0 && !hasNetworks) {
@@ -2100,6 +2283,7 @@ function convertOspfConfig(ospfConfig, commands, warnings, summary, interfaceMap
       // Interfaces
       for (const iface of area.interfaces || []) {
         const mappedIfName = mapInterfaceName(iface.name, interfaceMappings);
+        if (!isValidSrxInterface(mappedIfName)) continue;
         const ifBase = `${prefix}protocols ospf area ${areaId} interface ${mappedIfName}`;
         commands.push(ifBase);
 
@@ -2187,10 +2371,10 @@ function convertOspf3Config(ospf3Config, commands, warnings, summary, interfaceM
     for (const area of ospf.areas || []) {
       const areaId = area.area_id;
 
-      // Fix 7: Skip OSPFv3 areas with no interfaces after mapping
+      // Fix 7: Skip OSPFv3 areas with no valid SRX interfaces after mapping
       const mappedIf3s = (area.interfaces || []).filter(iface => {
         const mapped = mapInterfaceName(iface.name, interfaceMappings);
-        return mapped && mapped !== iface.name || Object.keys(interfaceMappings).length === 0;
+        return isValidSrxInterface(mapped);
       });
       const hasNets3 = (area.networks || []).length > 0;
       if (mappedIf3s.length === 0 && !hasNets3) {
@@ -2213,6 +2397,7 @@ function convertOspf3Config(ospf3Config, commands, warnings, summary, interfaceM
 
       for (const iface of area.interfaces || []) {
         const mappedIf3Name = mapInterfaceName(iface.name, interfaceMappings);
+        if (!isValidSrxInterface(mappedIf3Name)) continue;
         const ifBase = `${prefix}protocols ospf3 area ${areaId} interface ${mappedIf3Name}`;
         commands.push(ifBase);
 

@@ -168,8 +168,8 @@ export function convertToSrxSetCommands(config, interfaceMappings = {}, targetCo
   convertNatRules(config.nat_rules, commands, warnings, summary, config.address_objects);
   convertStaticRoutes(config.static_routes, commands, warnings, summary);
   convertBgpConfig(config.bgp_config, commands, warnings, summary);
-  convertOspfConfig(config.ospf_config, commands, warnings, summary);
-  convertOspf3Config(config.ospf3_config, commands, warnings, summary);
+  convertOspfConfig(config.ospf_config, commands, warnings, summary, interfaceMappings);
+  convertOspf3Config(config.ospf3_config, commands, warnings, summary, interfaceMappings);
   convertEvpnConfig(config.evpn_config, commands, warnings, summary);
   convertVxlanConfig(config.vxlan_config, commands, warnings, summary);
   convertHaConfig(config.ha_config, commands, warnings, summary);
@@ -1911,7 +1911,7 @@ function convertBgpConfig(bgpConfig, commands, warnings, summary) {
 // OSPF Configuration
 // ---------------------------------------------------------------------------
 
-function convertOspfConfig(ospfConfig, commands, warnings, summary) {
+function convertOspfConfig(ospfConfig, commands, warnings, summary, interfaceMappings = {}) {
   if (!ospfConfig || ospfConfig.length === 0) return;
 
   commands.push('# =============================================');
@@ -2015,7 +2015,7 @@ function convertOspfConfig(ospfConfig, commands, warnings, summary) {
 // OSPFv3 Configuration
 // ---------------------------------------------------------------------------
 
-function convertOspf3Config(ospf3Config, commands, warnings, summary) {
+function convertOspf3Config(ospf3Config, commands, warnings, summary, interfaceMappings = {}) {
   if (!ospf3Config || ospf3Config.length === 0) return;
 
   commands.push('# =============================================');

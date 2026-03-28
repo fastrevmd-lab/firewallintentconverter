@@ -143,7 +143,28 @@ export function convertToSrxSetCommands(config, interfaceMappings = {}, targetCo
   commands.push(...secIntelCommands);
 
   convertSchedules(config.schedules, commands, warnings);
-  convertSecurityPolicies(config.security_policies, commands, warnings, summary, { utmPolicyMap, idpPolicyMap, secIntelEnabled }, config.application_groups, sourceVendor, config._rule_groups);
+
+  // Bug 4 fix: Run policy conversion into a temp buffer to populate customfwicApps,
+  // then emit placeholder app definitions BEFORE emitting the policy commands.
+  // This ensures all custom applications are defined before policies reference them.
+  const policyCommands = [];
+  convertSecurityPolicies(config.security_policies, policyCommands, warnings, summary, { utmPolicyMap, idpPolicyMap, secIntelEnabled }, config.application_groups, sourceVendor, config._rule_groups);
+
+  if (customfwicApps.size > 0) {
+    commands.push('# =============================================');
+    commands.push('# Placeholder Custom Applications (Customfwic)');
+    commands.push('# WARNING: These need manual protocol/port definitions');
+    commands.push('# =============================================');
+    for (const [customName, originalName] of customfwicApps) {
+      commands.push(`# TODO: Define "${originalName}" — set correct protocol and destination-port`);
+      commands.push(`set applications application ${customName} protocol tcp`);
+      commands.push(`set applications application ${customName} destination-port 1`);
+      commands.push(`set applications application ${customName} description "Placeholder for ${originalName} - REQUIRES MANUAL CONFIGURATION"`);
+    }
+    commands.push('');
+  }
+
+  commands.push(...policyCommands);
   convertNatRules(config.nat_rules, commands, warnings, summary, config.address_objects);
   convertStaticRoutes(config.static_routes, commands, warnings, summary);
   convertBgpConfig(config.bgp_config, commands, warnings, summary);
@@ -162,21 +183,6 @@ export function convertToSrxSetCommands(config, interfaceMappings = {}, targetCo
   convertSslProxyConfig(config, commands, warnings, summary);
   convertFlowMonitoringConfig(config.flow_monitoring_config, commands, warnings, summary, interfaceMappings);
   convertUserIdentification(config.security_policies, commands, warnings);
-
-  // Generate placeholder definitions for unmapped Customfwic applications
-  if (customfwicApps.size > 0) {
-    commands.push('# =============================================');
-    commands.push('# Placeholder Custom Applications (Customfwic)');
-    commands.push('# WARNING: These need manual protocol/port definitions');
-    commands.push('# =============================================');
-    for (const [customName, originalName] of customfwicApps) {
-      commands.push(`# TODO: Define "${originalName}" — set correct protocol and destination-port`);
-      commands.push(`set applications application ${customName} protocol tcp`);
-      commands.push(`set applications application ${customName} destination-port 0`);
-      commands.push(`set applications application ${customName} description "Placeholder for ${originalName} - REQUIRES MANUAL CONFIGURATION"`);
-    }
-    commands.push('');
-  }
 
   // Unsupported feature notices
   commands.push('# =============================================');
@@ -372,6 +378,15 @@ function mapInterfaceName(panosIface, interfaceMappings = {}) {
     const port = parseInt(hwXe[3]);
     const u = hwXe[5] || '0';
     return `xe-0/${slot}/${port}.${u}`;
+  }
+
+  // Bug 1 fix: Map vendor "loopback" interfaces to SRX lo0 naming.
+  // Vendor configs use "loopback.X" but SRX expects "lo0.X". Without this,
+  // the zone references an undefined interface-range 'loopback.X'.
+  const loMatch = panosIface.match(/^loopback(\.(\d+))?$/i);
+  if (loMatch) {
+    const u = loMatch[2] || '0';
+    return `lo0.${u}`;
   }
 
   // If it doesn't match any known format, return as-is
@@ -710,8 +725,24 @@ function convertServiceObjects(services, commands, warnings, summary) {
         continue;
       }
 
-      commands.push(`set applications application ${name} protocol ${protocol}`);
-      commands.push(`set applications application ${name} destination-port ${port}`);
+      // Bug 2 fix: Junos destination-port does not accept comma-separated discrete
+      // ports (e.g., "443,8443"). Split into individual applications and wrap in an
+      // application-set so policies can reference the set by the original name.
+      if (port.includes(',')) {
+        const portParts = port.split(',').map(p => p.trim());
+        for (const part of portParts) {
+          const subName = `${name}-${part.replace('-', 'to')}`;
+          commands.push(`set applications application ${subName} protocol ${protocol}`);
+          commands.push(`set applications application ${subName} destination-port ${part}`);
+        }
+        for (const part of portParts) {
+          const subName = `${name}-${part.replace('-', 'to')}`;
+          commands.push(`set applications application-set ${name} application ${subName}`);
+        }
+      } else {
+        commands.push(`set applications application ${name} protocol ${protocol}`);
+        commands.push(`set applications application ${name} destination-port ${port}`);
+      }
 
       if (svc.source_port) {
         commands.push(`set applications application ${name} source-port ${svc.source_port}`);
@@ -781,8 +812,22 @@ function convertApplications(apps, commands, warnings, summary) {
       continue;
     }
 
-    commands.push(`set applications application ${name} protocol ${app.protocol}`);
-    commands.push(`set applications application ${name} destination-port ${app.port}`);
+    // Bug 2 fix: handle comma-separated discrete ports in custom apps too
+    if (app.port.includes(',')) {
+      const portParts = app.port.split(',').map(p => p.trim());
+      for (const part of portParts) {
+        const subName = `${name}-${part.replace('-', 'to')}`;
+        commands.push(`set applications application ${subName} protocol ${app.protocol}`);
+        commands.push(`set applications application ${subName} destination-port ${part}`);
+      }
+      for (const part of portParts) {
+        const subName = `${name}-${part.replace('-', 'to')}`;
+        commands.push(`set applications application-set ${name} application ${subName}`);
+      }
+    } else {
+      commands.push(`set applications application ${name} protocol ${app.protocol}`);
+      commands.push(`set applications application ${name} destination-port ${app.port}`);
+    }
 
     if (app.description) {
       commands.push(`set applications application ${name} description "${app.description}"`);
@@ -913,6 +958,10 @@ function convertUtmPolicies(policies, warnings, profileDefs = {}) {
           utmCommands.push(`set security utm feature-profile anti-virus profile ${mapped.srxProfile} fallback-options content-size log-and-permit`);
           // content-size-limit and timeout are not valid under AV profile in modern Junos — skip
         } else if (mapped.srxType === 'web-filtering') {
+          // Bug 3 fix: Junos requires the web-filtering type to be set before
+          // defining profiles, and the utm-policy http-profile name must match
+          // the profile name defined here exactly.
+          utmCommands.push(`set security utm feature-profile web-filtering type juniper-enhanced`);
           utmCommands.push(`set security utm feature-profile web-filtering juniper-enhanced profile ${mapped.srxProfile}`);
           if (profileDef && profileDef.blockCategories && profileDef.blockCategories.length > 0) {
             utmCommands.push(`# Block categories from source: ${profileDef.blockCategories.join(', ')}`);
@@ -1443,6 +1492,9 @@ function resolveApplications(applications, services, warnings, policyName, appGr
   if (services && services.length > 0) {
     for (const svc of services) {
       if (svc === 'application-default' || svc === 'any') continue;
+      // Bug 10 fix: Filter Huawei "service-set" keyword from services too.
+      // This is a Huawei config keyword meaning "use the service objects", not an app name.
+      if (svc === 'service-set') continue;
       // Check if this service was mapped to a predefined app during convertServiceObjects
       const predefName = predefServiceMap.get(svc);
       if (predefName) {
@@ -1538,6 +1590,25 @@ function convertNatRules(natRules, commands, warnings, summary, addressObjects) 
   commands.push('# =============================================');
   commands.push('# NAT Rules');
   commands.push('# =============================================');
+
+  // Bug 8 fix: Ensure all zones referenced in NAT rules are defined.
+  // Collect already-defined zones from prior commands, then create any missing ones.
+  const definedZones = new Set();
+  for (const cmd of commands) {
+    const zoneMatch = cmd.match(/^set security zones security-zone (\S+)/);
+    if (zoneMatch) definedZones.add(zoneMatch[1]);
+  }
+  for (const rule of natRules) {
+    const allZones = [...(rule.src_zones || []), ...(rule.dst_zones || [])];
+    for (const zone of allZones) {
+      if (zone === 'any') continue;
+      const safeName = sanitizeJunosName(zone);
+      if (!definedZones.has(safeName)) {
+        commands.push(`set security zones security-zone ${safeName}`);
+        definedZones.add(safeName);
+      }
+    }
+  }
 
   // Group NAT rules by type for SRX rule-set organization
   const sourceNatRules = natRules.filter(r => r.type === 'source' || r.type === 'source-and-destination');
@@ -1651,8 +1722,18 @@ function convertNatRules(natRules, commands, warnings, summary, addressObjects) 
 
         // Translation
         if (rule.translated_dst) {
-          const dstAddr = typeof rule.translated_dst === 'string' ? rule.translated_dst : rule.translated_dst.address || '';
+          let dstAddr = typeof rule.translated_dst === 'string' ? rule.translated_dst : rule.translated_dst.address || '';
           if (dstAddr) {
+            // Bug 5 fix: NAT destination pool address must be IP/prefix format.
+            // Resolve named objects and ensure bare IPs get /32 suffix.
+            const resolvedDst = resolveNatAddress(dstAddr, addrLookup, warnings);
+            if (resolvedDst) {
+              dstAddr = resolvedDst;
+            }
+            // Ensure host IPs have /32 prefix for Junos NAT pool format
+            if (/^\d+\.\d+\.\d+\.\d+$/.test(dstAddr)) {
+              dstAddr = `${dstAddr}/32`;
+            }
             const poolName = sanitizeJunosName(`dnat-pool-${rule.name}`);
             commands.push(`set security nat destination pool ${poolName} address ${dstAddr}`);
             if (rule.translated_port) {
@@ -2487,9 +2568,58 @@ function convertVpnTunnels(tunnels, commands, warnings, summary) {
   const emittedProposals = new Set();
   const emittedPolicies = new Set();
   const emittedGateways = new Set();
+  // Bug 6/11 fix: Track emitted st0 interfaces to avoid duplicates
+  const emittedTunnelInterfaces = new Set();
+
+  // Bug 6/11 fix: Emit all required st0 tunnel interfaces BEFORE IPsec references.
+  // vSRX commit check fails if bind-interface references an unconfigured st0 unit.
+  for (const vpn of tunnels) {
+    if (vpn.tunnel_interface) {
+      const bindIf = vpn.tunnel_interface.startsWith('st0') ? vpn.tunnel_interface : 'st0.0';
+      if (!emittedTunnelInterfaces.has(bindIf)) {
+        emittedTunnelInterfaces.add(bindIf);
+        const [stBase, stUnit = '0'] = bindIf.split('.');
+        commands.push(`set interfaces ${stBase} unit ${stUnit} family inet`);
+      }
+    }
+  }
 
   for (const vpn of tunnels) {
     const vpnName = sanitizeJunosName(vpn.name || 'vpn-1');
+
+    // Bug 7 fix: Determine the external interface for IKE gateway.
+    // If the source vendor interface can't be mapped to a valid SRX interface,
+    // skip the entire VPN config with a warning instead of emitting invalid config.
+    let resolvedExtIf = null;
+    if (vpn.ike_gateway?.external_interface) {
+      const candidateIf = vpn.ike_gateway.external_interface;
+      // Check if it's already a valid SRX interface name (e.g., ge-0/0/0.0)
+      if (/^(ge|xe|et|ae|lo|irb|st|reth)-?\d/.test(candidateIf)) {
+        resolvedExtIf = candidateIf.includes('.') ? candidateIf : `${candidateIf}.0`;
+      }
+    }
+    if (!resolvedExtIf && vpn.ike_gateway?.local_address) {
+      // local_address might be an IP, not an interface — use fallback
+      const la = vpn.ike_gateway.local_address;
+      if (/^(ge|xe|et|ae|lo|irb|reth)-?\d/.test(la)) {
+        resolvedExtIf = la.includes('.') ? la : `${la}.0`;
+      }
+      // If local_address is an IP address, we can't derive the interface — use ge-0/0/0.0 as default
+      if (!resolvedExtIf && /^\d+\.\d+\.\d+\.\d+/.test(la)) {
+        resolvedExtIf = 'ge-0/0/0.0';
+        warnings.push(createWarning('warning', `vpn/${vpnName}`,
+          `IKE gateway local-address "${la}" is an IP — using ge-0/0/0.0 as external-interface`,
+          'Verify the correct external interface for this VPN tunnel'));
+      }
+    }
+    if (!resolvedExtIf) {
+      // No valid external interface found — skip VPN with warning
+      warnings.push(createWarning('warning', `vpn/${vpnName}`,
+        `VPN "${vpn.name}" skipped — external interface could not be determined from source config`,
+        'Manually configure IKE gateway external-interface'));
+      commands.push(`# WARNING: VPN "${vpn.name}" skipped — IKE gateway external-interface not resolvable`);
+      continue;
+    }
 
     // IKE Proposal
     if (vpn.ike_proposal && !emittedProposals.has(vpn.ike_proposal.name)) {
@@ -2521,10 +2651,8 @@ function convertVpnTunnels(tunnels, commands, warnings, summary) {
         commands.push(`set security ike gateway ${gwName} address ${vpn.ike_gateway.address}`);
       }
       commands.push(`set security ike gateway ${gwName} ike-policy ${polName}`);
-      if (vpn.ike_gateway?.local_address) {
-        const extIf = vpn.ike_gateway.local_address.includes('.') && !vpn.ike_gateway.local_address.includes('/') ? vpn.ike_gateway.local_address : 'ge-0/0/0.0';
-        commands.push(`set security ike gateway ${gwName} external-interface ${extIf}`);
-      }
+      // Bug 7 fix: Use resolved external interface instead of raw vendor interface name
+      commands.push(`set security ike gateway ${gwName} external-interface ${resolvedExtIf}`);
       if (vpn.ike_gateway?.ike_version === 'v2') {
         commands.push(`set security ike gateway ${gwName} version v2-only`);
       }

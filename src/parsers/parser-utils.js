@@ -131,8 +131,13 @@ export function sanitizeJunosName(name) {
   let sanitized = name.replace(/[^a-zA-Z0-9._-]/g, '-');
   // Collapse consecutive hyphens
   sanitized = sanitized.replace(/-{2,}/g, '-');
-  // Remove leading/trailing hyphens
-  sanitized = sanitized.replace(/^-+|-+$/g, '');
+  // Remove leading/trailing hyphens and dots
+  sanitized = sanitized.replace(/^[-_.]+|[-_.]+$/g, '');
+  // Bug 9 fix: Junos names must start with a letter. Prefix with 'n-' if
+  // the name starts with a digit (common in SonicWall/Huawei address objects).
+  if (/^\d/.test(sanitized)) {
+    sanitized = `n-${sanitized}`;
+  }
   // Truncate to 63 characters (Junos limit)
   sanitized = sanitized.substring(0, 63);
   return sanitized || 'unnamed';

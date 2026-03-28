@@ -142,6 +142,11 @@ FILTER_PATTERNS = [
     re.compile(r"^set\s+protocols\s+evpn\b"),
     # Skip IDP (requires signature DB)
     re.compile(r"^set\s+security\s+idp\b"),
+    # Skip application-firewall (requires AppID license)
+    re.compile(r"^set\s+security\s+application-firewall\b"),
+    re.compile(r".*application-services\s+application-firewall"),
+    # Skip static NAT rules that may have incomplete translations
+    re.compile(r"^set\s+security\s+nat\s+static\b"),
     # Skip UTM/IDP/SecIntel references in policy application-services
     re.compile(r".*utm-policy\b"),
     re.compile(r".*idp-policy\b"),

@@ -587,14 +587,16 @@ function autoGenerateMissingAppDefinitions(commands) {
   }
 
   // junos-* apps that may not exist on all platforms (vSRX, older versions)
+  // We define them with a 'custom-' prefix since 'junos-' is reserved
   const PLATFORM_DEPENDENT_APPS = {
-    'junos-mysql':    { protocol: 'tcp', port: '3306' },
-    'junos-mssql':    { protocol: 'tcp', port: '1433' },
-    'junos-oracle':   { protocol: 'tcp', port: '1521' },
-    'junos-postgres': { protocol: 'tcp', port: '5432' },
-    'junos-mongodb':  { protocol: 'tcp', port: '27017' },
-    'junos-redis':    { protocol: 'tcp', port: '6379' },
-    'junos-memcached':{ protocol: 'tcp', port: '11211' },
+    'junos-mysql':    { protocol: 'tcp', port: '3306', alias: 'custom-mysql' },
+    'junos-mssql':    { protocol: 'tcp', port: '1433', alias: 'custom-mssql' },
+    'junos-oracle':   { protocol: 'tcp', port: '1521', alias: 'custom-oracle' },
+    'junos-postgres': { protocol: 'tcp', port: '5432', alias: 'custom-postgres' },
+    'junos-mongodb':  { protocol: 'tcp', port: '27017', alias: 'custom-mongodb' },
+    'junos-redis':    { protocol: 'tcp', port: '6379', alias: 'custom-redis' },
+    'junos-memcached':{ protocol: 'tcp', port: '11211', alias: 'custom-memcached' },
+    'junos-ocsp':     { protocol: 'tcp', port: '80', alias: 'custom-ocsp' },
   };
 
   // Check against predefined Junos apps — but always define platform-dependent ones
@@ -621,10 +623,18 @@ function autoGenerateMissingAppDefinitions(commands) {
 
   for (const appName of missing) {
     // Check platform-dependent junos-* apps first (known port mappings)
+    // Use alias name since 'junos-' prefix is reserved on Junos
     const platformApp = PLATFORM_DEPENDENT_APPS[appName];
     if (platformApp) {
-      insertionCmds.push(`set applications application ${appName} protocol ${platformApp.protocol}`);
-      insertionCmds.push(`set applications application ${appName} destination-port ${platformApp.port}`);
+      const defName = platformApp.alias || appName;
+      insertionCmds.push(`set applications application ${defName} protocol ${platformApp.protocol}`);
+      insertionCmds.push(`set applications application ${defName} destination-port ${platformApp.port}`);
+      // Replace all references to the original name with the alias in existing commands
+      for (let i = 0; i < commands.length; i++) {
+        if (commands[i].includes(appName)) {
+          commands[i] = commands[i].replaceAll(appName, defName);
+        }
+      }
       continue;
     }
     // Try to infer protocol/port from name

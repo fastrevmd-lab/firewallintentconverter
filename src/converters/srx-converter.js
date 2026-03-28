@@ -143,7 +143,7 @@ export function convertToSrxSetCommands(config, interfaceMappings = {}, targetCo
 
   convertSchedules(config.schedules, commands, warnings);
   convertSecurityPolicies(config.security_policies, commands, warnings, summary, { utmPolicyMap, idpPolicyMap, secIntelEnabled }, config.application_groups, sourceVendor, config._rule_groups);
-  convertNatRules(config.nat_rules, commands, warnings, summary);
+  convertNatRules(config.nat_rules, commands, warnings, summary, config.address_objects);
   convertStaticRoutes(config.static_routes, commands, warnings, summary);
   convertBgpConfig(config.bgp_config, commands, warnings, summary);
   convertOspfConfig(config.ospf_config, commands, warnings, summary);
@@ -865,8 +865,7 @@ function convertUtmPolicies(policies, warnings, profileDefs = {}) {
           const sizeLimit = (profileDef && profileDef.scanMode === 'full') ? 40000 : 20000;
           utmCommands.push(`set security utm feature-profile anti-virus profile ${mapped.srxProfile} fallback-options default log-and-permit`);
           utmCommands.push(`set security utm feature-profile anti-virus profile ${mapped.srxProfile} fallback-options content-size log-and-permit`);
-          utmCommands.push(`set security utm feature-profile anti-virus profile ${mapped.srxProfile} content-size-limit ${sizeLimit}`);
-          utmCommands.push(`set security utm feature-profile anti-virus profile ${mapped.srxProfile} timeout 180`);
+          // content-size-limit and timeout are not valid under AV profile in modern Junos — skip
         } else if (mapped.srxType === 'web-filtering') {
           utmCommands.push(`set security utm feature-profile web-filtering juniper-enhanced profile ${mapped.srxProfile}`);
           if (profileDef && profileDef.blockCategories && profileDef.blockCategories.length > 0) {
@@ -1445,8 +1444,43 @@ function mapAction(panosAction) {
 // NAT Rule Converter
 // ---------------------------------------------------------------------------
 
-function convertNatRules(natRules, commands, warnings, summary) {
+/**
+ * Resolves a NAT match address to a raw IP/subnet. Junos NAT match commands
+ * require literal IPs, not address-book object names.
+ * @param {string} addr - Address string (IP, subnet, or object name)
+ * @param {Object} addrLookup - Map of address-object names to IP values
+ * @param {string[]} warnings - Collector for warning messages
+ * @returns {string|null} Resolved IP/subnet, or null if unresolvable
+ */
+function resolveNatAddress(addr, addrLookup, warnings) {
+  if (!addr || addr === 'any') return null;
+  // Already an IP or subnet (contains a dot and looks numeric)
+  if (/^\d+\.\d+\.\d+\.\d+(\/\d+)?$/.test(addr) || /^[0-9a-fA-F:]+\/\d+$/.test(addr)) {
+    return addr;
+  }
+  const resolved = addrLookup[addr];
+  if (!resolved) {
+    warnings.push(createWarning('nat', `NAT match address "${addr}" is not a known address object — skipped`));
+    return null;
+  }
+  // Skip FQDN / dns-name values (not usable in NAT match)
+  if (!/^\d+\.\d+\.\d+\.\d+/.test(resolved) && !/^[0-9a-fA-F:]+/.test(resolved)) {
+    warnings.push(createWarning('nat', `NAT match address "${addr}" resolves to FQDN "${resolved}" — skipped (Junos NAT requires IP)`));
+    return null;
+  }
+  return resolved;
+}
+
+function convertNatRules(natRules, commands, warnings, summary, addressObjects) {
   if (!natRules || natRules.length === 0) return;
+
+  // Build lookup map: address-object name → IP/subnet value
+  const addrLookup = {};
+  for (const obj of (addressObjects || [])) {
+    if (obj.value) addrLookup[obj.name] = obj.value;
+    else if (obj.ip) addrLookup[obj.name] = obj.ip;
+    else if (obj.network) addrLookup[obj.name] = obj.network;
+  }
 
   commands.push('# =============================================');
   commands.push('# NAT Rules');
@@ -1480,14 +1514,20 @@ function convertNatRules(natRules, commands, warnings, summary) {
           if (addr === 'any') {
             commands.push(`set ${rulePath} match source-address ${anyAddr}`);
           } else {
-            commands.push(`set ${rulePath} match source-address ${addr}`);
+            const resolved = resolveNatAddress(addr, addrLookup, warnings);
+            if (resolved) {
+              commands.push(`set ${rulePath} match source-address ${resolved}`);
+            }
           }
         }
         for (const addr of (rule.dst_addresses || [anyAddr])) {
           if (addr === 'any') {
             commands.push(`set ${rulePath} match destination-address ${anyAddr}`);
           } else {
-            commands.push(`set ${rulePath} match destination-address ${addr}`);
+            const resolved = resolveNatAddress(addr, addrLookup, warnings);
+            if (resolved) {
+              commands.push(`set ${rulePath} match destination-address ${resolved}`);
+            }
           }
         }
 
@@ -1539,7 +1579,10 @@ function convertNatRules(natRules, commands, warnings, summary) {
           if (addr === 'any') {
             commands.push(`set ${rulePath} match destination-address ${dnatAny}`);
           } else {
-            commands.push(`set ${rulePath} match destination-address ${addr}`);
+            const resolved = resolveNatAddress(addr, addrLookup, warnings);
+            if (resolved) {
+              commands.push(`set ${rulePath} match destination-address ${resolved}`);
+            }
           }
         }
         // Port-forward matching (FortiGate VIP extport)
@@ -1580,7 +1623,10 @@ function convertNatRules(natRules, commands, warnings, summary) {
 
       for (const addr of (rule.dst_addresses || [])) {
         if (addr !== 'any') {
-          commands.push(`set ${ruleSetPath} match destination-address ${addr}`);
+          const resolved = resolveNatAddress(addr, addrLookup, warnings);
+          if (resolved) {
+            commands.push(`set ${ruleSetPath} match destination-address ${resolved}`);
+          }
         }
       }
 

@@ -126,13 +126,13 @@ export function convertToSrxSetCommands(config, interfaceMappings = {}, targetCo
   ensureZoneInterfaceFamilies(config.zones, config.interfaces, commands, interfaceMappings);
   convertLagInterfaces(config.lag_interfaces, commands, warnings, summary, interfaceMappings);
   convertAddressObjects(config.address_objects, commands, warnings, summary);
-  convertAddressGroups(config.address_groups, commands, warnings, summary);
-  convertServiceObjects(config.service_objects, commands, warnings, summary);
-  convertServiceGroups(config.service_groups, commands, warnings, summary);
-  convertApplications(config.applications, commands, warnings, summary);
-
   // Detect source vendor for 1:1 passthrough (SRX→SRX needs no app mapping)
   const sourceVendor = config.metadata?.source_vendor || '';
+
+  convertAddressGroups(config.address_groups, commands, warnings, summary);
+  convertServiceObjects(config.service_objects, commands, warnings, summary);
+  convertServiceGroups(config.service_groups, commands, warnings, summary, sourceVendor);
+  convertApplications(config.applications, commands, warnings, summary);
 
   // UTM / IDP / SecIntel — must run before security policies to build assignment maps
   const profileDefs = config.security_profile_definitions || {};
@@ -1005,7 +1005,7 @@ function convertServiceObjects(services, commands, warnings, summary) {
 // Service Group Converter → SRX Application Sets
 // ---------------------------------------------------------------------------
 
-function convertServiceGroups(groups, commands, warnings, summary) {
+function convertServiceGroups(groups, commands, warnings, summary, sourceVendor = '') {
   if (!groups || groups.length === 0) return;
 
   commands.push('# =============================================');
@@ -1020,8 +1020,10 @@ function convertServiceGroups(groups, commands, warnings, summary) {
     for (const member of group.members) {
       // Check if member maps to a predefined Junos app
       const predefName = predefServiceMap.get(member);
-      if (predefName) {
-        commands.push(`set applications application-set ${groupName} application ${predefName}`);
+      // Also try mapAppToJunos for uppercase names (HTTP→junos-http)
+      const mappedName = predefName || mapAppToJunos(member, sourceVendor);
+      if (mappedName) {
+        commands.push(`set applications application-set ${groupName} application ${mappedName}`);
       } else if (groupNameSet.has(member)) {
         commands.push(`set applications application-set ${groupName} application-set ${sanitizeJunosName(member)}`);
       } else {
@@ -2260,8 +2262,7 @@ function convertOspfConfig(ospfConfig, commands, warnings, summary, interfaceMap
         const mapped = mapInterfaceName(iface.name, interfaceMappings);
         return isValidSrxInterface(mapped);
       });
-      const hasNetworks = (area.networks || []).length > 0;
-      if (mappedInterfaces.length === 0 && !hasNetworks) {
+      if (mappedInterfaces.length === 0) {
         commands.push(`# WARNING: OSPF area ${areaId} skipped — no interfaces configured`);
         warnings.push(createWarning('warning', `ospf/area/${areaId}`,
           `OSPF area ${areaId} has no interfaces after mapping — skipped to avoid commit error`,
@@ -2376,8 +2377,7 @@ function convertOspf3Config(ospf3Config, commands, warnings, summary, interfaceM
         const mapped = mapInterfaceName(iface.name, interfaceMappings);
         return isValidSrxInterface(mapped);
       });
-      const hasNets3 = (area.networks || []).length > 0;
-      if (mappedIf3s.length === 0 && !hasNets3) {
+      if (mappedIf3s.length === 0) {
         commands.push(`# WARNING: OSPFv3 area ${areaId} skipped — no interfaces configured`);
         warnings.push(createWarning('warning', `ospf3/area/${areaId}`,
           `OSPFv3 area ${areaId} has no interfaces after mapping — skipped to avoid commit error`,

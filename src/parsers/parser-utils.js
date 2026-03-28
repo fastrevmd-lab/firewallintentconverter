@@ -595,7 +595,7 @@ export function mapProfileToSrx(profileType, profileName) {
     // PAN-OS originated
     'virus':              { srxFeature: 'utm', srxType: 'anti-virus',        srxProfile: `custom-av-${safeName}` },
     'wildfire-analysis':  { srxFeature: 'utm', srxType: 'anti-virus',        srxProfile: `custom-av-${safeName}` },
-    'url-filtering':      { srxFeature: 'utm', srxType: 'web-filtering',     srxProfile: `junos-wf-${safeName}` },
+    'url-filtering':      { srxFeature: 'utm', srxType: 'web-filtering',     srxProfile: `custom-wf-${safeName}` },
     'file-blocking':      { srxFeature: 'unsupported', srxType: 'content-filtering', srxProfile: `junos-cf-${safeName}` },
     'spyware':            { srxFeature: 'idp', srxType: 'idp-policy',        srxProfile: `idp-${safeName}` },
     'vulnerability':      { srxFeature: 'idp', srxType: 'idp-policy',        srxProfile: `idp-${safeName}` },

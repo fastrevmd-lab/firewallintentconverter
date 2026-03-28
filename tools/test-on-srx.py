@@ -147,6 +147,8 @@ FILTER_PATTERNS = [
     re.compile(r".*application-services\s+application-firewall"),
     # Skip static NAT rules that may have incomplete translations
     re.compile(r"^set\s+security\s+nat\s+static\b"),
+    # Skip HA fabric interfaces
+    re.compile(r".*\s+fab\d"),
     # Skip UTM/IDP/SecIntel references in policy application-services
     re.compile(r".*utm-policy\b"),
     re.compile(r".*idp-policy\b"),

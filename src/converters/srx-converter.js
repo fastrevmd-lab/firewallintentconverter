@@ -597,6 +597,11 @@ function autoGenerateMissingAppDefinitions(commands) {
     'junos-redis':    { protocol: 'tcp', port: '6379', alias: 'custom-redis' },
     'junos-memcached':{ protocol: 'tcp', port: '11211', alias: 'custom-memcached' },
     'junos-ocsp':     { protocol: 'tcp', port: '80', alias: 'custom-ocsp' },
+    'junos-quic':     { protocol: 'udp', port: '443', alias: 'custom-quic' },
+    'junos-imap':     { protocol: 'tcp', port: '143', alias: 'custom-imap' },
+    'junos-imaps':    { protocol: 'tcp', port: '993', alias: 'custom-imaps' },
+    'junos-pop3':     { protocol: 'tcp', port: '110', alias: 'custom-pop3' },
+    'junos-pop3s':    { protocol: 'tcp', port: '995', alias: 'custom-pop3s' },
   };
 
   // Check against predefined Junos apps — but always define platform-dependent ones
@@ -605,6 +610,12 @@ function autoGenerateMissingAppDefinitions(commands) {
     if (definedApps.has(app)) continue;
     if (PLATFORM_DEPENDENT_APPS[app]) {
       missing.push(app); // Always generate — may not exist on target
+      continue;
+    }
+    // For any junos-* app not in our known list, still generate a custom definition
+    // since vSRX and older platforms may lack many predefined apps
+    if (app.startsWith('junos-') && !PLATFORM_DEPENDENT_APPS[app]) {
+      missing.push(app);
       continue;
     }
     if (JUNOS_PREDEFINED_APPS.has(app)) continue;
@@ -633,6 +644,20 @@ function autoGenerateMissingAppDefinitions(commands) {
       for (let i = 0; i < commands.length; i++) {
         if (commands[i].includes(appName)) {
           commands[i] = commands[i].replaceAll(appName, defName);
+        }
+      }
+      continue;
+    }
+    // Catch-all for unknown junos-* apps — create custom alias with TCP/1 placeholder
+    if (appName.startsWith('junos-')) {
+      const alias = appName.replace('junos-', 'custom-');
+      insertionCmds.push(`# ${appName} not available on target platform — using placeholder`);
+      insertionCmds.push(`set applications application ${alias} protocol tcp`);
+      insertionCmds.push(`set applications application ${alias} destination-port 1`);
+      insertionCmds.push(`set applications application ${alias} description "Placeholder for ${appName}"`);
+      for (let i = 0; i < commands.length; i++) {
+        if (commands[i].includes(appName)) {
+          commands[i] = commands[i].replaceAll(appName, alias);
         }
       }
       continue;

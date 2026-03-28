@@ -590,7 +590,7 @@ export function isPredefEquivalent(name, protocol, portRange) {
  * @returns {{ srxFeature: string, srxType: string, srxProfile: string }}
  */
 export function mapProfileToSrx(profileType, profileName) {
-  const safeName = sanitizeJunosName(profileName);
+  const safeName = sanitizeJunosName(profileName).slice(0, 24);
   const mapping = {
     // PAN-OS originated
     'virus':              { srxFeature: 'utm', srxType: 'anti-virus',        srxProfile: `custom-av-${safeName}` },

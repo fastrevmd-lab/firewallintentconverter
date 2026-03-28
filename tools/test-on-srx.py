@@ -131,6 +131,17 @@ FILTER_PATTERNS = [
     re.compile(r"^set\s+security\s+ipsec\b"),
     # Skip DHCP (access pools reference vendor interfaces)
     re.compile(r"^set\s+access\b"),
+    # Skip BGP (requires reachable peers)
+    re.compile(r"^set\s+protocols\s+bgp\b"),
+    re.compile(r"^set\s+routing-options\s+autonomous-system\b"),
+    # Skip SecIntel/UTM that require licenses
+    re.compile(r"^set\s+security\s+utm\b"),
+    re.compile(r"^set\s+services\s+security-intelligence\b"),
+    # Skip EVPN/VXLAN (not supported on vSRX)
+    re.compile(r"^set\s+routing-instances\s+.*instance-type\s+evpn"),
+    re.compile(r"^set\s+protocols\s+evpn\b"),
+    # Skip IDP (requires signature DB)
+    re.compile(r"^set\s+security\s+idp\b"),
 ]
 
 

@@ -116,6 +116,8 @@ export function convertToSrxSetCommands(config, interfaceMappings = {}, targetCo
   // Clear trackers from any previous conversion (module-level state)
   customfwicApps.clear();
   predefServiceMap.clear();
+  commaPortSetMap.clear();
+  unresolvedServiceApps.clear();
 
   // Generate commands in Junos hierarchy order
   convertSystemConfig(config.system_config, commands, warnings, summary);
@@ -162,6 +164,46 @@ export function convertToSrxSetCommands(config, interfaceMappings = {}, targetCo
       commands.push(`set applications application ${customName} description "Placeholder for ${originalName} - REQUIRES MANUAL CONFIGURATION"`);
     }
     commands.push('');
+  }
+
+  // Fix 4: Emit definitions for service references not already defined as applications.
+  // Build set of already-defined application names from prior commands.
+  if (unresolvedServiceApps.size > 0) {
+    const definedApps = new Set();
+    for (const cmd of commands) {
+      const appMatch = cmd.match(/^set applications application (\S+)/);
+      if (appMatch) definedApps.add(appMatch[1]);
+      const appSetMatch = cmd.match(/^set applications application-set (\S+)/);
+      if (appSetMatch) definedApps.add(appSetMatch[1]);
+    }
+    const needsDefinition = [];
+    for (const [safeName, originalName] of unresolvedServiceApps) {
+      if (definedApps.has(safeName)) continue;
+      if (JUNOS_PREDEFINED_APPS.has(safeName)) continue;
+      // Try to infer protocol/port from name pattern like "tcp-9090" or "udp-53"
+      const protoPortMatch = safeName.match(/^(tcp|udp|sctp)-(\d[\d-]*)$/i);
+      if (protoPortMatch) {
+        const proto = protoPortMatch[1].toLowerCase();
+        const port = protoPortMatch[2];
+        needsDefinition.push({ safeName, originalName, proto, port });
+      } else {
+        needsDefinition.push({ safeName, originalName, proto: 'tcp', port: '1' });
+      }
+    }
+    if (needsDefinition.length > 0) {
+      commands.push('# =============================================');
+      commands.push('# Auto-generated Application Definitions');
+      commands.push('# (referenced in policies but not defined by source config)');
+      commands.push('# =============================================');
+      for (const { safeName, originalName, proto, port } of needsDefinition) {
+        commands.push(`set applications application ${safeName} protocol ${proto}`);
+        commands.push(`set applications application ${safeName} destination-port ${port}`);
+        if (port === '1') {
+          commands.push(`# WARNING: "${originalName}" — could not infer port, set to placeholder`);
+        }
+      }
+      commands.push('');
+    }
   }
 
   commands.push(...policyCommands);
@@ -567,27 +609,45 @@ function convertAddressObjects(objects, commands, warnings, summary) {
   for (const obj of objects) {
     const name = sanitizeJunosName(obj.name);
 
+    // Fix 6: Check all field variants for IP value (SonicWall uses subnet/network/address)
+    const addrValue = obj.value || obj.ip || obj.network || obj.subnet || obj.address;
+
     switch (obj.type) {
       case 'host':
       case 'subnet':
-        commands.push(`set security address-book global address ${name} ${obj.value}`);
+        if (!addrValue) {
+          commands.push(`# WARNING: Address "${obj.name}" has no IP value — skipping`);
+          warnings.push(createWarning('warning', `address/${name}`,
+            `Address "${obj.name}" (type: ${obj.type}) has no IP/subnet value — skipped`,
+            'Add an IP address or subnet to this address object'));
+          continue;
+        }
+        commands.push(`set security address-book global address ${name} ${addrValue}`);
         break;
       case 'range':
+        if (!addrValue) {
+          commands.push(`# WARNING: Range address "${obj.name}" has no range value — skipping`);
+          warnings.push(createWarning('warning', `address/${name}`,
+            `Range address "${obj.name}" has no range value — skipped`,
+            'Add a range value (e.g., "10.0.0.1-10.0.0.10") to this address object'));
+          continue;
+        }
         // SRX supports range-address
-        commands.push(`set security address-book global address ${name} range-address ${obj.value.replace('-', ' to ')}`);
+        commands.push(`set security address-book global address ${name} range-address ${addrValue.replace('-', ' to ')}`);
         break;
       case 'fqdn': {
+        const fqdnValue = addrValue;
         // Wildcard FQDNs (e.g., *.example.com) are not supported by SRX dns-name
-        const isWildcard = obj.value && obj.value.startsWith('*.');
+        const isWildcard = fqdnValue && fqdnValue.startsWith('*.');
         if (isWildcard) {
-          commands.push(`# WARNING: Wildcard FQDN "${obj.name}" (${obj.value}) — SRX does not support wildcard dns-name`);
+          commands.push(`# WARNING: Wildcard FQDN "${obj.name}" (${fqdnValue}) — SRX does not support wildcard dns-name`);
           commands.push(`# Convert to specific FQDN, address feed, or address set`);
-          commands.push(`set security address-book global address ${name} dns-name ${obj.value.slice(2)}`);
+          commands.push(`set security address-book global address ${name} dns-name ${fqdnValue.slice(2)}`);
           warnings.push(createWarning('warning', `address/${name}`,
-            `Wildcard FQDN "${obj.name}" (${obj.value}) stripped to "${obj.value.slice(2)}" — SRX dns-name does not support wildcards`,
+            `Wildcard FQDN "${obj.name}" (${fqdnValue}) stripped to "${fqdnValue.slice(2)}" — SRX dns-name does not support wildcards`,
             'Replace with specific FQDN or use custom address feed'));
         } else {
-          let dnsCmd = `set security address-book global address ${name} dns-name ${obj.value}`;
+          let dnsCmd = `set security address-book global address ${name} dns-name ${fqdnValue}`;
           // Append ipv4-only / ipv6-only if source specified IP version
           if (obj.fqdn_ip_version === 'v4') {
             dnsCmd += ' ipv4-only';
@@ -600,23 +660,23 @@ function convertAddressObjects(objects, commands, warnings, summary) {
       }
       case 'wildcard':
         // No SRX equivalent — add as comment
-        commands.push(`# UNSUPPORTED: Wildcard address "${obj.name}" (${obj.value}) — convert manually`);
+        commands.push(`# UNSUPPORTED: Wildcard address "${obj.name}" (${addrValue}) — convert manually`);
         warnings.push(createWarning('unsupported', `address/${name}`,
           `Wildcard address "${obj.name}" cannot be converted to SRX format`,
           'Replace with subnet or range address'));
         summary.unsupported_items++;
         continue; // Skip the description line
       case 'geography':
-        commands.push(`# UNSUPPORTED: Geography address "${obj.name}" (country: ${obj.value}) — SRX requires Security Intelligence feeds for geo-IP`);
+        commands.push(`# UNSUPPORTED: Geography address "${obj.name}" (country: ${addrValue}) — SRX requires Security Intelligence feeds for geo-IP`);
         warnings.push(createWarning('unsupported', `address/${name}`,
-          `Geography address "${obj.name}" (${obj.value}) has no direct SRX equivalent`,
+          `Geography address "${obj.name}" (${addrValue}) has no direct SRX equivalent`,
           'Replace with static IP ranges or configure SRX Security Intelligence geo-IP feeds'));
         summary.unsupported_items++;
         continue;
       case 'dynamic':
-        commands.push(`# UNSUPPORTED: Dynamic/SDN address "${obj.name}" (${obj.value}) — SRX requires manual configuration`);
+        commands.push(`# UNSUPPORTED: Dynamic/SDN address "${obj.name}" (${addrValue}) — SRX requires manual configuration`);
         warnings.push(createWarning('unsupported', `address/${name}`,
-          `Dynamic/SDN address "${obj.name}" (${obj.value}) has no direct SRX equivalent`,
+          `Dynamic/SDN address "${obj.name}" (${addrValue}) has no direct SRX equivalent`,
           'Replace with static addresses or use SRX Security Intelligence feeds'));
         summary.unsupported_items++;
         continue;
@@ -729,6 +789,10 @@ function convertServiceObjects(services, commands, warnings, summary) {
       // ports (e.g., "443,8443"). Split into individual applications and wrap in an
       // application-set so policies can reference the set by the original name.
       if (port.includes(',')) {
+        // Fix 2: Append -set suffix to application-set name to avoid name conflict
+        const setName = `${name}-set`;
+        commaPortSetMap.set(svc.name, setName);
+        commaPortSetMap.set(name, setName);
         const portParts = port.split(',').map(p => p.trim());
         for (const part of portParts) {
           const subName = `${name}-${part.replace('-', 'to')}`;
@@ -737,7 +801,7 @@ function convertServiceObjects(services, commands, warnings, summary) {
         }
         for (const part of portParts) {
           const subName = `${name}-${part.replace('-', 'to')}`;
-          commands.push(`set applications application-set ${name} application ${subName}`);
+          commands.push(`set applications application-set ${setName} application ${subName}`);
         }
       } else {
         commands.push(`set applications application ${name} protocol ${protocol}`);
@@ -814,6 +878,10 @@ function convertApplications(apps, commands, warnings, summary) {
 
     // Bug 2 fix: handle comma-separated discrete ports in custom apps too
     if (app.port.includes(',')) {
+      // Fix 2: Append -set suffix to application-set name to avoid name conflict
+      const setName = `${name}-set`;
+      commaPortSetMap.set(app.name, setName);
+      commaPortSetMap.set(name, setName);
       const portParts = app.port.split(',').map(p => p.trim());
       for (const part of portParts) {
         const subName = `${name}-${part.replace('-', 'to')}`;
@@ -822,7 +890,7 @@ function convertApplications(apps, commands, warnings, summary) {
       }
       for (const part of portParts) {
         const subName = `${name}-${part.replace('-', 'to')}`;
-        commands.push(`set applications application-set ${name} application ${subName}`);
+        commands.push(`set applications application-set ${setName} application ${subName}`);
       }
     } else {
       commands.push(`set applications application ${name} protocol ${app.protocol}`);
@@ -958,11 +1026,10 @@ function convertUtmPolicies(policies, warnings, profileDefs = {}) {
           utmCommands.push(`set security utm feature-profile anti-virus profile ${mapped.srxProfile} fallback-options content-size log-and-permit`);
           // content-size-limit and timeout are not valid under AV profile in modern Junos — skip
         } else if (mapped.srxType === 'web-filtering') {
-          // Bug 3 fix: Junos requires the web-filtering type to be set before
+          // Fix 3: Junos requires the web-filtering type to be set before
           // defining profiles, and the utm-policy http-profile name must match
-          // the profile name defined here exactly.
+          // the profile name defined under juniper-enhanced exactly.
           utmCommands.push(`set security utm feature-profile web-filtering type juniper-enhanced`);
-          utmCommands.push(`set security utm feature-profile web-filtering juniper-enhanced profile ${mapped.srxProfile}`);
           if (profileDef && profileDef.blockCategories && profileDef.blockCategories.length > 0) {
             utmCommands.push(`# Block categories from source: ${profileDef.blockCategories.join(', ')}`);
             utmCommands.push(`set security utm feature-profile web-filtering juniper-enhanced profile ${mapped.srxProfile} default block`);
@@ -1301,7 +1368,8 @@ function convertSecurityPolicies(policies, commands, warnings, summary, profileM
       for (const dstZone of dstZones) {
         const fromZone = sanitizeJunosName(srcZone);
         const toZone = sanitizeJunosName(dstZone);
-        const isGlobal = fromZone === 'any' && toZone === 'any';
+        // Fix 9: Use global policy when EITHER zone is 'any' (not just both)
+        const isGlobal = fromZone === 'any' || toZone === 'any';
         const policyPath = isGlobal
           ? `security policies global policy ${policyName}`
           : `security policies from-zone ${fromZone} to-zone ${toZone} policy ${policyName}`;
@@ -1373,12 +1441,14 @@ function convertSecurityPolicies(policies, commands, warnings, summary, profileM
           commands.push(`set ${policyPath} then permit application-services security-intelligence-policy secIntel-policy`);
         }
 
-        // SSL Proxy attachment (for policies flagged by LLM or safety net)
+        // Fix 8: SSL Proxy profiles require PKI certificates that can't be auto-generated.
+        // Skip the active ssl-proxy-profile reference; emit as comment only.
         if (policy._srx_decrypt && policy.action === 'allow') {
           const sslProfile = policy._srx_decrypt_profile
             ? sanitizeJunosName(policy._srx_decrypt_profile)
             : 'ssl-fwd-proxy';
-          commands.push(`set ${policyPath} then permit application-services ssl-proxy profile-name ${sslProfile}`);
+          commands.push(`# NOTE: SSL proxy skipped — profile "${sslProfile}" requires manual PKI setup before enabling`);
+          commands.push(`# set ${policyPath} then permit application-services ssl-proxy profile-name ${sslProfile}`);
         }
 
         // Profile group fallback (if no individual profiles but group exists)
@@ -1417,6 +1487,22 @@ function convertSecurityPolicies(policies, commands, warnings, summary, profileM
  * Map of customName → originalName, used to generate placeholder definitions.
  */
 const customfwicApps = new Map();
+
+/**
+ * Fix 4: Tracks service names referenced in policies that were not defined
+ * by convertServiceObjects (e.g., "tcp-9090"). These need application
+ * definitions emitted before policies.
+ * Map of sanitizedName → originalServiceName.
+ */
+const unresolvedServiceApps = new Map();
+
+/**
+ * Tracks services/apps with comma-separated ports that were split into
+ * individual applications and wrapped in an application-set with a -set suffix.
+ * Map of originalName → setName (e.g., "tcp-443-8443" → "tcp-443-8443-set").
+ * Built during convertServiceObjects()/convertApplications(), consumed by resolveApplications().
+ */
+const commaPortSetMap = new Map();
 
 /**
  * Tracks service objects that are equivalent to predefined Junos applications.
@@ -1501,13 +1587,23 @@ function resolveApplications(applications, services, warnings, policyName, appGr
         resolved.push(predefName);
         continue;
       }
+      // Fix 2: Check if this service was split into comma-port application-set
+      const commaSetName = commaPortSetMap.get(svc);
+      if (commaSetName) {
+        resolved.push(commaSetName);
+        continue;
+      }
       // Try mapping service name (catches FortiGate "HTTP", "HTTPS", etc.)
       const junosApp = mapAppToJunos(svc, sourceVendor);
       if (junosApp) {
         resolved.push(junosApp);
       } else {
         // Service objects already converted to SRX applications — reference by name
-        resolved.push(sanitizeJunosName(svc));
+        const safeSvcName = sanitizeJunosName(svc);
+        resolved.push(safeSvcName);
+        // Fix 4: Track service references that may not have been defined
+        // so we can emit application definitions before policies
+        unresolvedServiceApps.set(safeSvcName, svc);
       }
     }
   }
@@ -1622,11 +1718,30 @@ function convertNatRules(natRules, commands, warnings, summary, addressObjects) 
 
     for (const [zonePair, rules] of Object.entries(ruleSetGroups)) {
       const [fromZone, toZone] = zonePair.split('->');
+      // Fix 5: NAT rule-sets cannot use 'any' as zone — replace with actual zones
       const ruleSetName = sanitizeJunosName(`${fromZone}-to-${toZone}`);
       const ruleSetPath = `security nat source rule-set ${ruleSetName}`;
-
-      commands.push(`set ${ruleSetPath} from zone ${sanitizeJunosName(fromZone)}`);
-      commands.push(`set ${ruleSetPath} to zone ${sanitizeJunosName(toZone)}`);
+      if (fromZone === 'any' || toZone === 'any') {
+        const actualZones = [...definedZones].filter(z => z !== 'any');
+        if (actualZones.length === 0) {
+          commands.push(`# WARNING: NAT rule-set ${fromZone}-to-${toZone} skipped — no defined zones to replace 'any'`);
+          warnings.push(createWarning('warning', `nat/source/${fromZone}-to-${toZone}`,
+            `NAT rule-set from ${fromZone} to ${toZone} skipped — 'any' is not valid and no zones defined`,
+            'Define security zones before NAT rules'));
+          continue;
+        }
+        const resolvedFromZones = fromZone === 'any' ? actualZones : [sanitizeJunosName(fromZone)];
+        const resolvedToZones = toZone === 'any' ? actualZones : [sanitizeJunosName(toZone)];
+        for (const fz of resolvedFromZones) {
+          commands.push(`set ${ruleSetPath} from zone ${fz}`);
+        }
+        for (const tz of resolvedToZones) {
+          commands.push(`set ${ruleSetPath} to zone ${tz}`);
+        }
+      } else {
+        commands.push(`set ${ruleSetPath} from zone ${sanitizeJunosName(fromZone)}`);
+        commands.push(`set ${ruleSetPath} to zone ${sanitizeJunosName(toZone)}`);
+      }
 
       for (const rule of rules) {
         const ruleName = sanitizeJunosName(rule.name);
@@ -1691,7 +1806,22 @@ function convertNatRules(natRules, commands, warnings, summary, addressObjects) 
       const ruleSetName = sanitizeJunosName(`${fromZone}-to-${toZone}`);
       const ruleSetPath = `security nat destination rule-set ${ruleSetName}`;
 
-      commands.push(`set ${ruleSetPath} from zone ${sanitizeJunosName(fromZone)}`);
+      // Fix 5: NAT rule-sets cannot use 'any' as zone — replace with actual zones
+      if (fromZone === 'any') {
+        const actualZones = [...definedZones].filter(z => z !== 'any');
+        if (actualZones.length === 0) {
+          commands.push(`# WARNING: Destination NAT rule-set ${fromZone}-to-${toZone} skipped — no defined zones`);
+          warnings.push(createWarning('warning', `nat/destination/${fromZone}-to-${toZone}`,
+            `Destination NAT rule-set from ${fromZone} skipped — 'any' is not valid and no zones defined`,
+            'Define security zones before NAT rules'));
+          continue;
+        }
+        for (const fz of actualZones) {
+          commands.push(`set ${ruleSetPath} from zone ${fz}`);
+        }
+      } else {
+        commands.push(`set ${ruleSetPath} from zone ${sanitizeJunosName(fromZone)}`);
+      }
 
       for (const rule of rules) {
         const ruleName = sanitizeJunosName(rule.name);
@@ -1937,6 +2067,21 @@ function convertOspfConfig(ospfConfig, commands, warnings, summary, interfaceMap
     for (const area of ospf.areas || []) {
       const areaId = area.area_id;
 
+      // Fix 7: Check if area has any mapped interfaces — skip if empty
+      const mappedInterfaces = (area.interfaces || []).filter(iface => {
+        const mapped = mapInterfaceName(iface.name, interfaceMappings);
+        // Skip if interface mapping resulted in an unmappable vendor-specific name
+        return mapped && mapped !== iface.name || Object.keys(interfaceMappings).length === 0;
+      });
+      const hasNetworks = (area.networks || []).length > 0;
+      if (mappedInterfaces.length === 0 && !hasNetworks) {
+        commands.push(`# WARNING: OSPF area ${areaId} skipped — no interfaces configured`);
+        warnings.push(createWarning('warning', `ospf/area/${areaId}`,
+          `OSPF area ${areaId} has no interfaces after mapping — skipped to avoid commit error`,
+          'Add interfaces to this OSPF area or remove it'));
+        continue;
+      }
+
       // Area type
       if (area.area_type === 'stub') {
         commands.push(`${prefix}protocols ospf area ${areaId} stub`);
@@ -2037,6 +2182,20 @@ function convertOspf3Config(ospf3Config, commands, warnings, summary, interfaceM
 
     for (const area of ospf.areas || []) {
       const areaId = area.area_id;
+
+      // Fix 7: Skip OSPFv3 areas with no interfaces after mapping
+      const mappedIf3s = (area.interfaces || []).filter(iface => {
+        const mapped = mapInterfaceName(iface.name, interfaceMappings);
+        return mapped && mapped !== iface.name || Object.keys(interfaceMappings).length === 0;
+      });
+      const hasNets3 = (area.networks || []).length > 0;
+      if (mappedIf3s.length === 0 && !hasNets3) {
+        commands.push(`# WARNING: OSPFv3 area ${areaId} skipped — no interfaces configured`);
+        warnings.push(createWarning('warning', `ospf3/area/${areaId}`,
+          `OSPFv3 area ${areaId} has no interfaces after mapping — skipped to avoid commit error`,
+          'Add interfaces to this OSPFv3 area or remove it'));
+        continue;
+      }
 
       if (area.area_type === 'stub') {
         commands.push(`${prefix}protocols ospf3 area ${areaId} stub`);
@@ -2775,6 +2934,19 @@ function convertDhcpConfig(dhcpConfig, commands, warnings, summary) {
       // DHCP Server pool
       const poolName = sanitizeJunosName(cfg.name || cfg.interface || 'dhcp-pool');
 
+      // Fix 1: DHCP pool requires a network statement — skip pool entirely if missing
+      const dhcpNetwork = cfg.network || cfg.subnet;
+      if (!dhcpNetwork) {
+        commands.push(`# WARNING: DHCP pool "${cfg.name || poolName}" skipped — no network/subnet defined (mandatory for SRX)`);
+        warnings.push(createWarning('warning', `dhcp/${poolName}`,
+          `DHCP pool "${cfg.name || poolName}" has no network statement — skipped`,
+          'Add a network statement (e.g., 192.168.1.0/24) to the DHCP pool configuration'));
+        continue;
+      }
+
+      // Emit network statement first (mandatory)
+      commands.push(`set access address-assignment pool ${poolName} family inet network ${dhcpNetwork}`);
+
       if (cfg.pools) {
         for (let i = 0; i < cfg.pools.length; i++) {
           const pool = cfg.pools[i];
@@ -2792,10 +2964,6 @@ function convertDhcpConfig(dhcpConfig, commands, warnings, summary) {
           if (range.low) commands.push(`set access address-assignment pool ${poolName} family inet range ${rName} low ${range.low}`);
           if (range.high) commands.push(`set access address-assignment pool ${poolName} family inet range ${rName} high ${range.high}`);
         }
-      }
-
-      if (cfg.network) {
-        commands.push(`set access address-assignment pool ${poolName} family inet network ${cfg.network}`);
       }
 
       if (cfg.gateway || cfg.router) {

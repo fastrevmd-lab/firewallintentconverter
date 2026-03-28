@@ -121,6 +121,7 @@ export function convertToSrxSetCommands(config, interfaceMappings = {}, targetCo
   convertSystemConfig(config.system_config, commands, warnings, summary);
   convertZones(config.zones, commands, warnings, summary, interfaceMappings);
   convertInterfaceAddresses(config.interfaces, commands, warnings, summary, interfaceMappings);
+  ensureZoneInterfaceFamilies(config.zones, config.interfaces, commands, interfaceMappings);
   convertLagInterfaces(config.lag_interfaces, commands, warnings, summary, interfaceMappings);
   convertAddressObjects(config.address_objects, commands, warnings, summary);
   convertAddressGroups(config.address_groups, commands, warnings, summary);
@@ -409,6 +410,51 @@ function convertInterfaceAddresses(interfaces, commands, warnings, summary, inte
   }
 
   commands.push('');
+}
+
+// ---------------------------------------------------------------------------
+// Ensure Zone-Referenced Interfaces Have Family Config
+// ---------------------------------------------------------------------------
+
+/**
+ * Checks all interfaces referenced in security zones and ensures each has at
+ * least a `set interfaces {base} unit {unit} family inet` command. Interfaces
+ * already configured via convertInterfaceAddresses are skipped.
+ *
+ * @param {Object[]} zones - Parsed zone objects
+ * @param {Object[]} interfaces - Parsed interface objects (may be empty)
+ * @param {string[]} commands - Output commands array
+ * @param {Object} interfaceMappings - User-defined interface mappings
+ */
+function ensureZoneInterfaceFamilies(zones, interfaces, commands, interfaceMappings = {}) {
+  if (!zones || zones.length === 0) return;
+
+  // Collect all interfaces that already have a `set interfaces ... family inet` command
+  const configuredRe = /^set interfaces (\S+) unit (\S+) family inet/;
+  const configured = new Set();
+  for (const cmd of commands) {
+    const m = cmd.match(configuredRe);
+    if (m) configured.add(`${m[1]}.${m[2]}`);
+  }
+
+  const added = [];
+  for (const zone of zones) {
+    for (const iface of zone.interfaces || []) {
+      const srxIface = mapInterfaceName(iface, interfaceMappings);
+      const [base, unit = '0'] = srxIface.split('.');
+      const key = `${base}.${unit}`;
+      if (!configured.has(key)) {
+        commands.push(`set interfaces ${base} unit ${unit} family inet`);
+        configured.add(key);
+        added.push(srxIface);
+      }
+    }
+  }
+
+  if (added.length > 0) {
+    // Insert a blank line after the added interface family commands
+    commands.push('');
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1355,7 +1401,9 @@ function resolveApplications(applications, services, warnings, policyName, appGr
     if (junosApp) {
       resolved.push(junosApp);
     } else {
-      const customName = sanitizeJunosName(appName) + 'Customfwic';
+      let customName = sanitizeJunosName(appName).replace(/\./g, '-') + 'Customfwic';
+      // Junos names must start with a letter
+      if (/^\d/.test(customName)) customName = `app-${customName}`;
       resolved.push(customName);
       customfwicApps.set(customName, appName);
       warnings.push(createWarning(
@@ -1374,6 +1422,9 @@ function resolveApplications(applications, services, warnings, policyName, appGr
         resolved.push('any');
         continue;
       }
+
+      // Skip vendor keywords that aren't real application names
+      if (app === 'service-set') continue;
 
       // Check if this is an application group reference — expand to members
       const group = appGroups.find(g => g.name === app);
@@ -1480,6 +1531,8 @@ function convertNatRules(natRules, commands, warnings, summary, addressObjects) 
     if (obj.value) addrLookup[obj.name] = obj.value;
     else if (obj.ip) addrLookup[obj.name] = obj.ip;
     else if (obj.network) addrLookup[obj.name] = obj.network;
+    else if (obj.subnet) addrLookup[obj.name] = obj.subnet;
+    else if (obj.address) addrLookup[obj.name] = obj.address;
   }
 
   commands.push('# =============================================');
@@ -1651,17 +1704,18 @@ function convertStaticRoutes(routes, commands, warnings, summary) {
   for (const route of routes) {
     if (!route.destination) continue;
 
-    const dest = route.destination;
+    const dest = route.destination.trim();
+    const nextHop = route.next_hop ? route.next_hop.trim().replace(/[^\w.:/-]/g, '') : '';
 
     if (route.vrf) {
       // Routing instance
       const instName = sanitizeJunosName(route.vrf);
       if (route.next_hop_type === 'discard') {
         commands.push(`set routing-instances ${instName} routing-options static route ${dest} discard`);
-      } else if (route.next_hop_type === 'next-vr' && route.next_hop) {
-        commands.push(`set routing-instances ${instName} routing-options static route ${dest} next-table ${route.next_hop}.inet.0`);
-      } else if (route.next_hop) {
-        commands.push(`set routing-instances ${instName} routing-options static route ${dest} next-hop ${route.next_hop}`);
+      } else if (route.next_hop_type === 'next-vr' && nextHop) {
+        commands.push(`set routing-instances ${instName} routing-options static route ${dest} next-table ${nextHop}.inet.0`);
+      } else if (nextHop) {
+        commands.push(`set routing-instances ${instName} routing-options static route ${dest} next-hop ${nextHop}`);
       }
       if (route.metric && route.metric !== 10) {
         commands.push(`set routing-instances ${instName} routing-options static route ${dest} metric ${route.metric}`);
@@ -1670,10 +1724,10 @@ function convertStaticRoutes(routes, commands, warnings, summary) {
       // Global routing-options
       if (route.next_hop_type === 'discard') {
         commands.push(`set routing-options static route ${dest} discard`);
-      } else if (route.next_hop_type === 'next-vr' && route.next_hop) {
-        commands.push(`set routing-options static route ${dest} next-table ${route.next_hop}.inet.0`);
-      } else if (route.next_hop) {
-        commands.push(`set routing-options static route ${dest} next-hop ${route.next_hop}`);
+      } else if (route.next_hop_type === 'next-vr' && nextHop) {
+        commands.push(`set routing-options static route ${dest} next-table ${nextHop}.inet.0`);
+      } else if (nextHop) {
+        commands.push(`set routing-options static route ${dest} next-hop ${nextHop}`);
       }
       if (route.metric && route.metric !== 10) {
         commands.push(`set routing-options static route ${dest} metric ${route.metric}`);
@@ -2305,6 +2359,23 @@ function convertMnhaConfig(haConfig, commands, warnings, summary) {
 function convertScreenConfig(screens, commands, warnings, summary) {
   if (!screens || screens.length === 0) return;
 
+  // Junos screen value limits (parameter → max allowed value)
+  const screenLimits = {
+    syn_flood_timeout: 50,          // 1..50
+    syn_flood_threshold: 1000000,   // 1..1000000
+    syn_flood_alarm_threshold: 1000000,
+    flood_threshold: 1000000,       // icmp/udp flood
+    source_based: 128000,           // limit-session
+    destination_based: 128000,
+  };
+
+  /** @param {number} val @param {string} key */
+  const clampScreen = (val, key) => {
+    const max = screenLimits[key];
+    if (max && val > max) return max;
+    return val;
+  };
+
   commands.push('# =============================================');
   commands.push('# Security Screen (IDS Options)');
   commands.push('# =============================================');
@@ -2317,17 +2388,19 @@ function convertScreenConfig(screens, commands, warnings, summary) {
     if (screen.icmp) {
       if (screen.icmp.ping_death) commands.push(`${prefix} icmp ping-death`);
       if (screen.icmp.fragment) commands.push(`${prefix} icmp fragment`);
-      if (screen.icmp.flood_threshold) commands.push(`${prefix} icmp flood threshold ${screen.icmp.flood_threshold}`);
+      if (screen.icmp.flood_threshold) commands.push(`${prefix} icmp flood threshold ${clampScreen(screen.icmp.flood_threshold, 'flood_threshold')}`);
     }
 
     // TCP protections
     if (screen.tcp) {
       if (screen.tcp.syn_flood_threshold) {
-        const alarmVal = screen.tcp.syn_flood_alarm_threshold || Math.round(screen.tcp.syn_flood_threshold * 5) || 1024;
+        const rawAlarm = screen.tcp.syn_flood_alarm_threshold || Math.round(screen.tcp.syn_flood_threshold * 5) || 1024;
+        const alarmVal = clampScreen(rawAlarm, 'syn_flood_alarm_threshold');
+        const attackVal = clampScreen(screen.tcp.syn_flood_threshold, 'syn_flood_threshold');
         commands.push(`${prefix} tcp syn-flood alarm-threshold ${alarmVal}`);
-        commands.push(`${prefix} tcp syn-flood attack-threshold ${screen.tcp.syn_flood_threshold}`);
+        commands.push(`${prefix} tcp syn-flood attack-threshold ${attackVal}`);
       }
-      if (screen.tcp.syn_flood_timeout) commands.push(`${prefix} tcp syn-flood timeout ${screen.tcp.syn_flood_timeout}`);
+      if (screen.tcp.syn_flood_timeout) commands.push(`${prefix} tcp syn-flood timeout ${clampScreen(screen.tcp.syn_flood_timeout, 'syn_flood_timeout')}`);
       if (screen.tcp.land_attack) commands.push(`${prefix} tcp land`);
       if (screen.tcp.winnuke) commands.push(`${prefix} tcp winnuke`);
       if (screen.tcp.tcp_no_flag) commands.push(`${prefix} tcp tcp-no-flag`);
@@ -2335,7 +2408,7 @@ function convertScreenConfig(screens, commands, warnings, summary) {
 
     // UDP protections
     if (screen.udp && screen.udp.flood_threshold) {
-      commands.push(`${prefix} udp flood threshold ${screen.udp.flood_threshold}`);
+      commands.push(`${prefix} udp flood threshold ${clampScreen(screen.udp.flood_threshold, 'flood_threshold')}`);
     }
 
     // IP protections
@@ -2349,8 +2422,8 @@ function convertScreenConfig(screens, commands, warnings, summary) {
 
     // Session limits
     if (screen.limit_session) {
-      if (screen.limit_session.source_based) commands.push(`${prefix} limit-session source-ip-based ${screen.limit_session.source_based}`);
-      if (screen.limit_session.destination_based) commands.push(`${prefix} limit-session destination-ip-based ${screen.limit_session.destination_based}`);
+      if (screen.limit_session.source_based) commands.push(`${prefix} limit-session source-ip-based ${clampScreen(screen.limit_session.source_based, 'source_based')}`);
+      if (screen.limit_session.destination_based) commands.push(`${prefix} limit-session destination-ip-based ${clampScreen(screen.limit_session.destination_based, 'destination_based')}`);
     }
 
     // Apply screen to zone if known
@@ -2863,9 +2936,10 @@ function convertPbfConfig(pbfRules, commands, warnings, summary, interfaceMappin
   // Build lookup map from address object names to their IP values
   const addrLookup = new Map();
   for (const obj of (addressObjects || [])) {
-    if (obj.name && obj.value && (obj.type === 'host' || obj.type === 'subnet')) {
-      addrLookup.set(obj.name, obj.value);
-      addrLookup.set(sanitizeJunosName(obj.name), obj.value);
+    const addrVal = obj.value || obj.ip || obj.network || obj.subnet || obj.address;
+    if (obj.name && addrVal && (obj.type === 'host' || obj.type === 'subnet')) {
+      addrLookup.set(obj.name, addrVal);
+      addrLookup.set(sanitizeJunosName(obj.name), addrVal);
     }
   }
 

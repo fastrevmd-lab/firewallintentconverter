@@ -1,0 +1,156 @@
+[
+  {
+    "sample_key": "basic",
+    "label": "Basic (6 rules)",
+    "vendor": "panos",
+    "total_commands": 403,
+    "filtered_commands": 250,
+    "device_result": {
+      "status": "error",
+      "commit_warnings": 0,
+      "commit_errors": 0,
+      "error_details": "Connection/general error: conflicting args, cannot use 'set' with 'overwrite'",
+      "load_warnings": []
+    }
+  },
+  {
+    "sample_key": "medium",
+    "label": "Medium (12 rules)",
+    "vendor": "panos",
+    "total_commands": 245,
+    "filtered_commands": 179,
+    "device_result": {
+      "status": "error",
+      "commit_warnings": 0,
+      "commit_errors": 0,
+      "error_details": "Connection/general error: conflicting args, cannot use 'set' with 'overwrite'",
+      "load_warnings": []
+    }
+  },
+  {
+    "sample_key": "complex",
+    "label": "Complex (19 rules)",
+    "vendor": "panos",
+    "total_commands": 443,
+    "filtered_commands": 345,
+    "device_result": {
+      "status": "error",
+      "commit_warnings": 0,
+      "commit_errors": 0,
+      "error_details": "Connection/general error: conflicting args, cannot use 'set' with 'overwrite'",
+      "load_warnings": []
+    }
+  },
+  {
+    "sample_key": "edgeCases",
+    "label": "Edge Cases (8 rules)",
+    "vendor": "panos",
+    "total_commands": 164,
+    "filtered_commands": 111,
+    "device_result": {
+      "status": "error",
+      "commit_warnings": 0,
+      "commit_errors": 0,
+      "error_details": "Connection/general error: conflicting args, cannot use 'set' with 'overwrite'",
+      "load_warnings": []
+    }
+  },
+  {
+    "sample_key": "realworld",
+    "label": "Real-World (23 rules)",
+    "vendor": "panos",
+    "total_commands": 788,
+    "filtered_commands": 652,
+    "device_result": {
+      "status": "error",
+      "commit_warnings": 0,
+      "commit_errors": 0,
+      "error_details": "Connection/general error: conflicting args, cannot use 'set' with 'overwrite'",
+      "load_warnings": []
+    }
+  },
+  {
+    "sample_key": "srx_basic",
+    "label": "SRX Basic (6 rules)",
+    "vendor": "srx",
+    "total_commands": 317,
+    "filtered_commands": 201,
+    "device_result": {
+      "status": "error",
+      "commit_warnings": 0,
+      "commit_errors": 0,
+      "error_details": "Connection/general error: conflicting args, cannot use 'set' with 'overwrite'",
+      "load_warnings": []
+    }
+  },
+  {
+    "sample_key": "fortigate_basic",
+    "label": "FortiGate Basic (8 rules)",
+    "vendor": "fortigate",
+    "total_commands": 440,
+    "filtered_commands": 283,
+    "device_result": {
+      "status": "error",
+      "commit_warnings": 0,
+      "commit_errors": 0,
+      "error_details": "Connection/general error: conflicting args, cannot use 'set' with 'overwrite'",
+      "load_warnings": []
+    }
+  },
+  {
+    "sample_key": "cisco_basic",
+    "label": "Basic (8 rules)",
+    "vendor": "cisco_asa",
+    "total_commands": 291,
+    "filtered_commands": 179,
+    "device_result": {
+      "status": "error",
+      "commit_warnings": 0,
+      "commit_errors": 0,
+      "error_details": "Connection/general error: conflicting args, cannot use 'set' with 'overwrite'",
+      "load_warnings": []
+    }
+  },
+  {
+    "sample_key": "checkpoint_basic",
+    "label": "Basic (6 rules)",
+    "vendor": "checkpoint",
+    "total_commands": 138,
+    "filtered_commands": 79,
+    "device_result": {
+      "status": "error",
+      "commit_warnings": 0,
+      "commit_errors": 0,
+      "error_details": "Connection/general error: conflicting args, cannot use 'set' with 'overwrite'",
+      "load_warnings": []
+    }
+  },
+  {
+    "sample_key": "sonicwall_basic",
+    "label": "Basic (6 rules)",
+    "vendor": "sonicwall",
+    "total_commands": 156,
+    "filtered_commands": 97,
+    "device_result": {
+      "status": "error",
+      "commit_warnings": 0,
+      "commit_errors": 0,
+      "error_details": "Connection/general error: conflicting args, cannot use 'set' with 'overwrite'",
+      "load_warnings": []
+    }
+  },
+  {
+    "sample_key": "huawei_basic",
+    "label": "Basic (6 rules)",
+    "vendor": "huawei_usg",
+    "total_commands": 189,
+    "filtered_commands": 109,
+    "device_result": {
+      "status": "error",
+      "commit_warnings": 0,
+      "commit_errors": 0,
+      "error_details": "Connection/general error: conflicting args, cannot use 'set' with 'overwrite'",
+      "load_warnings": []
+    }
+  }
+]

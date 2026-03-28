@@ -865,8 +865,8 @@ function convertUtmPolicies(policies, warnings, profileDefs = {}) {
           const sizeLimit = (profileDef && profileDef.scanMode === 'full') ? 40000 : 20000;
           utmCommands.push(`set security utm feature-profile anti-virus profile ${mapped.srxProfile} fallback-options default log-and-permit`);
           utmCommands.push(`set security utm feature-profile anti-virus profile ${mapped.srxProfile} fallback-options content-size log-and-permit`);
-          utmCommands.push(`set security utm feature-profile anti-virus profile ${mapped.srxProfile} scan-options content-size-limit ${sizeLimit}`);
-          utmCommands.push(`set security utm feature-profile anti-virus profile ${mapped.srxProfile} scan-options timeout 180`);
+          utmCommands.push(`set security utm feature-profile anti-virus profile ${mapped.srxProfile} content-size-limit ${sizeLimit}`);
+          utmCommands.push(`set security utm feature-profile anti-virus profile ${mapped.srxProfile} timeout 180`);
         } else if (mapped.srxType === 'web-filtering') {
           utmCommands.push(`set security utm feature-profile web-filtering juniper-enhanced profile ${mapped.srxProfile}`);
           if (profileDef && profileDef.blockCategories && profileDef.blockCategories.length > 0) {
@@ -1118,13 +1118,13 @@ function convertUserIdentification(policies, commands, warnings) {
   commands.push('# =============================================');
   commands.push('# User Identification (JIMS Integration)');
   commands.push('# =============================================');
-  commands.push('# NOTE: JIMS server connection details must be configured manually');
-  commands.push('set services user-identification identity-management connection connect-method https');
-  commands.push('set services user-identification identity-management connection port 1443');
+  commands.push('# NOTE: JIMS/User-ID requires manual configuration with server-specific details.');
+  commands.push('# Configure identity-management connection after JIMS server is set up:');
+  commands.push('# set services user-identification identity-management connection connect-method https');
+  commands.push('# set services user-identification identity-management connection port 1443');
   commands.push('# set services user-identification identity-management connection primary address <JIMS_SERVER_IP>');
   commands.push('# set services user-identification identity-management connection primary client-id <CLIENT_ID>');
   commands.push('# set services user-identification identity-management connection primary client-secret <SECRET>');
-  commands.push('set services user-identification device-information authentication-source active-directory-authentication-table');
   commands.push('');
 
   // Document all unique identity references
@@ -1207,7 +1207,10 @@ function convertSecurityPolicies(policies, commands, warnings, summary, profileM
       for (const dstZone of dstZones) {
         const fromZone = sanitizeJunosName(srcZone);
         const toZone = sanitizeJunosName(dstZone);
-        const policyPath = `security policies from-zone ${fromZone} to-zone ${toZone} policy ${policyName}`;
+        const isGlobal = fromZone === 'any' && toZone === 'any';
+        const policyPath = isGlobal
+          ? `security policies global policy ${policyName}`
+          : `security policies from-zone ${fromZone} to-zone ${toZone} policy ${policyName}`;
 
         // Description (include PAN-OS tags as comments)
         let fullDescription = policy.description || '';
@@ -2320,11 +2323,27 @@ function convertScreenConfig(screens, commands, warnings, summary) {
  */
 /**
  * Maps common authentication algorithm names to valid Junos IKE/IPsec identifiers.
+ * IKE proposals use bare names (sha-256), IPsec proposals use HMAC variants (hmac-sha-256-128).
  * @param {string} algo - The source authentication algorithm name
+ * @param {'ike'|'ipsec'} context - Whether this is for an IKE or IPsec proposal
  * @returns {string} Valid Junos authentication-algorithm value
  */
-function mapAuthAlgorithm(algo) {
-  const map = {
+function mapAuthAlgorithm(algo, context = 'ipsec') {
+  const ikeMap = {
+    'sha256': 'sha-256',
+    'sha-256': 'sha-256',
+    'sha1': 'sha1',
+    'sha-1': 'sha1',
+    'sha384': 'sha-384',
+    'sha-384': 'sha-384',
+    'sha512': 'sha-512',
+    'sha-512': 'sha-512',
+    'md5': 'md5',
+    'hmac-sha-256-128': 'sha-256',
+    'hmac-sha1-96': 'sha1',
+    'hmac-md5-96': 'md5',
+  };
+  const ipsecMap = {
     'sha256': 'hmac-sha-256-128',
     'sha-256': 'hmac-sha-256-128',
     'sha1': 'hmac-sha1-96',
@@ -2335,6 +2354,7 @@ function mapAuthAlgorithm(algo) {
     'sha-512': 'hmac-sha-512',
     'md5': 'hmac-md5-96',
   };
+  const map = context === 'ike' ? ikeMap : ipsecMap;
   return map[algo.toLowerCase()] || algo;
 }
 
@@ -2359,7 +2379,7 @@ function convertVpnTunnels(tunnels, commands, warnings, summary) {
       commands.push(`set security ike proposal ${propName} authentication-method ${vpn.ike_proposal.auth_method || 'pre-shared-keys'}`);
       commands.push(`set security ike proposal ${propName} dh-group ${vpn.ike_proposal.dh_group || 'group14'}`);
       commands.push(`set security ike proposal ${propName} encryption-algorithm ${vpn.ike_proposal.encryption || 'aes-256-cbc'}`);
-      commands.push(`set security ike proposal ${propName} authentication-algorithm ${mapAuthAlgorithm(vpn.ike_proposal.authentication || 'sha-256')}`);
+      commands.push(`set security ike proposal ${propName} authentication-algorithm ${mapAuthAlgorithm(vpn.ike_proposal.authentication || 'sha-256', 'ike')}`);
       if (vpn.ike_proposal.lifetime) {
         commands.push(`set security ike proposal ${propName} lifetime-seconds ${vpn.ike_proposal.lifetime}`);
       }
@@ -3021,19 +3041,22 @@ function convertSslProxyConfig(config, commands, warnings, summary) {
     commands.push('');
   }
 
-  // 3. SSL Forward Proxy profiles
-  for (const profileName of fwdProxyProfiles) {
-    commands.push(`set services ssl proxy profile ${profileName} root-ca FPIC-CA`);
-    commands.push(`set services ssl proxy profile ${profileName} protocol-version tls12-and-above`);
-    commands.push(`set services ssl proxy profile ${profileName} actions log`);
-    commands.push(`set services ssl proxy profile ${profileName} actions crl-disable`);
+  // 3. SSL Forward Proxy profiles — skipped (requires manual PKI setup)
+  if (fwdProxyProfiles.size > 0) {
+    commands.push('# SSL forward-proxy profiles require manual configuration:');
+    for (const profileName of fwdProxyProfiles) {
+      commands.push(`#   set services ssl proxy profile ${profileName} root-ca <CA_PROFILE>`);
+    }
+    commands.push('# SSL proxy requires PKI certificates that cannot be auto-generated.');
+    commands.push('# See: https://www.juniper.net/documentation/us/en/software/junos/ssl-proxy/');
   }
 
-  // 4. SSL Inbound Inspection profiles
-  for (const [profileName, certName] of inboundProfiles) {
-    commands.push(`set services ssl proxy profile ${profileName} server-certificate ${certName}`);
-    commands.push(`set services ssl proxy profile ${profileName} protocol-version tls12-and-above`);
-    commands.push(`set services ssl proxy profile ${profileName} actions log`);
+  // 4. SSL Inbound Inspection profiles — skipped (requires manual PKI setup)
+  if (inboundProfiles.size > 0) {
+    commands.push('# SSL inbound-inspection profiles require manual configuration:');
+    for (const [profileName, certName] of inboundProfiles) {
+      commands.push(`#   set services ssl proxy profile ${profileName} server-certificate ${certName}`);
+    }
   }
 
   if (fwdProxyProfiles.size > 0 || inboundProfiles.size > 0) commands.push('');

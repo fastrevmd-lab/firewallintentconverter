@@ -1,0 +1,156 @@
+[
+  {
+    "sample_key": "basic",
+    "label": "Basic (6 rules)",
+    "vendor": "panos",
+    "total_commands": 6,
+    "filtered_commands": 0,
+    "device_result": {
+      "status": "pass",
+      "commit_warnings": 0,
+      "commit_errors": 0,
+      "error_details": "No commands after filtering (trivially passes)",
+      "load_warnings": []
+    }
+  },
+  {
+    "sample_key": "medium",
+    "label": "Medium (12 rules)",
+    "vendor": "panos",
+    "total_commands": 6,
+    "filtered_commands": 0,
+    "device_result": {
+      "status": "pass",
+      "commit_warnings": 0,
+      "commit_errors": 0,
+      "error_details": "No commands after filtering (trivially passes)",
+      "load_warnings": []
+    }
+  },
+  {
+    "sample_key": "complex",
+    "label": "Complex (19 rules)",
+    "vendor": "panos",
+    "total_commands": 6,
+    "filtered_commands": 0,
+    "device_result": {
+      "status": "pass",
+      "commit_warnings": 0,
+      "commit_errors": 0,
+      "error_details": "No commands after filtering (trivially passes)",
+      "load_warnings": []
+    }
+  },
+  {
+    "sample_key": "edgeCases",
+    "label": "Edge Cases (8 rules)",
+    "vendor": "panos",
+    "total_commands": 6,
+    "filtered_commands": 0,
+    "device_result": {
+      "status": "pass",
+      "commit_warnings": 0,
+      "commit_errors": 0,
+      "error_details": "No commands after filtering (trivially passes)",
+      "load_warnings": []
+    }
+  },
+  {
+    "sample_key": "realworld",
+    "label": "Real-World (23 rules)",
+    "vendor": "panos",
+    "total_commands": 6,
+    "filtered_commands": 0,
+    "device_result": {
+      "status": "pass",
+      "commit_warnings": 0,
+      "commit_errors": 0,
+      "error_details": "No commands after filtering (trivially passes)",
+      "load_warnings": []
+    }
+  },
+  {
+    "sample_key": "srx_basic",
+    "label": "SRX Basic (6 rules)",
+    "vendor": "srx",
+    "total_commands": 6,
+    "filtered_commands": 0,
+    "device_result": {
+      "status": "pass",
+      "commit_warnings": 0,
+      "commit_errors": 0,
+      "error_details": "No commands after filtering (trivially passes)",
+      "load_warnings": []
+    }
+  },
+  {
+    "sample_key": "fortigate_basic",
+    "label": "FortiGate Basic (8 rules)",
+    "vendor": "fortigate",
+    "total_commands": 6,
+    "filtered_commands": 0,
+    "device_result": {
+      "status": "pass",
+      "commit_warnings": 0,
+      "commit_errors": 0,
+      "error_details": "No commands after filtering (trivially passes)",
+      "load_warnings": []
+    }
+  },
+  {
+    "sample_key": "cisco_basic",
+    "label": "Basic (8 rules)",
+    "vendor": "cisco_asa",
+    "total_commands": 6,
+    "filtered_commands": 0,
+    "device_result": {
+      "status": "pass",
+      "commit_warnings": 0,
+      "commit_errors": 0,
+      "error_details": "No commands after filtering (trivially passes)",
+      "load_warnings": []
+    }
+  },
+  {
+    "sample_key": "checkpoint_basic",
+    "label": "Basic (6 rules)",
+    "vendor": "checkpoint",
+    "total_commands": 6,
+    "filtered_commands": 0,
+    "device_result": {
+      "status": "pass",
+      "commit_warnings": 0,
+      "commit_errors": 0,
+      "error_details": "No commands after filtering (trivially passes)",
+      "load_warnings": []
+    }
+  },
+  {
+    "sample_key": "sonicwall_basic",
+    "label": "Basic (6 rules)",
+    "vendor": "sonicwall",
+    "total_commands": 6,
+    "filtered_commands": 0,
+    "device_result": {
+      "status": "pass",
+      "commit_warnings": 0,
+      "commit_errors": 0,
+      "error_details": "No commands after filtering (trivially passes)",
+      "load_warnings": []
+    }
+  },
+  {
+    "sample_key": "huawei_basic",
+    "label": "Basic (6 rules)",
+    "vendor": "huawei_usg",
+    "total_commands": 6,
+    "filtered_commands": 0,
+    "device_result": {
+      "status": "pass",
+      "commit_warnings": 0,
+      "commit_errors": 0,
+      "error_details": "No commands after filtering (trivially passes)",
+      "load_warnings": []
+    }
+  }
+]

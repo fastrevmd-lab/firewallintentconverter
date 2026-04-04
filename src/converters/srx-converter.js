@@ -897,6 +897,8 @@ function convertAddressObjects(objects, commands, warnings, summary) {
       case 'host':
       case 'subnet':
       case 'network':
+      case 'ip-netmask':
+      case 'ip-prefix':
         if (!addrValue) {
           commands.push(`# WARNING: Address "${obj.name}" has no IP value — skipping`);
           warnings.push(createWarning('warning', `address/${name}`,
@@ -3427,12 +3429,14 @@ function convertSnmpConfig(snmpConfig, commands, warnings, summary) {
     }
 
     if (entry.type === 'v3-user') {
+      const VALID_AUTH = ['md5', 'sha'];
+      const VALID_PRIV = ['des', 'aes128'];
       const userName = sanitizeJunosName(entry.name);
       commands.push(`set snmp v3 usm local-engine user ${userName}`);
-      if (entry.auth_protocol && entry.auth_protocol !== 'none') {
+      if (entry.auth_protocol && entry.auth_protocol !== 'none' && VALID_AUTH.includes(entry.auth_protocol)) {
         commands.push(`set snmp v3 usm local-engine user ${userName} authentication-${entry.auth_protocol}`);
       }
-      if (entry.privacy_protocol && entry.privacy_protocol !== 'none') {
+      if (entry.privacy_protocol && entry.privacy_protocol !== 'none' && VALID_PRIV.includes(entry.privacy_protocol)) {
         commands.push(`set snmp v3 usm local-engine user ${userName} privacy-${entry.privacy_protocol}`);
       }
     }

@@ -1842,15 +1842,17 @@ function buildSnmpXml(snmpConfig, lines) {
     }
 
     if (entry.type === 'v3-user') {
+      const VALID_AUTH = ['md5', 'sha'];
+      const VALID_PRIV = ['des', 'aes128'];
       lines.push('    <v3>');
       lines.push('      <usm>');
       lines.push('        <local-engine>');
       lines.push('          <user>');
       lines.push(`            <name>${escapeXml(entry.name)}</name>`);
-      if (entry.auth_protocol && entry.auth_protocol !== 'none') {
+      if (entry.auth_protocol && entry.auth_protocol !== 'none' && VALID_AUTH.includes(entry.auth_protocol)) {
         lines.push(`            <authentication-${entry.auth_protocol}/>`);
       }
-      if (entry.privacy_protocol && entry.privacy_protocol !== 'none') {
+      if (entry.privacy_protocol && entry.privacy_protocol !== 'none' && VALID_PRIV.includes(entry.privacy_protocol)) {
         lines.push(`            <privacy-${entry.privacy_protocol}/>`);
       }
       lines.push('          </user>');

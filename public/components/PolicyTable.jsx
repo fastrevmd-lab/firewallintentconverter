@@ -15,6 +15,20 @@ import { mapActionToSrx, buildApplicationServices } from '../utils/srx-view-tran
 import useVirtualScroll from '../hooks/useVirtualScroll.js';
 import AutocompleteInput from './shared/AutocompleteInput.jsx';
 
+/**
+ * Returns a color for the hit count cell based on value and disabled state.
+ * @param {number|undefined} hitCount
+ * @param {boolean} disabled
+ * @returns {string} CSS color variable
+ */
+function getHitCountColor(hitCount, disabled) {
+  if (typeof hitCount !== 'number') return 'var(--text-muted)';
+  if (disabled) return 'var(--text-muted)';
+  if (hitCount === 0) return 'var(--error)';
+  if (hitCount < 100) return 'var(--caution)';
+  return 'var(--juniper-green)';
+}
+
 export default function PolicyTable({
   policies,
   warnings,
@@ -56,6 +70,9 @@ export default function PolicyTable({
   const hasIdentityPolicies = useMemo(() => {
     return (policies || []).some(p => p.source_users && p.source_users.length > 0);
   }, [policies]);
+
+  // Check if any policy has been annotated with live hit count data
+  const hasHitCounts = useMemo(() => policies.some(p => typeof p._hit_count === 'number'), [policies]);
 
   // Build a lookup of warning counts per rule
   const warningsByRule = useMemo(() => {
@@ -199,6 +216,14 @@ export default function PolicyTable({
     }
 
     result.sort((a, b) => {
+      // Numeric sort for hit counts — unannotated policies sort to the bottom
+      if (sortField === '_hit_count') {
+        const aVal = typeof a._hit_count === 'number' ? a._hit_count : -1;
+        const bVal = typeof b._hit_count === 'number' ? b._hit_count : -1;
+        if (aVal < bVal) return sortDir === 'asc' ? -1 : 1;
+        if (aVal > bVal) return sortDir === 'asc' ? 1 : -1;
+        return 0;
+      }
       let aVal = a[sortField];
       let bVal = b[sortField];
       if (Array.isArray(aVal)) aVal = aVal.join(', ');
@@ -828,6 +853,8 @@ export default function PolicyTable({
       <th onClick={() => handleSort('applications')}>App / Service{sortIndicator('applications')}</th>
       <th>Profiles</th>
       <th onClick={() => handleSort('action')}>Action{sortIndicator('action')}</th>
+      {hasHitCounts && <th onClick={() => handleSort('_hit_count')} style={{ width: 70, cursor: 'pointer' }}>Hits{sortIndicator('_hit_count')}</th>}
+      {hasHitCounts && <th style={{ width: 90 }}>Apps</th>}
       <th>Log</th>
       <th style={{ width: 36 }}></th>
     </tr>
@@ -843,6 +870,8 @@ export default function PolicyTable({
       <th onClick={() => handleSort('applications')}>Applications / Ports{sortIndicator('applications')}</th>
       {hasIdentityPolicies && <th>Source Identity</th>}
       <th onClick={() => handleSort('action')} style={{ width: 100 }}>Action{sortIndicator('action')}</th>
+      {hasHitCounts && <th onClick={() => handleSort('_hit_count')} style={{ width: 70, cursor: 'pointer' }}>Hits{sortIndicator('_hit_count')}</th>}
+      {hasHitCounts && <th style={{ width: 90 }}>Apps</th>}
       <th>Security Subscriptions</th>
       <th style={{ width: 70 }}>Options</th>
     </tr>
@@ -861,6 +890,8 @@ export default function PolicyTable({
       <th>Schedule</th>
       <th onClick={() => handleSort('services')}>Service{sortIndicator('services')}</th>
       <th onClick={() => handleSort('action')} style={{ width: 90 }}>Action{sortIndicator('action')}</th>
+      {hasHitCounts && <th onClick={() => handleSort('_hit_count')} style={{ width: 70, cursor: 'pointer' }}>Hits{sortIndicator('_hit_count')}</th>}
+      {hasHitCounts && <th style={{ width: 90 }}>Apps</th>}
       <th style={{ width: 52 }}>NAT</th>
       <th>Security Profiles</th>
       <th style={{ width: 40 }}>Log</th>
@@ -878,6 +909,8 @@ export default function PolicyTable({
       {hasIdentityPolicies && <th>Users</th>}
       <th onClick={() => handleSort('services')}>Services &amp; Apps{sortIndicator('services')}</th>
       <th onClick={() => handleSort('action')} style={{ width: 80 }}>Action{sortIndicator('action')}</th>
+      {hasHitCounts && <th onClick={() => handleSort('_hit_count')} style={{ width: 70, cursor: 'pointer' }}>Hits{sortIndicator('_hit_count')}</th>}
+      {hasHitCounts && <th style={{ width: 90 }}>Apps</th>}
       <th>Track</th>
       <th>Install On</th>
       <th style={{ width: 36 }}></th>
@@ -896,6 +929,8 @@ export default function PolicyTable({
       {hasIdentityPolicies && <th>Users</th>}
       <th onClick={() => handleSort('services')}>Service{sortIndicator('services')}</th>
       <th onClick={() => handleSort('action')} style={{ width: 80 }}>Action{sortIndicator('action')}</th>
+      {hasHitCounts && <th onClick={() => handleSort('_hit_count')} style={{ width: 70, cursor: 'pointer' }}>Hits{sortIndicator('_hit_count')}</th>}
+      {hasHitCounts && <th style={{ width: 90 }}>Apps</th>}
       <th style={{ width: 40 }}>DPI</th>
       <th style={{ width: 40 }}>Log</th>
       <th style={{ width: 36 }}></th>
@@ -915,6 +950,8 @@ export default function PolicyTable({
       <th onClick={() => handleSort('services')}>Service{sortIndicator('services')}</th>
       <th>Profiles</th>
       <th onClick={() => handleSort('action')} style={{ width: 80 }}>Action{sortIndicator('action')}</th>
+      {hasHitCounts && <th onClick={() => handleSort('_hit_count')} style={{ width: 70, cursor: 'pointer' }}>Hits{sortIndicator('_hit_count')}</th>}
+      {hasHitCounts && <th style={{ width: 90 }}>Apps</th>}
       <th style={{ width: 40 }}>Log</th>
       <th style={{ width: 36 }}></th>
     </tr>
@@ -932,7 +969,8 @@ export default function PolicyTable({
       {hasIdentityPolicies && <th>Users</th>}
       <th>Service / Port</th>
       <th style={{ width: 52 }}>Log</th>
-      <th style={{ width: 50 }}>Hits</th>
+      {hasHitCounts && <th onClick={() => handleSort('_hit_count')} style={{ width: 70, cursor: 'pointer' }}>Hits{sortIndicator('_hit_count')}</th>}
+      {hasHitCounts && <th style={{ width: 90 }}>Apps</th>}
       <th style={{ width: 36 }}></th>
     </tr>
   );
@@ -986,6 +1024,19 @@ export default function PolicyTable({
             {policy.action}
           </span>
         </td>
+        {hasHitCounts && (
+          <td style={{ textAlign: 'right', fontFamily: 'monospace', fontSize: 12, color: getHitCountColor(policy._hit_count, policy.disabled) }}>
+            {typeof policy._hit_count === 'number' ? policy._hit_count.toLocaleString() : '—'}
+          </td>
+        )}
+        {hasHitCounts && (
+          <td style={{ fontSize: 11 }} title={policy._matched_apps?.length ? policy._matched_apps.join(', ') : ''}>
+            {policy._matched_apps?.length > 0
+              ? <span className="chip" style={{ background: 'var(--bg-elevated)', padding: '1px 6px', borderRadius: 8, fontSize: 10 }}>{policy._matched_apps.length} apps</span>
+              : <span style={{ color: 'var(--text-muted)' }}>—</span>
+            }
+          </td>
+        )}
         <td style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
           {getDisplayLog(policy)}
         </td>
@@ -1040,6 +1091,19 @@ export default function PolicyTable({
         </td>
         {hasIdentityPolicies && <td>{renderCellValues(policy.source_users || [])}</td>}
         <td>{renderSrxAction(policy)}</td>
+        {hasHitCounts && (
+          <td style={{ textAlign: 'right', fontFamily: 'monospace', fontSize: 12, color: getHitCountColor(policy._hit_count, policy.disabled) }}>
+            {typeof policy._hit_count === 'number' ? policy._hit_count.toLocaleString() : '—'}
+          </td>
+        )}
+        {hasHitCounts && (
+          <td style={{ fontSize: 11 }} title={policy._matched_apps?.length ? policy._matched_apps.join(', ') : ''}>
+            {policy._matched_apps?.length > 0
+              ? <span className="chip" style={{ background: 'var(--bg-elevated)', padding: '1px 6px', borderRadius: 8, fontSize: 10 }}>{policy._matched_apps.length} apps</span>
+              : <span style={{ color: 'var(--text-muted)' }}>—</span>
+            }
+          </td>
+        )}
         <td>{renderSrxSubscriptions(policy)}</td>
         <td style={{ textAlign: 'center' }}>
           <button className="btn-icon btn-icon-danger" onClick={(e) => { e.stopPropagation(); onDeleteRule(realIndex); }} title="Delete policy">x</button>
@@ -1079,6 +1143,19 @@ export default function PolicyTable({
         <td><span className="fg-schedule">{fg.schedule || 'always'}</span></td>
         <td>{renderEditableCell(policy, 'services', renderCellValues(policy.services))}</td>
         <td>{renderFortigateAction(policy)}</td>
+        {hasHitCounts && (
+          <td style={{ textAlign: 'right', fontFamily: 'monospace', fontSize: 12, color: getHitCountColor(policy._hit_count, policy.disabled) }}>
+            {typeof policy._hit_count === 'number' ? policy._hit_count.toLocaleString() : '—'}
+          </td>
+        )}
+        {hasHitCounts && (
+          <td style={{ fontSize: 11 }} title={policy._matched_apps?.length ? policy._matched_apps.join(', ') : ''}>
+            {policy._matched_apps?.length > 0
+              ? <span className="chip" style={{ background: 'var(--bg-elevated)', padding: '1px 6px', borderRadius: 8, fontSize: 10 }}>{policy._matched_apps.length} apps</span>
+              : <span style={{ color: 'var(--text-muted)' }}>—</span>
+            }
+          </td>
+        )}
         <td>{renderFortigateNat(policy)}</td>
         <td>{renderFortigateProfiles(policy)}</td>
         <td style={{ fontSize: '11px', color: 'var(--text-muted)', textAlign: 'center' }}>
@@ -1119,6 +1196,19 @@ export default function PolicyTable({
             {policy.action === 'allow' ? 'Accept' : 'Drop'}
           </span>
         </td>
+        {hasHitCounts && (
+          <td style={{ textAlign: 'right', fontFamily: 'monospace', fontSize: 12, color: getHitCountColor(policy._hit_count, policy.disabled) }}>
+            {typeof policy._hit_count === 'number' ? policy._hit_count.toLocaleString() : '—'}
+          </td>
+        )}
+        {hasHitCounts && (
+          <td style={{ fontSize: 11 }} title={policy._matched_apps?.length ? policy._matched_apps.join(', ') : ''}>
+            {policy._matched_apps?.length > 0
+              ? <span className="chip" style={{ background: 'var(--bg-elevated)', padding: '1px 6px', borderRadius: 8, fontSize: 10 }}>{policy._matched_apps.length} apps</span>
+              : <span style={{ color: 'var(--text-muted)' }}>—</span>
+            }
+          </td>
+        )}
         <td style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
           {policy.log_end ? 'Log' : 'None'}
         </td>
@@ -1161,6 +1251,19 @@ export default function PolicyTable({
             {policy.action === 'allow' ? 'Allow' : policy.action === 'deny' ? 'Deny' : policy.action}
           </span>
         </td>
+        {hasHitCounts && (
+          <td style={{ textAlign: 'right', fontFamily: 'monospace', fontSize: 12, color: getHitCountColor(policy._hit_count, policy.disabled) }}>
+            {typeof policy._hit_count === 'number' ? policy._hit_count.toLocaleString() : '—'}
+          </td>
+        )}
+        {hasHitCounts && (
+          <td style={{ fontSize: 11 }} title={policy._matched_apps?.length ? policy._matched_apps.join(', ') : ''}>
+            {policy._matched_apps?.length > 0
+              ? <span className="chip" style={{ background: 'var(--bg-elevated)', padding: '1px 6px', borderRadius: 8, fontSize: 10 }}>{policy._matched_apps.length} apps</span>
+              : <span style={{ color: 'var(--text-muted)' }}>—</span>
+            }
+          </td>
+        )}
         <td style={{ textAlign: 'center', fontSize: '11px' }}>
           {sw.dpi ? <span style={{ color: 'var(--accent)' }}>On</span> : <span style={{ opacity: 0.4 }}>-</span>}
         </td>
@@ -1203,6 +1306,19 @@ export default function PolicyTable({
             {policy.action === 'allow' ? 'Permit' : 'Deny'}
           </span>
         </td>
+        {hasHitCounts && (
+          <td style={{ textAlign: 'right', fontFamily: 'monospace', fontSize: 12, color: getHitCountColor(policy._hit_count, policy.disabled) }}>
+            {typeof policy._hit_count === 'number' ? policy._hit_count.toLocaleString() : '—'}
+          </td>
+        )}
+        {hasHitCounts && (
+          <td style={{ fontSize: 11 }} title={policy._matched_apps?.length ? policy._matched_apps.join(', ') : ''}>
+            {policy._matched_apps?.length > 0
+              ? <span className="chip" style={{ background: 'var(--bg-elevated)', padding: '1px 6px', borderRadius: 8, fontSize: 10 }}>{policy._matched_apps.length} apps</span>
+              : <span style={{ color: 'var(--text-muted)' }}>—</span>
+            }
+          </td>
+        )}
         <td style={{ textAlign: 'center', fontSize: '11px', color: 'var(--text-muted)' }}>
           {policy.log_end ? 'Yes' : '-'}
         </td>
@@ -1267,7 +1383,19 @@ export default function PolicyTable({
         {hasIdentityPolicies && <td>{renderCellValues(policy.source_users || [])}</td>}
         <td>{renderEditableCell(policy, 'services', renderCiscoService(policy))}</td>
         <td style={{ textAlign: 'center' }}>{renderCiscoLog(policy)}</td>
-        <td style={{ textAlign: 'center' }}>{renderCiscoHitCount(policy)}</td>
+        {hasHitCounts && (
+          <td style={{ textAlign: 'right', fontFamily: 'monospace', fontSize: 12, color: getHitCountColor(policy._hit_count, policy.disabled) }}>
+            {typeof policy._hit_count === 'number' ? policy._hit_count.toLocaleString() : '—'}
+          </td>
+        )}
+        {hasHitCounts && (
+          <td style={{ fontSize: 11 }} title={policy._matched_apps?.length ? policy._matched_apps.join(', ') : ''}>
+            {policy._matched_apps?.length > 0
+              ? <span className="chip" style={{ background: 'var(--bg-elevated)', padding: '1px 6px', borderRadius: 8, fontSize: 10 }}>{policy._matched_apps.length} apps</span>
+              : <span style={{ color: 'var(--text-muted)' }}>—</span>
+            }
+          </td>
+        )}
         <td>
           <button className="btn-icon btn-icon-danger" onClick={(e) => { e.stopPropagation(); onDeleteRule(realIndex); }} title="Delete ACE">x</button>
         </td>
@@ -1390,14 +1518,15 @@ export default function PolicyTable({
   /** Column count for spacer colSpan */
   const colCount = useMemo(() => {
     const identityCol = hasIdentityPolicies ? 1 : 0;
-    if (isSrx) return 9 + identityCol;
-    if (isFortigate) return 14 + identityCol;
-    if (isCheckpoint) return 10 + identityCol;
-    if (isSonicwall) return 12 + identityCol;
-    if (isHuawei) return 12 + identityCol;
-    if (isCisco) return 11 + identityCol;
-    return 12 + identityCol; // PAN-OS
-  }, [isSrx, isFortigate, isCheckpoint, isSonicwall, isHuawei, isCisco, hasIdentityPolicies]);
+    const hitCols = hasHitCounts ? 2 : 0;
+    if (isSrx) return 9 + identityCol + hitCols;
+    if (isFortigate) return 14 + identityCol + hitCols;
+    if (isCheckpoint) return 10 + identityCol + hitCols;
+    if (isSonicwall) return 12 + identityCol + hitCols;
+    if (isHuawei) return 12 + identityCol + hitCols;
+    if (isCisco) return 11 + identityCol + hitCols;
+    return 12 + identityCol + hitCols; // PAN-OS
+  }, [isSrx, isFortigate, isCheckpoint, isSonicwall, isHuawei, isCisco, hasIdentityPolicies, hasHitCounts]);
 
   /** Table CSS class */
   const tableClass = useMemo(() => {

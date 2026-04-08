@@ -749,6 +749,129 @@ def policy_stats(name):
 
 
 # ---------------------------------------------------------------------------
+# App Usage — Per-policy hit counts + active sessions by application
+# ---------------------------------------------------------------------------
+
+@app.route("/devices/<name>/app-usage", methods=["GET"])
+def app_usage(name):
+    """Pull per-policy hit counts and active sessions grouped by application.
+
+    Runs two RPCs:
+      1. show security policies hit-count  — per-policy hit counts with zone context
+      2. show security flow session summary — active sessions grouped by application
+
+    If either RPC fails, partial results are returned with an ``errors`` list.
+    """
+    dev_dict, _ = _find_device(name)
+    if not dev_dict:
+        return _error_response(f"Device '{name}' not found.", 404)
+
+    dev = None
+    errors = []
+    policies = []
+    app_sessions = []
+
+    try:
+        dev = _connect(dev_dict)
+
+        # ------------------------------------------------------------------ #
+        # RPC 1: show security policies hit-count
+        # ------------------------------------------------------------------ #
+        try:
+            rpc_reply = dev.rpc.cli("show security policies hit-count", format="text")
+            raw_hit = rpc_reply.text or ""
+
+            for line in raw_hit.split("\n"):
+                stripped = line.strip()
+                # Skip blank lines, section headers, and dashes
+                if not stripped:
+                    continue
+                if any(kw in stripped for kw in ("Logical system", "Index", "---")):
+                    continue
+
+                # Data lines: Index  From-zone  To-zone  Name  Count
+                parts = stripped.split()
+                if len(parts) < 5:
+                    continue
+                try:
+                    int(parts[0])  # first field must be numeric index
+                except ValueError:
+                    continue
+
+                policies.append({
+                    "name": parts[3],
+                    "from_zone": parts[1],
+                    "to_zone": parts[2],
+                    "hit_count": int(parts[4]),
+                    "session_count": 0,
+                    "byte_count": 0,
+                })
+        except Exception as exc:
+            errors.append(f"hit-count RPC failed: {exc}")
+
+        # ------------------------------------------------------------------ #
+        # RPC 2: show security flow session summary
+        # ------------------------------------------------------------------ #
+        try:
+            rpc_reply2 = dev.rpc.cli("show security flow session summary", format="text")
+            raw_summary = rpc_reply2.text or ""
+
+            in_app_section = False
+            for line in raw_summary.split("\n"):
+                if not in_app_section:
+                    if "Session count by application" in line:
+                        in_app_section = True
+                    continue
+
+                # Exit on blank line after section starts
+                stripped = line.strip()
+                if not stripped:
+                    break
+
+                parts = stripped.split()
+                if len(parts) < 2:
+                    continue
+                try:
+                    session_count = int(parts[-1])
+                except ValueError:
+                    continue
+
+                app_sessions.append({
+                    "application": parts[0],
+                    "sessions": session_count,
+                })
+        except Exception as exc:
+            errors.append(f"flow session summary RPC failed: {exc}")
+
+        dev.close()
+        dev = None
+
+        response = {
+            "ok": True,
+            "policies": policies,
+            "app_sessions": app_sessions,
+            "policy_count": len(policies),
+            "app_count": len(app_sessions),
+        }
+        if errors:
+            response["errors"] = errors
+
+        return jsonify(response)
+
+    except (ConnectError, ConnectAuthError, ConnectRefusedError, ConnectTimeoutError) as e:
+        return _error_response(f"Connection failed: {e}", 502)
+    except RpcError as e:
+        return _error_response(f"RPC error: {e}", 400, details=str(e))
+    except Exception as e:
+        if dev:
+            try:
+                dev.close()
+            except Exception:
+                pass
+        return _error_response(f"Unexpected error: {e}", 500)
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":

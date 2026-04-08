@@ -23,6 +23,21 @@ const PROVIDER_LABELS = {
 };
 const LOCAL_PROVIDERS = new Set(['ollama', 'lmstudio']);
 
+function getHitColor(hitCount, disabled) {
+  if (disabled) return 'var(--text-muted)';
+  if (hitCount === 0) return 'var(--error)';
+  if (hitCount < 100) return 'var(--caution)';
+  return 'var(--juniper-green)';
+}
+
+function formatBytes(bytes) {
+  if (bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+}
+
 export default function InterviewPanel({
   selectedRule,
   intermediateConfig,
@@ -293,6 +308,66 @@ export default function InterviewPanel({
             >
               {isAccepted ? 'Accepted' : 'Accept Policy'}
             </button>
+          </div>
+        )}
+
+        {/* Live Traffic */}
+        {typeof selectedRule._hit_count === 'number' && (
+          <div style={{ marginBottom: 16, padding: 12, background: 'var(--bg-elevated)', borderRadius: 8, border: '1px solid var(--border)' }}>
+            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, color: 'var(--caution)' }}>Live Traffic</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 8 }}>
+              <div style={{ textAlign: 'center' }}>
+                <div style={{ fontSize: 18, fontWeight: 600, color: getHitColor(selectedRule._hit_count, selectedRule.disabled) }}>
+                  {selectedRule._hit_count.toLocaleString()}
+                </div>
+                <div style={{ fontSize: 10, color: 'var(--text-muted)', textTransform: 'uppercase' }}>Hits</div>
+              </div>
+              <div style={{ textAlign: 'center' }}>
+                <div style={{ fontSize: 18, fontWeight: 600 }}>
+                  {(selectedRule._session_count || 0).toLocaleString()}
+                </div>
+                <div style={{ fontSize: 10, color: 'var(--text-muted)', textTransform: 'uppercase' }}>Sessions</div>
+              </div>
+              <div style={{ textAlign: 'center' }}>
+                <div style={{ fontSize: 18, fontWeight: 600 }}>
+                  {formatBytes(selectedRule._byte_count || 0)}
+                </div>
+                <div style={{ fontSize: 10, color: 'var(--text-muted)', textTransform: 'uppercase' }}>Bytes</div>
+              </div>
+            </div>
+
+            {/* Matched Applications */}
+            {selectedRule._matched_apps?.length > 0 && (
+              <div style={{ marginTop: 8 }}>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>Matched Applications:</div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                  {selectedRule._matched_apps.map(app => (
+                    <span key={app} style={{ background: 'var(--bg-input)', padding: '2px 8px', borderRadius: 10, fontSize: 11 }}>{app}</span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Suggestion: tighten 'any' apps */}
+            {selectedRule.applications?.includes('any') && selectedRule._matched_apps?.length > 0 && (
+              <div style={{ marginTop: 8, padding: 8, background: 'rgba(245, 158, 11, 0.1)', borderRadius: 6, fontSize: 11 }}>
+                <span style={{ color: 'var(--caution)' }}>Suggestion:</span> This rule permits <strong>any</strong> application but only {selectedRule._matched_apps.length} specific app(s) were observed.
+                <button
+                  className="btn btn-sm"
+                  style={{ marginLeft: 8, fontSize: 10, padding: '2px 8px' }}
+                  onClick={() => onUpdateRule({ ...selectedRule, applications: [...selectedRule._matched_apps] })}
+                >
+                  Replace with observed apps
+                </button>
+              </div>
+            )}
+
+            {/* Last updated */}
+            {selectedRule._stats_timestamp && (
+              <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 6, textAlign: 'right' }}>
+                Updated: {new Date(selectedRule._stats_timestamp).toLocaleTimeString()}
+              </div>
+            )}
           </div>
         )}
 

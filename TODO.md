@@ -347,7 +347,7 @@
 
 ### Planned — Future Improvements
 - [ ] **Responsive layout for tablet/small screens** — Breakpoints below 1280px for auto-collapse
-- [ ] **Config validation v2** — License gating, conflict detection, best practices
+- [x] **Config validation v2** — Post-conversion SRX output validator: hardware limits (7 checks), operational best practices (9 checks), compliance/hardening (12 checks), license gating toggle (warn-only vs strip+warn), on-demand Validate button in platform bar, WarningsPanel integration with source filter
 - [ ] **Force-directed topology layout upgrade** — d3-force with drag-to-rearrange and pan/zoom
 - [ ] **Live traffic / hit-count fusion** — Pull PAN-OS App-ID hit counts and annotate policies (Expedition-style)
 

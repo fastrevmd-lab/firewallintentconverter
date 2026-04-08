@@ -85,7 +85,7 @@ export function runHardwareChecks(
     warnings.push(
       createWarning(
         'info',
-        'hardware',
+        'hardware/no-model',
         'No target SRX model selected — hardware compatibility checks skipped.',
         'Select a target model to enable interface, capacity, and throughput checks.',
       ),
@@ -98,7 +98,7 @@ export function runHardwareChecks(
     warnings.push(
       createWarning(
         'info',
-        'hardware',
+        'hardware/unknown-model',
         `Target model '${targetModel}' not found in model database — hardware checks skipped.`,
         'Verify the model name or update the hardware database.',
       ),
@@ -118,7 +118,7 @@ export function runHardwareChecks(
     warnings.push(
       createWarning(
         'unsupported',
-        'interfaces',
+        'hardware/interface-count',
         `Configuration uses ${physicalInterfaces.length} physical interfaces but ${targetModel} only has ${modelPortCount} ports.`,
         'Reduce the number of interfaces or choose a higher-density model.',
       ),
@@ -137,7 +137,7 @@ export function runHardwareChecks(
       warnings.push(
         createWarning(
           'warning',
-          'interfaces',
+          'hardware/interface-type',
           `Configuration references ${highSpeedInterfaces.length} xe-/et- interface(s) but ${targetModel} only has ge- slots.`,
           'Review interface assignments; xe-/et- ports are not available on this model.',
         ),
@@ -159,7 +159,7 @@ export function runHardwareChecks(
         warnings.push(
           createWarning(
             'unsupported',
-            'security-policies',
+            'hardware/policy-count',
             `Policy count (${policyCount}) meets or exceeds the ${targetModel} limit of ${limits.max_policies}.`,
             'Consolidate or reduce policies, or choose a model with a higher policy limit.',
           ),
@@ -168,7 +168,7 @@ export function runHardwareChecks(
         warnings.push(
           createWarning(
             'warning',
-            'security-policies',
+            'hardware/policy-count',
             `Policy count (${policyCount}) is at ${Math.round(ratio * 100)}% of the ${targetModel} limit (${limits.max_policies}).`,
             'Consider consolidating policies or choosing a model with more headroom.',
           ),
@@ -183,7 +183,7 @@ export function runHardwareChecks(
         warnings.push(
           createWarning(
             'unsupported',
-            'zones',
+            'hardware/zone-count',
             `Zone count (${zoneCount}) meets or exceeds the ${targetModel} limit of ${limits.max_zones}.`,
             'Reduce the number of zones or choose a model with a higher zone limit.',
           ),
@@ -192,7 +192,7 @@ export function runHardwareChecks(
         warnings.push(
           createWarning(
             'warning',
-            'zones',
+            'hardware/zone-count',
             `Zone count (${zoneCount}) is at ${Math.round(ratio * 100)}% of the ${targetModel} limit (${limits.max_zones}).`,
             'Consider reducing zones or choosing a model with more headroom.',
           ),
@@ -207,7 +207,7 @@ export function runHardwareChecks(
         warnings.push(
           createWarning(
             'unsupported',
-            'nat-rules',
+            'hardware/nat-count',
             `NAT rule count (${natCount}) meets or exceeds the ${targetModel} limit of ${limits.max_nat_rules}.`,
             'Consolidate NAT rules or choose a model with a higher NAT limit.',
           ),
@@ -216,7 +216,7 @@ export function runHardwareChecks(
         warnings.push(
           createWarning(
             'warning',
-            'nat-rules',
+            'hardware/nat-count',
             `NAT rule count (${natCount}) is at ${Math.round(ratio * 100)}% of the ${targetModel} limit (${limits.max_nat_rules}).`,
             'Consider consolidating NAT rules or choosing a model with more headroom.',
           ),
@@ -232,7 +232,7 @@ export function runHardwareChecks(
     warnings.push(
       createWarning(
         'info',
-        'throughput',
+        'hardware/throughput',
         `${targetModel} L4 throughput (${model.throughput.l4}) is lower than the source device (${sourceModel.throughput.l4}).`,
         'Verify that the target model meets your throughput requirements, or choose a higher-tier model.',
       ),

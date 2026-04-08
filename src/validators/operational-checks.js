@@ -152,7 +152,7 @@ function checkMissingDefaultDeny(commands, policyZonePairs) {
       warnings.push(
         createWarning(
           'warning',
-          `zone-pair:${fromZone}>${toZone}`,
+          `operational/missing-deny/${fromZone}>${toZone}`,
           `Zone pair ${fromZone}→${toZone} has permit policies but no explicit deny-all at the end.`,
           `Add a final catch-all deny policy: set security policies from-zone ${fromZone} to-zone ${toZone} policy deny-all match source-address any destination-address any application any then deny`
         )
@@ -175,7 +175,7 @@ function checkEmptyZonePairs(commands, definedZones, policyZonePairs) {
       warnings.push(
         createWarning(
           'info',
-          `zone-pair:${pair}`,
+          `operational/no-policy/${pair}`,
           `Zone pair ${fromZone}→${toZone} has no security policies defined (at least one zone is internet-facing).`,
           'Define explicit policies for this zone pair or verify the omission is intentional.'
         )
@@ -194,7 +194,7 @@ function checkNatUncoveredZonePairs(natZonePairs, policyZonePairs) {
       warnings.push(
         createWarning(
           'warning',
-          `nat-zone-pair:${pair}`,
+          `operational/nat-no-policy/${pair}`,
           `NAT rule references zone pair ${fromZone}→${toZone} but no security policy exists for that pair.`,
           'Add a security policy for this zone pair to allow NATted traffic through.'
         )
@@ -217,7 +217,7 @@ function checkMissingScreens(commands, definedZones) {
       warnings.push(
         createWarning(
           'warning',
-          `zone:${zone}`,
+          `operational/no-screen/${zone}`,
           `Internet-facing zone "${zone}" has no screen profile bound.`,
           `Bind a screen profile: set security zones security-zone ${zone} screen <screen-name>`
         )
@@ -250,7 +250,7 @@ function checkPermitWithoutLogging(commands) {
       warnings.push(
         createWarning(
           'warning',
-          `policy:${policyName}`,
+          `operational/no-logging/${policyName}`,
           `Policy "${policyName}" (${fromZone}→${toZone}) permits traffic but does not log session-close.`,
           `Add: set security policies from-zone ${fromZone} to-zone ${toZone} policy ${policyName} then log session-close`
         )
@@ -273,7 +273,7 @@ function checkDuplicateAddressObjects(intermediateConfig) {
       warnings.push(
         createWarning(
           'info',
-          `address-object:${obj.name}`,
+          `operational/duplicate-address/${obj.name}`,
           `Address object "${obj.name}" is a duplicate of "${seen.get(signature)}" (same type and value: ${signature}).`,
           `Consider consolidating into a single address object to reduce policy complexity.`
         )
@@ -298,7 +298,7 @@ function checkRoutingWithoutExportPolicy(commands) {
   return [
     createWarning(
       'warning',
-      'routing-protocols',
+      'operational/routing-no-export',
       `${proto} is configured but no policy-options policy-statement is defined.`,
       'Define an export policy to control route advertisements and prevent accidental full-table exports.'
     ),
@@ -319,7 +319,7 @@ function checkVpnWithoutPolicy(commands) {
   return [
     createWarning(
       'warning',
-      'ipsec-vpn',
+      'operational/vpn-no-policy',
       'IPsec VPN is configured but no security policy with "then permit tunnel ipsec-vpn" was found.',
       'Add a policy that references the VPN tunnel: set security policies from-zone <z> to-zone <z> policy <name> then permit tunnel ipsec-vpn <vpn-name>'
     ),
@@ -352,7 +352,7 @@ function checkOverlappingNatRules(intermediateConfig) {
     warnings.push(
       createWarning(
         'warning',
-        `nat-rules:${names.join(',')}`,
+        `operational/overlapping-nat/${names[0]}`,
         `NAT rules [${names.join(', ')}] have identical match criteria (${signature}).`,
         'Remove or consolidate duplicate NAT rules to avoid unpredictable match order behaviour.'
       )

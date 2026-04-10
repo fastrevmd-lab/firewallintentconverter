@@ -555,18 +555,19 @@ html, body, #root {
 }
 
 .expanded-detail-panel {
-  padding: 12px 12px 12px 55px;
+  padding: 10px 16px 10px 70px;
   border-bottom: 1px solid var(--border-color);
 }
 
 .expanded-detail-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
-  gap: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
 }
 
 .expanded-detail-cell {
   min-width: 0;
+  flex-shrink: 0;
 }
 
 .expanded-detail-label {
@@ -592,6 +593,49 @@ html, body, #root {
   border-radius: 3px;
   padding: 4px 8px;
   margin-bottom: 4px;
+}
+
+/* --- Subscription Icons (compact 2-letter badges) --- */
+.sub-icons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+}
+
+.sub-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 16px;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 700;
+  color: #000;
+  letter-spacing: 0.3px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+/* --- Subscription Legend (bottom of table) --- */
+.sub-legend {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 6px 12px;
+  background: var(--bg-tertiary);
+  border-top: 1px solid var(--border-color);
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+.sub-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  color: var(--text-muted);
 }
 
 .implicit-chip {

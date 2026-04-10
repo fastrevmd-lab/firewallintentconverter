@@ -16,6 +16,36 @@ import { computeTriageBucket, computeTriageCounts, TRIAGE_CONFIG } from '../util
 import useVirtualScroll from '../hooks/useVirtualScroll.js';
 import AutocompleteInput from './shared/AutocompleteInput.jsx';
 
+/** Security subscription abbreviations, full names, and colors */
+const SUBSCRIPTION_DEFS = [
+  { key: 'ips',     abbr: 'IP', label: 'IPS',              color: '#f87171' },
+  { key: 'cs',      abbr: 'CS', label: 'Content Security', color: '#60a5fa' },
+  { key: 'dec',     abbr: 'DE', label: 'Decrypt',          color: '#c084fc' },
+  { key: 'av',      abbr: 'AV', label: 'Flow-based AV',    color: '#34d399' },
+  { key: 'am',      abbr: 'AM', label: 'Anti-malware',     color: '#fb923c' },
+  { key: 'si',      abbr: 'SI', label: 'SecIntel',         color: '#fbbf24' },
+  { key: 'swp',     abbr: 'SW', label: 'Secure Web Proxy', color: '#2dd4bf' },
+  { key: 'icap',    abbr: 'IC', label: 'ICAP Redirect',    color: '#a78bfa' },
+];
+
+/** Get active subscription keys for a policy */
+function getActiveSubscriptions(policy) {
+  const sp = policy.security_profiles || {};
+  const active = [];
+  if (policy._srx_idp || sp.vulnerability) active.push('ips');
+  if (policy._srx_content_security || sp['file-blocking'] || sp['url-filtering']) active.push('cs');
+  if (policy._srx_decrypt) active.push('dec');
+  if (policy._srx_flow_av || sp.virus) active.push('av');
+  if (policy._srx_antimalware || sp.spyware) active.push('am');
+  const hasSecIntel = policy._srx_secintel !== undefined
+    ? !!policy._srx_secintel
+    : (policy._secIntelAddresses?.length > 0);
+  if (hasSecIntel) active.push('si');
+  if (policy._srx_secure_web_proxy) active.push('swp');
+  if (policy._srx_icap_redirect) active.push('icap');
+  return active;
+}
+
 /**
  * Returns a color for the hit count cell based on value and disabled state.
  * @param {number|undefined} hitCount
@@ -885,13 +915,17 @@ export default function PolicyTable({
   const renderSrxHeader = () => (
     <tr>
       {renderHeaderCheckbox()}
-      <th style={{ width: 32 }}></th>
-      <th onClick={() => handleSort('_rule_index')} style={{ width: 44 }}>#</th>
-      <th onClick={() => handleSort('name')}>Name{sortIndicator('name')}</th>
+      <th style={{ width: 28 }}></th>
+      <th onClick={() => handleSort('_rule_index')} style={{ width: 40 }}>#</th>
+      <th onClick={() => handleSort('name')} style={{ minWidth: 140 }}>Name{sortIndicator('name')}</th>
       <th onClick={() => handleSort('src_zones')}>Zones{sortIndicator('src_zones')}</th>
-      <th onClick={() => handleSort('action')} style={{ width: 80 }}>Action{sortIndicator('action')}</th>
-      <th>Triage</th>
-      <th style={{ width: 36 }}></th>
+      <th onClick={() => handleSort('src_addresses')}>Src Addr{sortIndicator('src_addresses')}</th>
+      <th onClick={() => handleSort('dst_addresses')}>Dst Addr{sortIndicator('dst_addresses')}</th>
+      <th onClick={() => handleSort('applications')}>Apps / Svc{sortIndicator('applications')}</th>
+      <th>Subs</th>
+      <th onClick={() => handleSort('action')} style={{ width: 70 }}>Action{sortIndicator('action')}</th>
+      <th style={{ width: 90 }}>Triage</th>
+      <th style={{ width: 28 }}></th>
     </tr>
   );
 
@@ -1095,15 +1129,15 @@ export default function PolicyTable({
 
     return (
       <React.Fragment key={rowKey}>
-        {/* Collapsed summary row */}
+        {/* Summary row — always visible */}
         <tr
           ref={measureRef}
           className={`${buildRowClass(policy)}${isExpanded ? ' expanded-row' : ''}${isAccepted ? ' accepted-row' : ''}`}
-          onClick={(e) => { handleRowClick(policy, isSelected, e); if (!isAccepted) toggleRowExpand(rowKey); }}
+          onClick={(e) => handleRowClick(policy, isSelected, e)}
           style={{ cursor: 'pointer' }}
         >
           {renderRowCheckbox(policy)}
-          <td style={{ textAlign: 'center', width: 32 }}>
+          <td style={{ textAlign: 'center', width: 28 }}>
             {isAccepted ? (
               <span style={{ color: 'var(--success)', fontSize: 12 }}>✓</span>
             ) : (
@@ -1120,8 +1154,41 @@ export default function PolicyTable({
             {policy._implicit && <span className="cell-chip implicit-chip">Implicit</span>}
             <span style={{ fontWeight: 500 }}>{policy.name}</span>
           </td>
-          <td style={{ color: 'var(--text-secondary)', fontSize: 11 }}>
+          <td style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
             {(policy.src_zones || ['any']).join(', ')} → {(policy.dst_zones || ['any']).join(', ')}
+          </td>
+          <td>
+            <div className="editable-cell" onDoubleClick={(e) => { e.stopPropagation(); startEdit(realIndex, 'src_addresses', policy.src_addresses); }}>
+              {policy.negate_source && <span className="cell-chip negate-chip">NOT</span>}
+              {renderCellValues(policy.src_addresses || ['any'])}
+            </div>
+          </td>
+          <td>
+            <div className="editable-cell" onDoubleClick={(e) => { e.stopPropagation(); startEdit(realIndex, 'dst_addresses', policy.dst_addresses); }}>
+              {policy.negate_destination && <span className="cell-chip negate-chip">NOT</span>}
+              {renderCellValues(policy.dst_addresses || ['any'])}
+            </div>
+          </td>
+          <td>
+            <div className="editable-cell" onDoubleClick={(e) => { e.stopPropagation(); startEdit(realIndex, 'applications', policy.applications); }}>
+              {renderCellValues(policy.applications || ['any'])}
+              {(policy.services || []).filter(s => s !== 'any').length > 0 && (
+                <span style={{ color: 'var(--text-muted)', fontSize: 10 }}> + {policy.services.filter(s => s !== 'any').length} svc</span>
+              )}
+            </div>
+          </td>
+          <td>
+            {(() => {
+              const activeSubs = getActiveSubscriptions(policy);
+              if (activeSubs.length === 0) return <span style={{ color: 'var(--text-muted)', fontSize: 10 }}>—</span>;
+              return (
+                <div className="sub-icons">
+                  {SUBSCRIPTION_DEFS.filter(d => activeSubs.includes(d.key)).map(d => (
+                    <span key={d.key} className="sub-icon" style={{ background: d.color }} title={d.label}>{d.abbr}</span>
+                  ))}
+                </div>
+              );
+            })()}
           </td>
           <td>
             <span style={{ color: actionColor, fontWeight: 600 }}>{srxAction}</span>
@@ -1143,44 +1210,15 @@ export default function PolicyTable({
           </td>
         </tr>
 
-        {/* Expanded detail row */}
+        {/* Expanded detail row — security profiles, logging, users, warnings */}
         {isExpanded && !isAccepted && (
           <tr className="expanded-detail-row" key={`${rowKey}-detail`}>
-            <td colSpan={8} style={{ padding: 0 }}>
+            <td colSpan={12} style={{ padding: 0 }}>
               <div className="expanded-detail-panel">
                 <div className="expanded-detail-grid">
                   <div className="expanded-detail-cell">
-                    <div className="expanded-detail-label">Source Addresses</div>
-                    <div className="editable-cell" onDoubleClick={(e) => { e.stopPropagation(); startEdit(realIndex, 'src_addresses', policy.src_addresses); }}>
-                      {(policy.src_addresses || ['any']).map((addr, i) => (
-                        <span key={i} className="cell-chip">{addr}</span>
-                      ))}
-                      {policy.negate_source && <span className="cell-chip negate-chip">NOT</span>}
-                    </div>
-                  </div>
-                  <div className="expanded-detail-cell">
-                    <div className="expanded-detail-label">Destination Addresses</div>
-                    <div className="editable-cell" onDoubleClick={(e) => { e.stopPropagation(); startEdit(realIndex, 'dst_addresses', policy.dst_addresses); }}>
-                      {(policy.dst_addresses || ['any']).map((addr, i) => (
-                        <span key={i} className="cell-chip">{addr}</span>
-                      ))}
-                      {policy.negate_destination && <span className="cell-chip negate-chip">NOT</span>}
-                    </div>
-                  </div>
-                  <div className="expanded-detail-cell">
-                    <div className="expanded-detail-label">Applications & Ports</div>
-                    <div className="editable-cell" onDoubleClick={(e) => { e.stopPropagation(); startEdit(realIndex, 'applications', policy.applications); }}>
-                      {(policy.applications || ['any']).map((app, i) => (
-                        <span key={i} className="cell-chip">{app}</span>
-                      ))}
-                      {(policy.services || []).filter(s => s !== 'any').map((svc, i) => (
-                        <span key={`svc-${i}`} className="cell-chip">{svc}</span>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="expanded-detail-cell">
                     <div className="expanded-detail-label">Security Profiles</div>
-                    <div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
                       {policy.security_profiles && typeof policy.security_profiles === 'object'
                         ? Object.entries(policy.security_profiles).map(([type, val]) => (
                             val && <span key={type} className="cell-chip profile-chip">{type.toUpperCase()}</span>
@@ -1203,10 +1241,20 @@ export default function PolicyTable({
                         : 'Off'}
                     </div>
                   </div>
+                  {(policy.services || []).filter(s => s !== 'any').length > 0 && (
+                    <div className="expanded-detail-cell">
+                      <div className="expanded-detail-label">Services (ports)</div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
+                        {policy.services.filter(s => s !== 'any').map((svc, i) => (
+                          <span key={i} className="cell-chip">{svc}</span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                   {(policy.source_users || []).some(u => u !== 'any') && (
                     <div className="expanded-detail-cell">
                       <div className="expanded-detail-label">Users</div>
-                      <div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
                         {policy.source_users.filter(u => u !== 'any').map((u, i) => (
                           <span key={i} className="cell-chip">{u}</span>
                         ))}
@@ -1833,6 +1881,18 @@ export default function PolicyTable({
           </table>
         )}
       </div>
+
+      {/* Subscription legend — SRX view only */}
+      {platformView === 'srx' && policies.length > 0 && (
+        <div className="sub-legend">
+          {SUBSCRIPTION_DEFS.map(d => (
+            <span key={d.key} className="sub-legend-item">
+              <span className="sub-icon" style={{ background: d.color }}>{d.abbr}</span>
+              <span>{d.label}</span>
+            </span>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

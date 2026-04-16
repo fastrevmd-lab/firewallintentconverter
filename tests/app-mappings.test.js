@@ -115,5 +115,15 @@ test('kerberos maps to TCP/UDP 88', () => {
   assert(portCheck, 'kerberos port 88 required (or junos-kerberos predefined)');
 });
 
+console.log('--- Top-250 coverage: Remote Access/VPN ---');
+// wireguard, openvpn existed pre-5d; cisco-anyconnect, globalprotect,
+// pulse-secure, forticlient-vpn added in 5d; sstp, ikev2 added as substitutes.
+for (const app of ['wireguard', 'openvpn', 'cisco-anyconnect', 'globalprotect', 'pulse-secure', 'forticlient-vpn']) {
+  test(`${app} (panos) resolves`, () => {
+    const r = getJunosEmission(app, 'panos');
+    assert(r !== null, `${app} should be mapped`);
+  });
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

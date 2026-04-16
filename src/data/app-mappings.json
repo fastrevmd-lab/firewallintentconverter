@@ -7903,6 +7903,259 @@
           "confidence": 0.9
         }
       }
+    },
+    {
+      "canonical": "cisco-anyconnect",
+      "description": "Cisco AnyConnect SSL VPN client",
+      "category": "tunnel",
+      "protocols": [
+        "TCP",
+        "UDP"
+      ],
+      "ports": [
+        "443",
+        "4444"
+      ],
+      "vendors": {
+        "panos": {
+          "name": "cisco-anyconnect",
+          "confidence": 0.9
+        },
+        "fortios": {
+          "name": "AnyConnect.VPN",
+          "confidence": 0.85
+        },
+        "ftd": {
+          "name": "ANYCONNECT-PLUS",
+          "confidence": 0.95
+        },
+        "checkpoint": {
+          "name": "Cisco-AnyConnect",
+          "confidence": 0.85
+        },
+        "sonicwall": {
+          "name": null,
+          "confidence": 0
+        },
+        "huawei": {
+          "name": null,
+          "confidence": 0
+        },
+        "junos": {
+          "name": null,
+          "confidence": 0
+        }
+      }
+    },
+    {
+      "canonical": "globalprotect",
+      "description": "Palo Alto Networks GlobalProtect VPN",
+      "category": "tunnel",
+      "protocols": [
+        "TCP",
+        "UDP"
+      ],
+      "ports": [
+        "443",
+        "4501"
+      ],
+      "vendors": {
+        "panos": {
+          "name": "globalprotect",
+          "confidence": 1
+        },
+        "fortios": {
+          "name": null,
+          "confidence": 0
+        },
+        "ftd": {
+          "name": null,
+          "confidence": 0
+        },
+        "checkpoint": {
+          "name": null,
+          "confidence": 0
+        },
+        "sonicwall": {
+          "name": null,
+          "confidence": 0
+        },
+        "huawei": {
+          "name": null,
+          "confidence": 0
+        },
+        "junos": {
+          "name": null,
+          "confidence": 0
+        }
+      }
+    },
+    {
+      "canonical": "pulse-secure",
+      "description": "Ivanti (Pulse) Secure VPN SSL access gateway",
+      "category": "tunnel",
+      "protocols": [
+        "TCP"
+      ],
+      "ports": [
+        "443"
+      ],
+      "vendors": {
+        "panos": {
+          "name": "pulse-secure",
+          "confidence": 0.9
+        },
+        "fortios": {
+          "name": "Pulse.Secure",
+          "confidence": 0.85
+        },
+        "ftd": {
+          "name": "Pulse-Secure",
+          "confidence": 0.85
+        },
+        "checkpoint": {
+          "name": "Pulse-Secure",
+          "confidence": 0.8
+        },
+        "sonicwall": {
+          "name": null,
+          "confidence": 0
+        },
+        "huawei": {
+          "name": null,
+          "confidence": 0
+        },
+        "junos": {
+          "name": null,
+          "confidence": 0
+        }
+      }
+    },
+    {
+      "canonical": "forticlient-vpn",
+      "description": "Fortinet FortiClient VPN endpoint agent",
+      "category": "tunnel",
+      "protocols": [
+        "TCP",
+        "UDP"
+      ],
+      "ports": [
+        "443",
+        "4433"
+      ],
+      "vendors": {
+        "panos": {
+          "name": "forticlient-vpn",
+          "confidence": 0.85
+        },
+        "fortios": {
+          "name": "FortiClient",
+          "confidence": 1
+        },
+        "ftd": {
+          "name": null,
+          "confidence": 0
+        },
+        "checkpoint": {
+          "name": null,
+          "confidence": 0
+        },
+        "sonicwall": {
+          "name": null,
+          "confidence": 0
+        },
+        "huawei": {
+          "name": null,
+          "confidence": 0
+        },
+        "junos": {
+          "name": null,
+          "confidence": 0
+        }
+      }
+    },
+    {
+      "canonical": "sstp",
+      "description": "Secure Socket Tunneling Protocol (Microsoft VPN)",
+      "category": "tunnel",
+      "protocols": [
+        "TCP"
+      ],
+      "ports": [
+        "443"
+      ],
+      "vendors": {
+        "panos": {
+          "name": "sstp",
+          "confidence": 0.85
+        },
+        "fortios": {
+          "name": "SSTP",
+          "confidence": 0.85
+        },
+        "ftd": {
+          "name": "SSTP",
+          "confidence": 0.8
+        },
+        "checkpoint": {
+          "name": "SSTP",
+          "confidence": 0.8
+        },
+        "sonicwall": {
+          "name": "SSTP",
+          "confidence": 0.8
+        },
+        "huawei": {
+          "name": "sstp",
+          "confidence": 0.8
+        },
+        "junos": {
+          "name": null,
+          "confidence": 0
+        }
+      }
+    },
+    {
+      "canonical": "ikev2",
+      "description": "Internet Key Exchange v2 VPN protocol",
+      "category": "tunnel",
+      "protocols": [
+        "UDP"
+      ],
+      "ports": [
+        "500",
+        "4500"
+      ],
+      "vendors": {
+        "panos": {
+          "name": "ike",
+          "confidence": 0.9
+        },
+        "fortios": {
+          "name": "IKE",
+          "confidence": 0.95
+        },
+        "ftd": {
+          "name": "IKEv2",
+          "confidence": 0.95
+        },
+        "checkpoint": {
+          "name": "IKEv2",
+          "confidence": 0.9
+        },
+        "sonicwall": {
+          "name": "IKEv2",
+          "confidence": 0.85
+        },
+        "huawei": {
+          "name": "ike",
+          "confidence": 0.9
+        },
+        "junos": {
+          "name": "junos:IKE",
+          "confidence": 0.95
+        }
+      }
     }
   ]
 }

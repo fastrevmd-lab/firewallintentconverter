@@ -70,5 +70,47 @@ test('junos-ldap passthrough — no placeholder, no custom-app emission', () => 
     'junos-ldap must not receive UNMAPPED suffix');
 });
 
+console.log('--- Real PAN-OS fixture ---');
+test('realistic PAN-OS policy with 5 apps produces 0 destination-port 1 lines', () => {
+  const cfg = {
+    metadata: { source_vendor: 'panos' },
+    zones: [{ name: 'trust', interfaces: [] }, { name: 'untrust', interfaces: [] }],
+    security_policies: [{
+      name: 'allow-web-and-saas',
+      src_zones: ['trust'], dst_zones: ['untrust'],
+      src_addresses: ['any'], dst_addresses: ['any'],
+      applications: ['ssl', 'web-browsing', 'smtp', 'ntp', 'ftp'],
+      services: [],
+      action: 'permit',
+    }],
+  };
+  const { commands } = convertToSrxSetCommands(cfg, {}, { target_model: 'SRX380' });
+  const joined = commands.join('\n');
+  const bogusPortLines = (joined.match(/destination-port 1$/gm) || []).length;
+  assert(bogusPortLines === 0, `expected 0 placeholder port-1 lines; got ${bogusPortLines}\n${joined}`);
+  assert(joined.includes('match application junos-https'), 'ssl should resolve to junos-https');
+  assert(joined.includes('match application junos-http'), 'web-browsing should resolve to junos-http');
+});
+
+test('truly-unknown app emits one INTERVIEW block and exactly one port-1 sentinel', () => {
+  const cfg = {
+    metadata: { source_vendor: 'panos' },
+    zones: [{ name: 'trust', interfaces: [] }, { name: 'untrust', interfaces: [] }],
+    security_policies: [{
+      name: 'mgt-policy',
+      src_zones: ['trust'], dst_zones: ['untrust'],
+      src_addresses: ['any'], dst_addresses: ['any'],
+      applications: ['MGT-Applications'], services: [],
+      action: 'permit',
+    }],
+  };
+  const { commands } = convertToSrxSetCommands(cfg, {}, { target_model: 'SRX380' });
+  const joined = commands.join('\n');
+  const interviewHeaders = (joined.match(/INTERVIEW REQUIRED: Unmapped Applications/g) || []).length;
+  assert(interviewHeaders === 1, `expected 1 INTERVIEW header, got ${interviewHeaders}`);
+  const portOneLines = (joined.match(/destination-port 1$/gm) || []).length;
+  assert(portOneLines === 1, `expected exactly 1 sentinel port-1 line for the unknown app, got ${portOneLines}`);
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

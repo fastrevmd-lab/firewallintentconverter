@@ -122,3 +122,50 @@ export function getAppCount() {
 export function isLoaded() {
   return _appData !== null;
 }
+
+/**
+ * Returns how a vendor app should be emitted as a Junos application reference.
+ *
+ *   { kind: 'predefined', name: 'junos-https' }
+ *     → policy references this name directly; no applications-section emission needed.
+ *
+ *   { kind: 'custom', protocol: 'tcp', ports: ['5223','2195','2196'], canonical: '...' }
+ *     → caller emits `set applications application <name> protocol tcp destination-port <p>`
+ *       (for each port, possibly wrapped in an application-set for multi-port).
+ *
+ *   null
+ *     → no knowledge; caller should fall through to sync APP_MAP then INTERVIEW block.
+ *
+ * Confidence threshold: 0.8, matching mapAppToJunos().
+ *
+ * @param {string} vendorAppName - The app name from the source config
+ * @param {string} sourceVendor - Our vendor ID (panos, fortigate, cisco_asa, etc.)
+ * @returns {{ kind: 'predefined', name: string } | { kind: 'custom', protocol: string, ports: string[], canonical: string } | null}
+ */
+export function getJunosEmission(vendorAppName, sourceVendor) {
+  if (!vendorAppName || !_vendorIndex) return null;
+  const index = _vendorIndex[sourceVendor];
+  if (!index) return null;
+  const entry = index.get(vendorAppName.toLowerCase());
+  if (!entry) return null;
+
+  const junosEntry = entry.vendors.junos;
+  if (junosEntry && junosEntry.confidence >= 0.8) {
+    return { kind: 'predefined', name: normalizeJunosName(junosEntry.name) };
+  }
+
+  // No high-confidence Junos predefined — emit as custom app if we know ports/protocols
+  if (Array.isArray(entry.protocols) && entry.protocols.length > 0 &&
+      Array.isArray(entry.ports) && entry.ports.length > 0) {
+    // Prefer TCP if multi-protocol (simpler custom-app emission); protocols are uppercase in JSON
+    const protoRaw = entry.protocols.includes('TCP') ? 'TCP' : entry.protocols[0];
+    return {
+      kind: 'custom',
+      protocol: protoRaw.toLowerCase(),
+      ports: entry.ports.slice(),
+      canonical: entry.canonical,
+    };
+  }
+
+  return null;
+}

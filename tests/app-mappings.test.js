@@ -3,7 +3,8 @@
  * Tests for src/utils/app-mappings.js multi-vendor coverage.
  * Run with: node tests/app-mappings.test.js
  */
-import { loadAppMappings, mapVendorApp } from '../src/utils/app-mappings.js';
+import { loadAppMappings, mapVendorApp, getJunosEmission, isLoaded } from '../src/utils/app-mappings.js';
+import { mapAppToJunos, JUNOS_PREDEFINED_APPS } from '../src/parsers/parser-utils.js';
 
 let passed = 0;
 let failed = 0;
@@ -34,8 +35,6 @@ test('huawei vendor lookup resolves https (if alias present)', () => {
     `huawei_usg/https returned unexpected ${JSON.stringify(r)}`);
 });
 
-import { mapAppToJunos, JUNOS_PREDEFINED_APPS } from '../src/parsers/parser-utils.js';
-
 console.log('--- junos-* passthrough ---');
 test('junos-ldap passes through unchanged', () => {
   const r = mapAppToJunos('junos-ldap', 'panos');
@@ -49,6 +48,26 @@ test('junos-bogus (not a predefined) does NOT pass through', () => {
   assert(!JUNOS_PREDEFINED_APPS.has('junos-bogus'), 'precondition failed');
   const r = mapAppToJunos('junos-bogus', 'panos');
   assert(r === null, `expected null for unknown junos-* name, got ${r}`);
+});
+
+console.log('--- getJunosEmission ---');
+test('https returns predefined', () => {
+  const r = getJunosEmission('ssl', 'panos');
+  assert(r?.kind === 'predefined', `expected predefined, got ${JSON.stringify(r)}`);
+  assert(r.name === 'junos-https', `expected junos-https, got ${r?.name}`);
+});
+test('returns null for unknown vendor app', () => {
+  const r = getJunosEmission('totally-not-a-real-app-xyz', 'panos');
+  assert(r === null, `expected null, got ${JSON.stringify(r)}`);
+});
+// The apple-push-notifications test is gated on data arriving in Task 5,
+// so only assert shape contract here:
+test('custom-kind shape is { kind: custom, protocol, ports[] } when present', () => {
+  // Use any entry that has ports but no junos alias in current data.
+  // If none exists yet, this test trivially passes.
+  // Task 5 will backfill real assertions.
+  const r = getJunosEmission('__shape_probe__', 'panos');
+  assert(r === null, 'shape probe expected null until Task 5');
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

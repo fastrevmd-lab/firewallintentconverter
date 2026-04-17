@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useConfigContext } from '../../contexts/ConfigContext.jsx';
 import { useConversionContext } from '../../contexts/ConversionContext.jsx';
 import { useUIContext, isDeterministicMode } from '../../contexts/UIContext.jsx';
+import { countOverrides } from '../../utils/app-mapping-overrides.js';
 
 /**
  * Resolves the active theme ('dark' or 'light') based on localStorage and OS preference.
@@ -267,6 +268,27 @@ export default function TopBar() {
               </button>
               <button className="overflow-item" onClick={() => { showModal('feedback'); setOverflowOpen(false); }}>
                 Feedback
+              </button>
+              <button
+                className="overflow-item"
+                onClick={() => { showModal('appMappings'); setOverflowOpen(false); }}
+                title="View and edit application name → Junos mappings"
+              >
+                Application Mappings
+                {countOverrides() > 0 && (
+                  <span
+                    aria-label={`${countOverrides()} overrides active`}
+                    style={{
+                      display: 'inline-block',
+                      marginLeft: 6,
+                      width: 8,
+                      height: 8,
+                      borderRadius: '50%',
+                      background: 'var(--caution, #f59e0b)',
+                      verticalAlign: 'middle',
+                    }}
+                  />
+                )}
               </button>
               <div className="overflow-divider" />
               {isDeterministicMode(ui.llmRiskAcceptance) ? (

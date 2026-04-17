@@ -19,6 +19,71 @@ const VENDOR_KEY_MAP = {
 let _appData = null;
 let _vendorIndex = null; // Map<ourVendor, Map<vendorAppNameLower, entry>>
 
+// User-editable overrides persisted in browser localStorage under this key.
+// Shape: { <vendorId>: { <vendorAppNameLower>: { _deleted?: true, junosApp?, canonical?, kind?, name?, protocol?, ports?, category?, description? } } }
+const OVERRIDES_STORAGE_KEY = 'app-mappings-overrides';
+let _overridesCache = null; // null = not yet read; object = cached value
+
+/**
+ * Reads the override map from localStorage. Returns {} in Node or when empty.
+ * Prototype-pollution safe: strips __proto__/constructor/prototype keys.
+ */
+function _loadOverrides() {
+  if (_overridesCache !== null) return _overridesCache;
+  if (typeof localStorage === 'undefined') {
+    _overridesCache = {};
+    return _overridesCache;
+  }
+  try {
+    const raw = localStorage.getItem(OVERRIDES_STORAGE_KEY);
+    if (!raw) {
+      _overridesCache = {};
+      return _overridesCache;
+    }
+    _overridesCache = JSON.parse(raw, (key, value) => {
+      if (key === '__proto__' || key === 'constructor' || key === 'prototype') return undefined;
+      return value;
+    }) || {};
+  } catch {
+    _overridesCache = {};
+  }
+  return _overridesCache;
+}
+
+/**
+ * Invalidates the cached override map. Call after the Settings UI writes
+ * a new override so the next lookup re-reads localStorage.
+ */
+export function invalidateOverridesCache() {
+  _overridesCache = null;
+}
+
+/**
+ * Returns the override record for (vendor, app) or null.
+ * Input is lower-cased before lookup.
+ */
+function _getOverride(vendorAppName, sourceVendor) {
+  if (!vendorAppName || !sourceVendor) return null;
+  const overrides = _loadOverrides();
+  const vendorMap = overrides[sourceVendor];
+  if (!vendorMap || typeof vendorMap !== 'object') return null;
+  const record = vendorMap[vendorAppName.toLowerCase()];
+  return record || null;
+}
+
+/**
+ * Adds an indexable key → app entry, lower-cased and de-duplicated.
+ * Existing keys are NOT overwritten (first app wins) so a rare-word canonical
+ * cannot be hijacked by a later app listing it as an alias.
+ */
+function _indexKey(map, key, app) {
+  if (!key) return;
+  const normalized = String(key).toLowerCase();
+  if (!map.has(normalized)) {
+    map.set(normalized, app);
+  }
+}
+
 function _buildIndex() {
   _vendorIndex = {};
   for (const [ourVendor, fatcatKey] of Object.entries(VENDOR_KEY_MAP)) {
@@ -26,8 +91,22 @@ function _buildIndex() {
     const map = new Map();
     for (const app of _appData.apps) {
       const vendorEntry = app.vendors[fatcatKey];
-      if (vendorEntry && vendorEntry.name !== null) {
-        map.set(vendorEntry.name.toLowerCase(), app);
+      // 1. Vendor-specific display name (original behavior)
+      if (vendorEntry && vendorEntry.name) {
+        _indexKey(map, vendorEntry.name, app);
+      }
+      // 2. Vendor-specific aliases (optional schema field)
+      if (vendorEntry && Array.isArray(vendorEntry.aliases)) {
+        for (const alias of vendorEntry.aliases) _indexKey(map, alias, app);
+      }
+      // 3. Canonical name — covers PAN-OS configs that emit the canonical form
+      //    (e.g. "facebook") instead of the vendor-specific display ("facebook-base").
+      _indexKey(map, app.canonical, app);
+      // 4. PAN-OS <canonical>-base fallback: many PA App-IDs follow the
+      //    "<canonical>-base" convention. Only applied when the panos block
+      //    is absent so we don't shadow a real panos.name value.
+      if (fatcatKey === 'panos' && !vendorEntry && app.canonical) {
+        _indexKey(map, `${app.canonical}-base`, app);
       }
     }
     _vendorIndex[ourVendor] = map;
@@ -66,6 +145,21 @@ function normalizeJunosName(name) {
  */
 export function mapVendorApp(vendorAppName, sourceVendor) {
   if (!vendorAppName || !_vendorIndex) return null;
+
+  // User override takes precedence over the bundled table.
+  const override = _getOverride(vendorAppName, sourceVendor);
+  if (override) {
+    if (override._deleted) return null;
+    return {
+      junosApp: override.junosApp ?? (override.kind === 'predefined' ? override.name : null),
+      confidence: override.confidence ?? 1,
+      canonical: override.canonical ?? vendorAppName.toLowerCase(),
+      category: override.category ?? 'user-override',
+      description: override.description ?? 'User-defined mapping',
+      ports: override.ports ?? [],
+    };
+  }
+
   const index = _vendorIndex[sourceVendor];
   if (!index) return null;
 
@@ -144,6 +238,25 @@ export function isLoaded() {
  */
 export function getJunosEmission(vendorAppName, sourceVendor) {
   if (!vendorAppName || !_vendorIndex) return null;
+
+  // User override takes precedence.
+  const override = _getOverride(vendorAppName, sourceVendor);
+  if (override) {
+    if (override._deleted) return null;
+    if (override.kind === 'predefined' && override.name) {
+      return { kind: 'predefined', name: normalizeJunosName(override.name) };
+    }
+    if (override.kind === 'custom' && override.protocol && Array.isArray(override.ports)) {
+      return {
+        kind: 'custom',
+        protocol: String(override.protocol).toLowerCase(),
+        ports: override.ports.slice(),
+        canonical: override.canonical ?? vendorAppName.toLowerCase(),
+      };
+    }
+    // Malformed override — fall through to bundled lookup rather than crash
+  }
+
   const index = _vendorIndex[sourceVendor];
   if (!index) return null;
   const entry = index.get(vendorAppName.toLowerCase());

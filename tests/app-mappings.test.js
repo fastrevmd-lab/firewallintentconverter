@@ -158,6 +158,44 @@ for (const app of ['http', 'https', 'ssh', 'dns', 'ldap', 'ntp']) {
   });
 }
 
+console.log('--- Regression: 21 apps from user-reported PAN-OS policy block ---');
+// All 21 L7 application names extracted from the user's real
+// ALLOW-AC-Internet-Applications rule. Each MUST resolve via mapVendorApp
+// for sourceVendor 'panos'. Pre-fix these emitted `-UNMAPPED` in the SRX
+// output because the index only keyed vendors.panos.name, not canonical
+// or aliases.
+const USER_REPORTED_PANOS_APPS = [
+  'facebook',
+  'zoom',
+  'ms-teams',
+  'sharepoint-online',
+  'dropbox',
+  'gmail',
+  'ms-office365',
+  'ms-onedrive',
+  'adobe-cloud',
+  'apple-push-notifications',
+  'boxnet',
+  'dns-over-https',
+  'google-base',
+  'google-play',
+  'icloud',
+  'lastpass',
+  'linkedin',
+  'ms-update',
+  'outlook-web-online',
+  'spotify',
+  'windows-azure',
+];
+for (const app of USER_REPORTED_PANOS_APPS) {
+  test(`user-reported app "${app}" (panos) resolves via mapVendorApp`, () => {
+    const r = mapVendorApp(app, 'panos');
+    assert(r !== null, `${app} must not be UNMAPPED; got null from mapVendorApp`);
+    assert(typeof r.canonical === 'string' && r.canonical.length > 0,
+      `${app} resolved but canonical missing`);
+  });
+}
+
 test('total canonical app count >= 250', () => {
   assert(getAppCount() >= 250, `got ${getAppCount()} apps; expected >= 250`);
 });

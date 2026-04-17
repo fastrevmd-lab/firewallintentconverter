@@ -422,7 +422,8 @@
         },
         "panos": {
           "name": "ms-sharepoint",
-          "confidence": 1
+          "confidence": 1,
+          "aliases": ["sharepoint-online", "sharepoint"]
         },
         "ftd": {
           "name": "Microsoft-SharePoint",
@@ -568,7 +569,8 @@
         },
         "panos": {
           "name": "outlook-web-app",
-          "confidence": 1
+          "confidence": 1,
+          "aliases": ["outlook-web-online", "owa"]
         },
         "ftd": {
           "name": "Outlook-Web-Access",
@@ -2159,7 +2161,8 @@
         },
         "panos": {
           "name": "ms-azure",
-          "confidence": 1
+          "confidence": 1,
+          "aliases": ["windows-azure", "azure"]
         },
         "ftd": {
           "name": "Microsoft-Azure",
@@ -9115,6 +9118,71 @@
           "name": null,
           "confidence": 0
         }
+      }
+    },
+    {
+      "canonical": "boxnet",
+      "description": "Box.com enterprise cloud storage",
+      "category": "cloud-storage",
+      "protocols": ["TCP"],
+      "ports": ["443"],
+      "vendors": {
+        "junos": { "name": null, "confidence": 0 },
+        "panos": { "name": "boxnet", "confidence": 1, "aliases": ["box", "box-net"] },
+        "fortios": { "name": "Box", "confidence": 1 },
+        "ftd": { "name": "Box", "confidence": 1 }
+      }
+    },
+    {
+      "canonical": "google-base",
+      "description": "Google base services (search, accounts, core APIs)",
+      "category": "web",
+      "protocols": ["TCP"],
+      "ports": ["443"],
+      "vendors": {
+        "junos": { "name": null, "confidence": 0 },
+        "panos": { "name": "google-base", "confidence": 1, "aliases": ["google"] },
+        "fortios": { "name": "Google.Services", "confidence": 0.9 },
+        "ftd": { "name": "Google", "confidence": 0.9 }
+      }
+    },
+    {
+      "canonical": "google-play",
+      "description": "Google Play store and services",
+      "category": "cloud-saas",
+      "protocols": ["TCP"],
+      "ports": ["443"],
+      "vendors": {
+        "junos": { "name": null, "confidence": 0 },
+        "panos": { "name": "google-play", "confidence": 1 },
+        "fortios": { "name": "Google.Play", "confidence": 1 },
+        "ftd": { "name": "Google-Play", "confidence": 1 }
+      }
+    },
+    {
+      "canonical": "icloud",
+      "description": "Apple iCloud storage and sync services",
+      "category": "cloud-storage",
+      "protocols": ["TCP"],
+      "ports": ["443"],
+      "vendors": {
+        "junos": { "name": null, "confidence": 0 },
+        "panos": { "name": "icloud", "confidence": 1, "aliases": ["apple-icloud"] },
+        "fortios": { "name": "Apple.iCloud", "confidence": 1 },
+        "ftd": { "name": "iCloud", "confidence": 1 }
+      }
+    },
+    {
+      "canonical": "ms-update",
+      "description": "Microsoft Windows Update service",
+      "category": "management",
+      "protocols": ["TCP"],
+      "ports": ["80", "443"],
+      "vendors": {
+        "junos": { "name": null, "confidence": 0 },
+        "panos": { "name": "ms-update", "confidence": 1, "aliases": ["windows-update", "wsus"] },
+        "fortios": { "name": "MS.Windows.Update", "confidence": 1 },
+        "ftd": { "name": "Windows-Update", "confidence": 1 }
       }
     }
   ]

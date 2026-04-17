@@ -24,6 +24,7 @@ import CommandPalette from './components/layout/CommandPalette.jsx';
 const ModelSelector = React.lazy(() => import('./components/ModelSelector.jsx'));
 const InterfaceMapper = React.lazy(() => import('./components/InterfaceMapper.jsx'));
 const LLMSettings = React.lazy(() => import('./components/LLMSettings.jsx'));
+const AppMappingsEditor = React.lazy(() => import('./components/AppMappingsEditor.jsx'));
 const FeedbackModal = React.lazy(() => import('./components/FeedbackModal.jsx'));
 const SaveProjectModal = React.lazy(() => import('./components/SaveProjectModal.jsx'));
 const ReportModal = React.lazy(() => import('./components/ReportModal.jsx'));
@@ -499,6 +500,12 @@ export default function App() {
         <LLMSettings
           initialTab={ui.showSettings === 'mcp' ? 'mcp' : 'llm'}
           onClose={() => uiDispatch({ type: 'HIDE_MODAL', name: 'settings' })}
+        />
+      )}
+
+      {ui.showAppMappings && (
+        <AppMappingsEditor
+          onClose={() => uiDispatch({ type: 'HIDE_MODAL', name: 'appMappings' })}
         />
       )}
 

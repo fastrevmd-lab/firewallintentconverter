@@ -21,10 +21,11 @@ export default defineConfig({
     rollupOptions: {
       input: 'standalone/index.html',
       output: {
-        // Collapse all dynamic imports into a single JS file.
+        // Disable code splitting so everything collapses into a single JS file.
         // This is required for file:// — browsers block ES module
         // import() across file:// origins due to CORS.
-        inlineDynamicImports: true,
+        // (Vite 8 / Rolldown replacement for the deprecated inlineDynamicImports.)
+        codeSplitting: false,
       },
     },
   },

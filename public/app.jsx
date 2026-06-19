@@ -17,6 +17,7 @@ import RightPanel from './components/layout/RightPanel.jsx';
 import StatusBar from './components/layout/StatusBar.jsx';
 import ResizeHandle from './components/layout/ResizeHandle.jsx';
 import Breadcrumb from './components/layout/Breadcrumb.jsx';
+import WorkflowStepper from './components/layout/WorkflowStepper.jsx';
 import ContentRouter from './components/layout/ContentRouter.jsx';
 import CommandPalette from './components/layout/CommandPalette.jsx';
 
@@ -456,6 +457,7 @@ export default function App() {
         <ResizeHandle direction="vertical" onResize={handleLeftResize} onDoubleClick={() => uiDispatch({ type: 'TOGGLE_SIDEBAR' })} />
         <div className="app-workspace">
           <div className="app-center">
+            <WorkflowStepper />
             <Breadcrumb />
             <Suspense fallback={<div className="center-content" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 1, color: 'var(--text-muted)' }}><span className="spinner" style={{ marginRight: 8 }} />Loading...</div>}>
               <ContentRouter

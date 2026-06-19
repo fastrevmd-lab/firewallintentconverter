@@ -1,4 +1,4 @@
-import React, { Suspense, useMemo, useCallback, useState } from 'react';
+import React, { Suspense, useMemo, useCallback } from 'react';
 import { useConfigContext } from '../../contexts/ConfigContext.jsx';
 import { useConversionContext } from '../../contexts/ConversionContext.jsx';
 import { useUIContext, isDeterministicMode } from '../../contexts/UIContext.jsx';
@@ -144,145 +144,9 @@ export default function ContentRouter({
     });
   }, [warningStatuses, cfgDispatch]);
 
-  const [enforceLicense, setEnforceLicense] = useState(false);
-
-  // --- Platform view bar (hoisted before early returns) ---
-  const analysisCount = activeConfig?._analysisFindings?.reduce((s, f) => s + f.count, 0) || 0;
+  // --- Platform mode helpers (used by tab branches below) ---
   const detMode = isDeterministicMode(ui.llmRiskAcceptance);
   const localOnly = ui.llmRiskAcceptance === 'local-only';
-
-  const renderPlatformBar = () => (
-    <div className="platform-view-bar">
-      <button
-        className={`platform-view-btn ${platformView === 'panos' && editTab === 'rules' ? 'active' : ''}`}
-        onClick={() => {
-          uiDispatch({ type: 'SET_FIELD', field: 'platformView', value: 'panos' });
-          uiDispatch({ type: 'SET_FIELD', field: 'editTab', value: 'rules' });
-        }}
-      >
-        {greenfieldMode ? 'from LLM Interview'
-          : isHealthCheckMode ? 'Original Config'
-          : `from ${sourceModel || ({ panos: 'PAN-OS', srx: 'SRX', fortigate: 'FortiGate', cisco_asa: 'Cisco ASA', checkpoint: 'Check Point', sonicwall: 'SonicWall', huawei_usg: 'Huawei USG' }[sourceVendor] || 'PAN-OS')}`
-        } &rsaquo;
-      </button>
-      <button
-        className={`platform-view-btn ${editTab === 'analysis' ? 'active' : ''}`}
-        onClick={() => {
-          if (analysisCount > 0) {
-            uiDispatch({ type: 'SET_FIELD', field: 'editTab', value: 'analysis' });
-          } else {
-            config.handleRunAnalysis();
-          }
-        }}
-        disabled={ui.isLoading || !activeConfig?.security_policies?.length}
-        title={analysisCount > 0 ? `View analysis findings (${analysisCount})` : 'Run pre-conversion analysis'}
-      >
-        <span style={{ color: 'var(--caution)' }}>{ui.isLoading && editTab === 'analysis' ? <><span className="spinner" /> Analyzing...</> : 'Analysis'} &rsaquo;</span>
-      </button>
-      <button
-        className={`btn btn-translate${localOnly ? ' llm-local' : ''}`}
-        onClick={llm.handleTranslateWithLLM}
-        disabled={detMode || isTranslating || !intermediateConfig?.security_policies?.length}
-        title={detMode ? 'Disabled in No-AI mode' : localOnly ? 'Note: sending info to Local LLM' : 'Warning: sending info to a Public LLM'}
-        style={detMode ? { opacity: 0.4, cursor: 'not-allowed' } : undefined}
-      >
-        {isTranslating
-          ? <><span className="spinner" /> {isHealthCheckMode ? 'Checking...' : greenfieldMode ? 'Importing...' : 'Translating...'}</>
-          : 'Review w/LLM'
-        } &rsaquo;
-      </button>
-      <button
-        className={`platform-view-btn ${platformView === 'srx' && editTab === 'rules' ? 'active' : ''}`}
-        onClick={() => {
-          uiDispatch({ type: 'SET_FIELD', field: 'platformView', value: 'srx' });
-          uiDispatch({ type: 'SET_FIELD', field: 'editTab', value: 'rules' });
-        }}
-      >
-        {isHealthCheckMode ? 'Best Practice Status' : <>to <span style={{ color: 'var(--juniper-green)' }}>{targetModel || 'SRX'}</span></>} &rsaquo;
-      </button>
-      <button
-        className="platform-view-btn convert-btn"
-        onClick={() => mergeMode ? conversion.handleMergeConvert('set') : conversion.handleConvertClick('set')}
-        disabled={isLoading || (!intermediateConfig?.security_policies?.length)}
-      >
-        {mergeMode ? 'Merge & Convert' : 'Convert to SRX'}
-      </button>
-      {conv.srxOutput && (
-        <>
-          <button
-            className="platform-view-btn"
-            onClick={() => conversion.handleValidate(enforceLicense)}
-            disabled={ui.isLoading}
-            title="Run post-conversion validation checks"
-            style={{ color: 'var(--caution)' }}
-          >
-            {ui.isLoading && ui.loadingMessage?.includes('validation')
-              ? <><span className="spinner" /> Validating...</>
-              : <>Validate{conv.validationFindings?.length > 0 ? ` (${conv.validationFindings.length})` : ''}</>
-            }
-          </button>
-          <label
-            style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--text-muted)', marginLeft: 4, cursor: 'pointer' }}
-            title="When enabled, commands requiring a higher license tier are removed from the SRX output"
-          >
-            <input
-              type="checkbox"
-              checked={enforceLicense}
-              onChange={(e) => setEnforceLicense(e.target.checked)}
-              style={{ margin: 0 }}
-            />
-            Enforce license
-          </label>
-        </>
-      )}
-      <button
-        className={`platform-view-btn${editTab === 'day2ops' ? ' active' : ''}`}
-        onClick={() => uiDispatch({ type: 'SET_FIELD', field: 'editTab', value: 'day2ops' })}
-        disabled={!activeConfig?.security_policies?.length}
-        title="Day 2 Operations — pull live stats from SRX device"
-        style={{ color: 'var(--caution)' }}
-      >
-        Day 2 Ops
-      </button>
-      {platformView === 'srx' && (
-        <div className="platform-view-actions">
-          <select
-            className="btn btn-secondary btn-sm"
-            value={targetContext.type}
-            onChange={(e) => convDispatch({ type: 'SET_FIELD', field: 'targetContext', value: { ...targetContext, type: e.target.value, name: e.target.value === 'none' ? '' : targetContext.name } })}
-            style={{ maxWidth: 130 }}
-          >
-            <option value="none">Flat Config</option>
-            <option value="logical-system">Logical System</option>
-            <option value="tenant">Tenant</option>
-          </select>
-          {targetContext.type !== 'none' && (
-            <input
-              type="text"
-              className="btn btn-secondary btn-sm"
-              placeholder="Name..."
-              value={targetContext.name}
-              onChange={(e) => convDispatch({ type: 'SET_FIELD', field: 'targetContext', value: { ...targetContext, name: e.target.value } })}
-              style={{ maxWidth: 100, textAlign: 'left' }}
-            />
-          )}
-          <button
-            className="btn btn-secondary btn-sm push-btn"
-            onClick={() => {
-              const bridgeSettings = localStorage.getItem('pyez-bridge-settings') || localStorage.getItem('mcp-settings');
-              if (bridgeSettings) {
-                uiDispatch({ type: 'SHOW_MODAL', name: 'pushModal' });
-              } else {
-                uiDispatch({ type: 'SHOW_MODAL', name: 'settings', value: 'mcp' });
-              }
-            }}
-            title="Push config to SRX device via PyEZ"
-            disabled={!conv.srxOutput}
-          >Push to SRX</button>
-        </div>
-      )}
-    </div>
-  );
 
   // --- Import / Config Input ---
   if (editTab === 'import') {
@@ -329,7 +193,6 @@ export default function ContentRouter({
     if (!table.length) {
       return (
         <div className="center-content" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
-          {renderPlatformBar()}
           <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <div className="empty-state">
               <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" opacity="0.3">
@@ -351,7 +214,6 @@ export default function ContentRouter({
 
     return (
       <div className="center-content" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
-        {renderPlatformBar()}
         <div style={{ flex: 1, overflow: 'auto', padding: 16 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--success)" strokeWidth="2">
@@ -426,7 +288,6 @@ export default function ContentRouter({
       if (isDeterministicMode(ui.llmRiskAcceptance)) {
         return (
           <div className="center-content" style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
-            {renderPlatformBar()}
             <div className="panel-body">
               <div className="empty-state">
                 <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" opacity="0.3">
@@ -442,7 +303,6 @@ export default function ContentRouter({
       }
       return (
         <div className="center-content" style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
-          {renderPlatformBar()}
           <GreenfieldChat
             intermediateConfig={intermediateConfig}
             targetModel={targetModel}
@@ -457,7 +317,6 @@ export default function ContentRouter({
     if (platformView === 'srx' && !srxTranslatedPolicies && !isDeterministicMode(ui.llmRiskAcceptance)) {
       return (
         <div className="center-content" style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
-          {renderPlatformBar()}
           <div className="panel-body">
             <div className="empty-state">
               <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" opacity="0.3">
@@ -483,7 +342,6 @@ export default function ContentRouter({
 
     return (
       <div className="center-content" style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
-        {renderPlatformBar()}
         <PolicyTable
           policies={policies}
           warnings={allWarnings}
@@ -522,7 +380,6 @@ export default function ContentRouter({
   if (editTab === 'decryption') {
     return (
       <div className="center-content" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
-        {renderPlatformBar()}
         <SectionAcceptBar sectionId="decryption" label="SSL B&I" />
         <div className="panel-body" style={{ overflow: 'auto', flex: 1 }}>
           <table className="policy-table">
@@ -554,7 +411,6 @@ export default function ContentRouter({
   if (editTab === 'pbf') {
     return (
       <div className="center-content" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
-        {renderPlatformBar()}
         <SectionAcceptBar sectionId="pbf" label="PBF" />
         <div className="panel-body" style={{ overflow: 'auto', flex: 1 }}>
           <table className="policy-table">
@@ -586,7 +442,6 @@ export default function ContentRouter({
   if (editTab === 'analysis') {
     return (
       <div className="center-content" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
-        {renderPlatformBar()}
         <div style={{ flex: 1, overflow: 'auto' }}>
           <AnalysisPanel
             findings={activeConfig?._analysisFindings || []}
@@ -618,7 +473,6 @@ export default function ContentRouter({
   if (editTab === 'day2ops') {
     return (
       <div className="editor-content">
-        {renderPlatformBar()}
         <div style={{ flex: 1, overflow: 'auto' }}>
           <React.Suspense fallback={<LoadingTab />}>
             <Day2OpsPanel />
@@ -632,7 +486,6 @@ export default function ContentRouter({
     const PolicyDependencyGraph = React.lazy(() => import('../PolicyDependencyGraph.jsx'));
     return (
       <div className="center-content" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
-        {renderPlatformBar()}
         <Suspense fallback={<LoadingTab />}>
           <PolicyDependencyGraph intermediateConfig={activeConfig} />
         </Suspense>
@@ -644,7 +497,6 @@ export default function ContentRouter({
   if (editTab === 'zones') {
     return (
       <div className="center-content" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
-        {renderPlatformBar()}
         <SectionAcceptBar sectionId="zones" label="Zones" />
         <div style={{ flex: 1, overflow: 'auto' }}><ZoneEditor zones={activeConfig?.zones || []} onZonesUpdate={config.handleZonesUpdate} viewMode={effectiveViewMode} interfaceMappings={interfaceMappings} /></div>
       </div>
@@ -654,7 +506,6 @@ export default function ContentRouter({
   if (editTab === 'objects') {
     return (
       <div className="center-content" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
-        {renderPlatformBar()}
         <div style={{ flex: 1, overflow: 'auto' }}><ObjectEditor intermediateConfig={activeConfig} onConfigUpdate={config.handleConfigUpdate} viewMode={effectiveViewMode} /></div>
       </div>
     );
@@ -663,7 +514,6 @@ export default function ContentRouter({
   if (editTab === 'nat') {
     return (
       <div className="center-content" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
-        {renderPlatformBar()}
         <SectionAcceptBar sectionId="nat" label="NAT Rules" />
         <div style={{ flex: 1, overflow: 'auto' }}><NATEditor natRules={activeConfig?.nat_rules || []} onNATUpdate={config.handleNATUpdate} viewMode={effectiveViewMode} /></div>
       </div>
@@ -673,7 +523,6 @@ export default function ContentRouter({
   if (editTab === 'routing') {
     return (
       <div className="center-content" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
-        {renderPlatformBar()}
         <SectionAcceptBar sectionId="routing" label="Routing" />
         <div style={{ flex: 1, overflow: 'auto' }}>
           <RoutingEditor
@@ -704,7 +553,6 @@ export default function ContentRouter({
   if (editTab === 'vpn') {
     return (
       <div className="center-content" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
-        {renderPlatformBar()}
         <SectionAcceptBar sectionId="vpn" label="VPN" />
         <div style={{ flex: 1, overflow: 'auto' }}><VPNEditor vpnTunnels={activeConfig?.vpn_tunnels || []} onVPNUpdate={config.handleVPNUpdate} viewMode={effectiveViewMode} /></div>
       </div>
@@ -714,7 +562,6 @@ export default function ContentRouter({
   if (editTab === 'ha') {
     return (
       <div className="center-content" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
-        {renderPlatformBar()}
         <SectionAcceptBar sectionId="ha" label="HA" />
         <div style={{ flex: 1, overflow: 'auto' }}><HAEditor haConfig={activeConfig?.ha_config} onHAUpdate={config.handleHAUpdate} viewMode={effectiveViewMode} targetModel={targetModel} /></div>
       </div>
@@ -724,7 +571,6 @@ export default function ContentRouter({
   if (editTab === 'screen') {
     return (
       <div className="center-content" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
-        {renderPlatformBar()}
         {/* Screen acceptance is handled per-zone inside ScreenEditor */}
         <div style={{ flex: 1, overflow: 'auto' }}><ScreenEditor screenConfig={activeConfig?.screen_config || []} onScreenUpdate={config.handleScreenUpdate} viewMode={effectiveViewMode} zones={activeConfig?.zones || []} staticRoutes={activeConfig?.static_routes || []} interfaces={activeConfig?.interfaces || []} targetModel={targetModel} interfaceMappings={interfaceMappings} /></div>
       </div>
@@ -734,7 +580,6 @@ export default function ContentRouter({
   if (editTab === 'syslog') {
     return (
       <div className="center-content" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
-        {renderPlatformBar()}
         <SectionAcceptBar sectionId="syslog" label="Syslog" />
         <div style={{ flex: 1, overflow: 'auto' }}><SyslogEditor syslogConfig={activeConfig?.syslog_config || []} onSyslogUpdate={config.handleSyslogUpdate} viewMode={effectiveViewMode} /></div>
       </div>
@@ -744,7 +589,6 @@ export default function ContentRouter({
   if (editTab === 'snmp') {
     return (
       <div className="center-content" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
-        {renderPlatformBar()}
         <SectionAcceptBar sectionId="snmp" label="SNMP" />
         <div style={{ flex: 1, overflow: 'auto' }}><SNMPEditor snmpConfig={activeConfig?.snmp_config || []} onSNMPUpdate={config.handleSNMPUpdate} viewMode={effectiveViewMode} /></div>
       </div>
@@ -754,7 +598,6 @@ export default function ContentRouter({
   if (editTab === 'aaa') {
     return (
       <div className="center-content" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
-        {renderPlatformBar()}
         <SectionAcceptBar sectionId="aaa" label="AAA" />
         <div style={{ flex: 1, overflow: 'auto' }}><AAAEditor aaaConfig={activeConfig?.aaa_config || []} onAAAUpdate={config.handleAAAUpdate} viewMode={effectiveViewMode} /></div>
       </div>
@@ -764,7 +607,6 @@ export default function ContentRouter({
   if (editTab === 'dhcp') {
     return (
       <div className="center-content" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
-        {renderPlatformBar()}
         <SectionAcceptBar sectionId="dhcp" label="DHCP" />
         <div style={{ flex: 1, overflow: 'auto' }}><DHCPEditor dhcpConfig={activeConfig?.dhcp_config || []} onDHCPUpdate={config.handleDHCPUpdate} viewMode={effectiveViewMode} /></div>
       </div>
@@ -774,7 +616,6 @@ export default function ContentRouter({
   if (editTab === 'qos') {
     return (
       <div className="center-content" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
-        {renderPlatformBar()}
         <SectionAcceptBar sectionId="qos" label="QoS" />
         <div style={{ flex: 1, overflow: 'auto' }}><QoSEditor qosConfig={activeConfig?.qos_config || []} onQoSUpdate={config.handleQoSUpdate} viewMode={effectiveViewMode} /></div>
       </div>
@@ -784,7 +625,6 @@ export default function ContentRouter({
   if (editTab === 'flow-monitoring') {
     return (
       <div className="center-content" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
-        {renderPlatformBar()}
         <SectionAcceptBar sectionId="flow-monitoring" label="Flow Monitoring" />
         <div style={{ flex: 1, overflow: 'auto' }}><FlowMonitoringEditor flowConfig={activeConfig?.flow_monitoring_config} onFlowUpdate={(flowConfig) => config.handleConfigUpdate('flow_monitoring_config', flowConfig)} viewMode={effectiveViewMode} /></div>
       </div>
@@ -795,7 +635,6 @@ export default function ContentRouter({
   if (editTab === 'output') {
     return (
       <div className="center-content" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
-        {renderPlatformBar()}
         {srxOutput && (
           <div style={{ display: 'flex', gap: 4, padding: '8px 12px', borderBottom: '1px solid var(--border-color)', flexShrink: 0 }}>
             <button className={`format-btn ${outputFormat === 'set' ? 'active' : ''}`} onClick={() => conversion.handleConvert('set')}>Set Commands</button>
@@ -810,7 +649,6 @@ export default function ContentRouter({
   if (editTab === 'warnings') {
     return (
       <div className="center-content" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
-        {renderPlatformBar()}
         <div style={{ flex: 1, overflow: 'auto' }}>
           <WarningsPanel warnings={allWarnings} warningStatuses={warningStatuses} onWarningAction={handleWarningAction} />
         </div>
@@ -825,7 +663,6 @@ export default function ContentRouter({
     ];
     return (
       <div className="center-content" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
-        {renderPlatformBar()}
         <div style={{ display: 'flex', gap: 4, padding: '8px 12px', borderBottom: '1px solid var(--border-color)', flexShrink: 0 }}>
           <button className={`format-btn ${diffSubTab === 'policy' ? 'active' : ''}`} onClick={() => setDiffSubTab('policy')}>Policy Diff</button>
           <button className={`format-btn ${diffSubTab === 'config' ? 'active' : ''}`} onClick={() => setDiffSubTab('config')}>Config Diff</button>
@@ -845,7 +682,6 @@ export default function ContentRouter({
   if (editTab === 'checklist') {
     return (
       <div className="center-content" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
-        {renderPlatformBar()}
         <Suspense fallback={<LoadingTab />}>
           <MigrationChecklist intermediateConfig={intermediateConfig} siteName={cfg.siteName} />
         </Suspense>
@@ -856,7 +692,6 @@ export default function ContentRouter({
   if (editTab === 'report') {
     return (
       <div className="center-content" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
-        {renderPlatformBar()}
         <Suspense fallback={<LoadingTab />}>
           <ConversionReport
             intermediateConfig={intermediateConfig}

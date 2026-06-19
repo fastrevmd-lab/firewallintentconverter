@@ -54,6 +54,40 @@ const TEMPLATE_ICONS = {
   ),
 };
 
+/**
+ * Source-selector tile metadata.
+ * `id` MUST match the existing selectedVendor values used by onParse, sample
+ * filtering and textarea placeholders — do not rename them.
+ * `color` is a brand color applied ONLY to the icon chip (tinted bg + glyph).
+ * `mono` is the short monogram shown in the chip.
+ * `group` controls which section the tile renders under.
+ * `secondary` is the descriptor shown in the selected-source header.
+ */
+const SOURCE_GROUPS = ['scratch', 'vendor', 'cloud'];
+
+const SOURCE_GROUP_LABELS = {
+  scratch: 'From scratch',
+  vendor: 'Firewall vendors',
+  cloud: 'Cloud',
+};
+
+const SOURCE_META = [
+  { id: 'greenfield',      label: 'Greenfield',        mono: 'GF',  color: 'var(--llm-cloud)', group: 'scratch', secondary: 'LLM-guided · start from a template', llm: true },
+  { id: 'srx_healthcheck', label: 'SRX Best Practice', mono: 'BP',  color: 'var(--juniper-green)', group: 'scratch', secondary: 'Audit an existing SRX config' },
+  { id: 'srx',             label: 'Junos SRX',         mono: 'SRX', color: 'var(--juniper-green)', group: 'vendor', secondary: 'Junos SRX config import' },
+  { id: 'panos',           label: 'PAN-OS',            mono: 'PA',  color: '#FA582D', group: 'vendor', secondary: 'PAN-OS XML import' },
+  { id: 'fortigate',       label: 'FortiGate',         mono: 'FG',  color: '#EE3124', group: 'vendor', secondary: 'FortiOS config import' },
+  { id: 'cisco_asa',       label: 'Cisco ASA/FTD',     mono: 'ASA', color: '#1BA0D7', group: 'vendor', secondary: 'ASA/FTD running-config import' },
+  { id: 'checkpoint',      label: 'Check Point R80+',  mono: 'CP',  color: '#E6097E', group: 'vendor', secondary: 'Check Point policy import' },
+  { id: 'sonicwall',       label: 'SonicWall',         mono: 'SW',  color: '#FF6C2C', group: 'vendor', secondary: 'SonicOS config import' },
+  { id: 'huawei_usg',      label: 'Huawei USG',        mono: 'HW',  color: '#E40012', group: 'vendor', secondary: 'Huawei VRP config import' },
+  { id: 'aws_sg',          label: 'AWS SG',            mono: 'AWS', color: '#FF9900', group: 'cloud',  secondary: 'AWS Security Groups import' },
+  { id: 'azure_nsg',       label: 'Azure NSG',         mono: 'AZ',  color: '#0078D4', group: 'cloud',  secondary: 'Azure NSG import' },
+  { id: 'gcp_fw',          label: 'GCP Firewall',      mono: 'GCP', color: '#4285F4', group: 'cloud',  secondary: 'GCP Firewall Rules import' },
+];
+
+const SOURCE_META_BY_ID = Object.fromEntries(SOURCE_META.map((meta) => [meta.id, meta]));
+
 const SANITIZE_TYPE_LABELS = {
   hash: 'Hash', key: 'Key', community: 'SNMP', username: 'User', public_ip: 'Public IP',
   certificate: 'Certificate', hostname: 'Hostname', bgp: 'BGP AS',

@@ -282,6 +282,89 @@ html, body, #root {
 .vendor-select:hover { border-color: var(--accent); }
 .vendor-select:focus { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
 
+/* --- Source chooser tile grid --- */
+.source-chooser {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.source-group-label {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  margin: 10px 0 4px;
+}
+.source-group-label:first-child { margin-top: 0; }
+.source-tile-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 7px;
+}
+.source-tile {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  text-align: left;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 9px 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s;
+}
+.source-tile:hover { background: var(--bg-hover); border-color: var(--accent); }
+.source-tile.selected { border-color: var(--accent); background: var(--bg-elevated); color: var(--text-primary); }
+.source-tile-chip {
+  width: 30px;
+  height: 24px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 5px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  /* --chip-color set inline per tile */
+  color: var(--chip-color, var(--text-secondary));
+  background: color-mix(in srgb, var(--chip-color, var(--border-color)) 18%, transparent);
+}
+
+/* --- Selected-source header (shown after a tile is committed) --- */
+.selected-source-header {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin-bottom: 10px;
+}
+.selected-source-header .ssh-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.selected-source-header .ssh-sub {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+.selected-source-change {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--accent);
+  background: transparent;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 3px 9px;
+  cursor: pointer;
+}
+.selected-source-change:hover { border-color: var(--accent); }
+
 /* --- Left Panel: Config Input --- */
 .config-input-panel {
   grid-column: 1;

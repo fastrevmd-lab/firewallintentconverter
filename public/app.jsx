@@ -672,6 +672,52 @@ export default function App() {
         </div>
       )}
 
+      {/* Reset workspace confirmation */}
+      {ui.showResetConfirm && (
+        <div className="modal-overlay" onClick={() => uiDispatch({ type: 'HIDE_MODAL', name: 'resetConfirm' })}>
+          <div className="modal-content" onClick={e => e.stopPropagation()} style={{ width: 480 }}>
+            <div className="modal-header">
+              <h2>Reset Workspace</h2>
+              <button className="modal-close" onClick={() => uiDispatch({ type: 'HIDE_MODAL', name: 'resetConfirm' })}>&times;</button>
+            </div>
+            <div className="modal-body" style={{ padding: '16px 20px' }}>
+              <p style={{ color: 'var(--warning)', fontWeight: 600, marginBottom: 8 }}>
+                This will clear the current config, conversion output, warnings, and undo history. This cannot be undone.
+              </p>
+              <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>
+                Your settings, LLM configuration, application mappings, theme, and layout are kept.
+              </p>
+              <p style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                Save your work first if you want to keep it.
+              </p>
+            </div>
+            <div className="modal-footer" style={{ gap: 8 }}>
+              <button
+                className="btn btn-secondary"
+                onClick={() => uiDispatch({ type: 'HIDE_MODAL', name: 'resetConfirm' })}
+              >
+                Cancel
+              </button>
+              <button
+                className="btn btn-secondary"
+                onClick={() => {
+                  uiDispatch({ type: 'HIDE_MODAL', name: 'resetConfirm' });
+                  uiDispatch({ type: 'SHOW_MODAL', name: 'saveModal' });
+                }}
+              >
+                Save now
+              </button>
+              <button
+                className="btn btn-primary"
+                onClick={() => project.resetWorkspace()}
+              >
+                Continue without saving
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* LLM warning */}
       {ui.showLLMWarning && (
         <div className="modal-overlay" onClick={() => uiDispatch({ type: 'HIDE_MODAL', name: 'llmWarning' })}>

@@ -205,7 +205,7 @@ export default function TopBar() {
             <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
           </svg>
         </button>
-        <div style={{ width: 1, height: 20, background: 'var(--border)', margin: '0 4px' }} />
+        <div style={{ width: 1, height: 20, background: 'var(--border-color)', margin: '0 4px' }} />
         {/* Save */}
         <button
           className="settings-btn"

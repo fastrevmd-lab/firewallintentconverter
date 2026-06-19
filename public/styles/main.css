@@ -1323,6 +1323,11 @@ html, body, #root {
   background: var(--accent-glow);
 }
 
+.reset-btn:hover {
+  color: var(--caution);
+  border-color: var(--caution);
+}
+
 /* --- Overflow Menu --- */
 .overflow-menu {
   position: absolute;

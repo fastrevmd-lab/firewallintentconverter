@@ -9,7 +9,7 @@ import React, { createContext, useContext, useReducer } from 'react';
 // ---------------------------------------------------------------------------
 // Initial state
 // ---------------------------------------------------------------------------
-const initialState = {
+export const initialState = {
   srxOutput: null,
   convertWarnings: [],
   conversionSummary: null,
@@ -21,7 +21,7 @@ const initialState = {
 // ---------------------------------------------------------------------------
 // Reducer
 // ---------------------------------------------------------------------------
-function conversionReducer(state, action) {
+export function conversionReducer(state, action) {
   switch (action.type) {
     // Generic single-field setter
     case 'SET_FIELD':
@@ -47,6 +47,10 @@ function conversionReducer(state, action) {
         conversionSummary: null,
         validationFindings: [],
       };
+
+    // Full reset to initial state (workspace reset — keeps no output)
+    case 'RESET':
+      return { ...initialState };
 
     // Restore from a project file
     case 'LOAD_PROJECT': {

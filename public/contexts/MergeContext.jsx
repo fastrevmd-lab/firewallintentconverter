@@ -9,7 +9,7 @@ import React, { createContext, useContext, useReducer } from 'react';
 // ---------------------------------------------------------------------------
 // Initial state
 // ---------------------------------------------------------------------------
-const initialState = {
+export const initialState = {
   mergeMode: false,
   configSlots: [],
   activeSlotIndex: 0,
@@ -34,7 +34,7 @@ function removeAt(arr, index) {
 // ---------------------------------------------------------------------------
 // Reducer
 // ---------------------------------------------------------------------------
-function mergeReducer(state, action) {
+export function mergeReducer(state, action) {
   switch (action.type) {
     // Generic single-field setter
     case 'SET_FIELD':
@@ -83,6 +83,10 @@ function mergeReducer(state, action) {
     // Set cross-logical-system links
     case 'SET_CROSS_LS_LINKS':
       return { ...state, crossLsLinks: action.links };
+
+    // Full reset to initial state (workspace reset)
+    case 'RESET':
+      return { ...initialState };
 
     // Restore from a project file
     case 'LOAD_PROJECT': {

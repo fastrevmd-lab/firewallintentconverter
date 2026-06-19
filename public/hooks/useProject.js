@@ -3,13 +3,14 @@
  *
  * Provides handlers for saving/loading .fpic.json project files
  * and restoring all application state from a loaded project.
- * Uses ConfigContext, UIContext, ConversionContext, and MergeContext.
+ * Uses ConfigContext, UIContext, ConversionContext, MergeContext, and UndoContext.
  */
 import { useCallback } from 'react';
 import { useConfigContext } from '../contexts/ConfigContext.jsx';
 import { useUIContext } from '../contexts/UIContext.jsx';
 import { useConversionContext } from '../contexts/ConversionContext.jsx';
 import { useMergeContext } from '../contexts/MergeContext.jsx';
+import { useUndoContext } from '../contexts/UndoContext.jsx';
 import { buildProjectPayload, validateProjectFile, generateProjectName } from '../utils/project-io.js';
 import { safeJsonParse } from '../utils/safe-json.js';
 
@@ -18,6 +19,7 @@ export default function useProject() {
   const { state: uiState, dispatch: uiDispatch } = useUIContext();
   const { state: conversionState, dispatch: conversionDispatch } = useConversionContext();
   const { state: mergeState, dispatch: mergeDispatch } = useMergeContext();
+  const { dispatch: undoDispatch } = useUndoContext();
 
   // -----------------------------------------------------------------------
   // handleSaveProject — build payload from all state, download as .fpic.json
@@ -184,6 +186,36 @@ export default function useProject() {
   }, [configDispatch, conversionDispatch, mergeDispatch, uiDispatch]);
 
   // -----------------------------------------------------------------------
+  // resetWorkspace — clear all working-data contexts and transient UI state,
+  //                  preserving localStorage-backed preferences
+  // -----------------------------------------------------------------------
+  const resetWorkspace = useCallback(() => {
+    // Working-data contexts -> back to their initial states
+    configDispatch({ type: 'RESET' });
+    conversionDispatch({ type: 'RESET' });
+    mergeDispatch({ type: 'RESET' });
+    undoDispatch({ type: 'CLEAR' });
+
+    // Transient UI state -> defaults (does NOT touch llmRiskAcceptance,
+    // layout widths/collapse, or other settings-derived UI fields)
+    uiDispatch({ type: 'SET_FIELD', field: 'editTab', value: 'import' });
+    uiDispatch({ type: 'SET_FIELD', field: 'platformView', value: 'panos' });
+    uiDispatch({ type: 'SET_FIELD', field: 'bottomTab', value: 'output' });
+    uiDispatch({ type: 'SET_FIELD', field: 'selectedRule', value: null });
+    uiDispatch({ type: 'SET_FIELD', field: 'isTranslating', value: false });
+    uiDispatch({ type: 'SET_FIELD', field: 'translationError', value: null });
+    uiDispatch({ type: 'SET_FIELD', field: 'translationProgress', value: null });
+    uiDispatch({ type: 'SET_FIELD', field: 'groupingInProgress', value: false });
+    uiDispatch({ type: 'SET_FIELD', field: 'llmWarningDismissed', value: false });
+    uiDispatch({ type: 'CLEAR_ERROR' });
+    uiDispatch({ type: 'SET_LOADING', isLoading: false });
+    uiDispatch({ type: 'HIDE_MODAL', name: 'modelSelector' });
+    uiDispatch({ type: 'HIDE_MODAL', name: 'interfaceMapper' });
+    uiDispatch({ type: 'HIDE_MODAL', name: 'llmWarning' });
+    uiDispatch({ type: 'HIDE_MODAL', name: 'resetConfirm' });
+  }, [configDispatch, conversionDispatch, mergeDispatch, undoDispatch, uiDispatch]);
+
+  // -----------------------------------------------------------------------
   // generateName — convenience wrapper around generateProjectName
   // -----------------------------------------------------------------------
   const generateName = useCallback(() => {
@@ -201,6 +233,7 @@ export default function useProject() {
     handleSaveProject,
     handleLoadProjectFile,
     applyLoadedProject,
+    resetWorkspace,
     generateName,
   };
 }

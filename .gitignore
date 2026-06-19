@@ -8,6 +8,7 @@ venv/
 .claude/
 .superpowers/
 CLAUDE.md
+TODO.md
 tmp/
 
 # Secrets / API keys — never commit these

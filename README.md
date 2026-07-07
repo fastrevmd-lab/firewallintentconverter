@@ -4,6 +4,8 @@
 
 <h1 align="center"><span style="color: #005b5a;">Firewall to Intent Converter</span></h1>
 
+Unofficial / community project. Not affiliated with, endorsed by, or supported by Cisco, Fortinet, Palo Alto Networks, Juniper Networks, or HPE. See License and Provenance for the full notice and the trademark disclaimer.
+
 <p align="center">A browser-based tool that converts firewall configurations into an intermediate format for review, editing, and conversion to Juniper SRX. Supports <b>PAN-OS XML</b>, <b>Junos SRX</b>, <b>FortiGate / FortiOS</b>, <b>Cisco ASA / FTD</b>, <b>Check Point R80+</b>, <b>SonicWall SonicOS</b>, <b>Huawei USG</b>, <b>AWS Security Groups</b>, <b>Azure NSG</b>, and <b>GCP Firewall Rules</b> as source formats, plus a <b>Greenfield</b> mode that builds an SRX configuration from scratch via LLM-guided interview. Paste or upload a config (or start a greenfield interview), review and edit the parsed rules through an interactive UI, optionally get AI-powered best-practice suggestions, then export as SRX set commands or XML.</p>
 
 <p align="center">

@@ -9,7 +9,11 @@ Unofficial / community project. Not affiliated with, endorsed by, or supported b
 <p align="center">A browser-based tool that converts firewall configurations into an intermediate format for review, editing, and conversion to Juniper SRX. Supports <b>PAN-OS XML</b>, <b>Junos SRX</b>, <b>FortiGate / FortiOS</b>, <b>Cisco ASA / FTD</b>, <b>Check Point R80+</b>, <b>SonicWall SonicOS</b>, <b>Huawei USG</b>, <b>AWS Security Groups</b>, <b>Azure NSG</b>, and <b>GCP Firewall Rules</b> as source formats, plus a <b>Greenfield</b> mode that builds an SRX configuration from scratch via LLM-guided interview. Paste or upload a config (or start a greenfield interview), review and edit the parsed rules through an interactive UI, optionally get AI-powered best-practice suggestions, then export as SRX set commands or XML.</p>
 
 <p align="center">
-  <a href="https://creativecommons.org/licenses/by-nc-nd/4.0/"><img src="https://img.shields.io/badge/License-CC%20BY--NC--ND%204.0-lightgrey.svg" alt="License: CC BY-NC-ND 4.0"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT"></a>
+</p>
+
+<p align="center">
+  <b>Unofficial / community project.</b> Not affiliated with, endorsed by, or supported by Juniper Networks, Palo Alto Networks, Fortinet, Cisco, Check Point, SonicWall, Huawei, HPE, Amazon Web Services, Microsoft, or Google.
 </p>
 
 ## Screenshots
@@ -517,3 +521,17 @@ PyEZ Bridge configuration is stored in `localStorage` under the key `pyez-bridge
 - **Styling**: Custom CSS with dark theme (CSS variables, no preprocessor)
 - **LLM**: Direct browser-to-provider API calls (no server proxy)
 - **Architecture**: Fully static SPA — all parsing, conversion, and validation runs client-side in the browser. No backend server required.
+
+## Community Project Notice
+
+> **Unofficial / community project.** Not affiliated with, endorsed by, or supported by Juniper Networks, Palo Alto Networks, Fortinet, Cisco, Check Point, SonicWall, Huawei, HPE, Amazon Web Services, Microsoft, or Google.
+
+## Trademark Disclaimer
+
+This repository is an independent, community-driven initiative and carries no formal affiliation with Juniper Networks, Palo Alto Networks, Fortinet, Cisco, Check Point Software Technologies, SonicWall, Huawei, Hewlett Packard Enterprise, Amazon Web Services, Microsoft, or Google. The terms "Juniper," "Juniper SRX," "Junos," "PAN-OS," "Palo Alto Networks," "FortiGate," "FortiOS," "Fortinet," "Cisco," "ASA," "FTD," "Check Point," "SonicWall," "Huawei," "HPE," "AWS," "Azure," and "Google Cloud" are trademarks owned by their respective corporations. These names appear solely to identify the products and platforms with which this software integrates. Product support, licensing inquiries, and official guidance should be directed to the respective vendors.
+
+## License
+
+Original material in this repository is distributed under the MIT License; consult [LICENSE](LICENSE) for full terms.
+
+Configuration output produced by this tool is a **migration draft requiring review**, never production-ready. Always validate generated configurations against vendor documentation and your own change-management process before deployment. No warranty is provided, express or implied.

@@ -88,12 +88,19 @@ describe('conversion fail-closed behavior', () => {
     };
 
     const setResult = await convertConfig(intermediate, 'set');
-    const xmlResult = await mergeConvert([
+    const configSlots = [
       { lsName: 'site-a', intermediateConfig: intermediate, interfaceMappings: {} },
-    ], [], 'xml');
+    ];
+    const mergedSetResult = await mergeConvert(configSlots, [], 'set');
+    const xmlResult = await mergeConvert(configSlots, [], 'xml');
 
     expect(setResult.output.format).toBe('set');
     expect(setResult.output.commands.length).toBeGreaterThan(0);
+    expect(mergedSetResult.output.format).toBe('set');
+    expect(mergedSetResult.output.commands.length).toBeGreaterThan(0);
+    expect(mergedSetResult.output.commands.every(
+      command => typeof command === 'string' && command.trim().length > 0,
+    )).toBe(true);
     expect(xmlResult.output.format).toBe('xml');
     expect(xmlResult.output.xml).toContain('<configuration>');
   });

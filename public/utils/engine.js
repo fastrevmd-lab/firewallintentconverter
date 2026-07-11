@@ -8,6 +8,18 @@
 import { detectVendor } from '../../src/parsers/parser-utils.js';
 import { normalizeConversionOutput } from '../../src/conversion/conversion-output.js';
 
+function normalizeEngineOutput(output, format) {
+  if (format === 'set' && Array.isArray(output?.commands)) {
+    output = {
+      ...output,
+      commands: output.commands.filter(
+        command => typeof command !== 'string' || command.trim().length > 0,
+      ),
+    };
+  }
+  return normalizeConversionOutput(output, format);
+}
+
 // All parsers, converters, validators, and analysis modules are loaded on
 // demand via dynamic import() — see parseConfig / convertConfig / mergeConvert.
 
@@ -93,13 +105,7 @@ export async function convertConfig(intermediateConfig, format = 'set', interfac
   }
   if (format === 'xml') outputValidatorMod.validateXmlOutput(output.xml);
   else outputValidatorMod.validateSetOutput(output.commands);
-  if (format === 'set') {
-    output = {
-      ...output,
-      commands: output.commands.filter(command => typeof command !== 'string' || command.trim().length > 0),
-    };
-  }
-  output = normalizeConversionOutput(output, format);
+  output = normalizeEngineOutput(output, format);
 
   // Detect shadowed rules and optimization opportunities
   const analysis = shadowMod.detectShadowedRules(intermediateConfig.security_policies, output.warnings);
@@ -141,13 +147,7 @@ export async function mergeConvert(configSlots, crossLsLinks = [], format = 'set
   }
   if (format === 'xml') outputValidatorMod.validateXmlOutput(output.xml);
   else outputValidatorMod.validateSetOutput(output.commands);
-  if (format === 'set') {
-    output = {
-      ...output,
-      commands: output.commands.filter(command => typeof command !== 'string' || command.trim().length > 0),
-    };
-  }
-  output = normalizeConversionOutput(output, format);
+  output = normalizeEngineOutput(output, format);
 
   return { output, format: output.format };
 }

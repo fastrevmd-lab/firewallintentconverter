@@ -20,6 +20,16 @@
 
 import { sanitizeJunosName, mapAppToJunos, mapProfileToSrx, createWarning, isPredefEquivalent, JUNOS_PREDEFINED_APPS } from '../parsers/parser-utils.js';
 import { getJunosEmission } from '../utils/app-mappings.js';
+import {
+  setComment,
+  setEnum,
+  setIdentifier,
+  setInteger,
+  setQuoted,
+  setToken,
+} from '../security/junos-serialization.js';
+import { validateJunosInput } from '../security/junos-input-validation.js';
+import { validateSetOutput } from '../security/junos-output-validation.js';
 
 /**
  * Returns the correct ANY address for NAT rules based on whether the rule
@@ -34,6 +44,14 @@ function natAnyAddress(rule) {
     ...(rule.translated_dst?.address ? [rule.translated_dst.address] : []),
   ];
   return allAddrs.some(a => a && typeof a === 'string' && a.includes(':')) ? '::/0' : '0.0.0.0/0';
+}
+
+function serializeSetComments(commands) {
+  for (let index = 0; index < commands.length; index += 1) {
+    if (commands[index].startsWith('# ')) {
+      commands[index] = setComment(commands[index].slice(2), `output.comments[${index}]`);
+    }
+  }
 }
 
 /**
@@ -83,6 +101,19 @@ function generateDescriptiveName(policy, pIdx) {
  * @returns {{ commands: string[], warnings: Object[], summary: Object }}
  */
 export function convertToSrxSetCommands(config, interfaceMappings = {}, targetContext = null) {
+  validateJunosInput(config);
+  validateJunosInput(interfaceMappings, 'interfaceMappings');
+  for (const [sourceName, mappedName] of Object.entries(interfaceMappings)) {
+    setToken(mappedName, `interfaceMappings.${sourceName}`, /^[A-Za-z0-9_.:/-]+$/);
+  }
+  if (targetContext) {
+    validateJunosInput(targetContext, 'targetContext');
+    if (targetContext.type !== undefined) {
+      setEnum(targetContext.type, ['none', 'logical-system', 'tenant'], 'targetContext.type');
+      if (targetContext.type !== 'none') setIdentifier(targetContext.name, 'targetContext.name');
+    }
+  }
+
   const commands = [];
   const warnings = [];
   const summary = {
@@ -109,8 +140,8 @@ export function convertToSrxSetCommands(config, interfaceMappings = {}, targetCo
     commands.push('# =============================================');
     commands.push('# Site Identification');
     commands.push('# =============================================');
-    if (siteN) commands.push(`# Site: ${siteN}`);
-    if (siteG) commands.push(`# Site Group: ${siteG}`);
+    if (siteN) commands.push(setComment(`Site: ${siteN}`, 'metadata.siteName'));
+    if (siteG) commands.push(setComment(`Site Group: ${siteG}`, 'metadata.siteGroup'));
     commands.push('');
   }
 
@@ -164,7 +195,7 @@ export function convertToSrxSetCommands(config, interfaceMappings = {}, targetCo
       if (ports.length === 1) {
         commands.push(`set applications application ${customName} protocol ${protocol}`);
         commands.push(`set applications application ${customName} destination-port ${ports[0]}`);
-        commands.push(`set applications application ${customName} description "${originalName} (canonical: ${canonical})"`);
+        commands.push(`set applications application ${customName} description ${setQuoted(`${originalName} (canonical: ${canonical})`, 'applications.generated.description')}`);
       } else {
         // Multi-port: customName becomes an application-set composed of per-port sub-apps
         commands.push(`# ${originalName} (canonical: ${canonical})`);
@@ -232,7 +263,7 @@ export function convertToSrxSetCommands(config, interfaceMappings = {}, targetCo
       commands.push(`# INTERVIEW: "${originalName}" — placeholder "${placeholderName}" emitted below with sentinel values.`);
       commands.push(`set applications application ${placeholderName} protocol tcp`);
       commands.push(`set applications application ${placeholderName} destination-port 1`);
-      commands.push(`set applications application ${placeholderName} description "INTERVIEW REQUIRED: ${originalName}"`);
+      commands.push(`set applications application ${placeholderName} description ${setQuoted(`INTERVIEW REQUIRED: ${originalName}`, 'applications.unmapped.description')}`);
     }
     commands.push('# =============================================================');
     commands.push('');
@@ -304,6 +335,8 @@ export function convertToSrxSetCommands(config, interfaceMappings = {}, targetCo
     }
   }
 
+  serializeSetComments(commands);
+  validateSetOutput(commands);
   return { commands, warnings, summary };
 }
 
@@ -326,7 +359,12 @@ function convertSystemConfig(systemConfig, commands, warnings, summary) {
   commands.push('# =============================================');
 
   if (systemConfig.hostname) {
-    commands.push(`set system host-name ${systemConfig.hostname}`);
+    const hostname = setToken(
+      systemConfig.hostname,
+      'system_config.hostname',
+      /^(?=.{1,255}$)[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$/,
+    );
+    commands.push(`set system host-name ${hostname}`);
   }
   if (systemConfig.domain_name) {
     commands.push(`set system domain-name ${systemConfig.domain_name}`);
@@ -341,8 +379,7 @@ function convertSystemConfig(systemConfig, commands, warnings, summary) {
     commands.push(`set system time-zone ${systemConfig.timezone}`);
   }
   if (systemConfig.login_banner) {
-    const escaped = systemConfig.login_banner.replace(/"/g, '\\"');
-    commands.push(`set system login message "${escaped}"`);
+    commands.push(`set system login message ${setQuoted(systemConfig.login_banner, 'system_config.login_banner')}`);
   }
 
   const mgmt = systemConfig.management_services || {};
@@ -399,7 +436,7 @@ function convertZones(zones, commands, warnings, summary, interfaceMappings = {}
     commands.push(`set security zones security-zone ${zoneName} host-inbound-traffic system-services ping`);
 
     if (zone.description) {
-      commands.push(`set security zones security-zone ${zoneName} description "${zone.description}"`);
+      commands.push(`set security zones security-zone ${zoneName} description ${setQuoted(zone.description, 'zones.description')}`);
     }
 
     summary.zones_converted++;
@@ -776,7 +813,7 @@ function convertInterfaceAddresses(interfaces, commands, warnings, summary, inte
       commands.push(`set interfaces ${base} unit ${unit} family inet6 address ${iface.ipv6}`);
     }
     if (iface.description) {
-      commands.push(`set interfaces ${base} unit ${unit} description "${iface.description}"`);
+      commands.push(`set interfaces ${base} unit ${unit} description ${setQuoted(iface.description, 'interfaces.description')}`);
     }
   }
 
@@ -882,8 +919,7 @@ function convertLagInterfaces(lagInterfaces, commands, warnings, summary, interf
 
     // Description
     if (lag.description) {
-      const escaped = lag.description.replace(/"/g, '\\"');
-      commands.push(`set interfaces ${aeName} description "${escaped}"`);
+      commands.push(`set interfaces ${aeName} description ${setQuoted(lag.description, 'lag_interfaces.description')}`);
     }
 
     // Member interface bindings
@@ -1022,7 +1058,7 @@ function convertAddressObjects(objects, commands, warnings, summary) {
     }
 
     if (obj.description) {
-      commands.push(`set security address-book global address ${name} description "${obj.description}"`);
+      commands.push(`set security address-book global address ${name} description ${setQuoted(obj.description, 'address_objects.description')}`);
     }
 
     summary.addresses_converted++;
@@ -1062,7 +1098,7 @@ function convertAddressGroups(groups, commands, warnings, summary) {
     }
 
     if (group.description) {
-      commands.push(`set security address-book global address-set ${groupName} description "${group.description}"`);
+      commands.push(`set security address-book global address-set ${groupName} description ${setQuoted(group.description, 'address_groups.description')}`);
     }
 
     summary.address_groups_converted++;
@@ -1150,7 +1186,7 @@ function convertServiceObjects(services, commands, warnings, summary) {
     }
 
     if (svc.description) {
-      commands.push(`set applications application ${name} description "${svc.description}"`);
+      commands.push(`set applications application ${name} description ${setQuoted(svc.description, 'service_objects.description')}`);
     }
 
     summary.services_converted++;
@@ -1236,7 +1272,7 @@ function convertApplications(apps, commands, warnings, summary) {
     }
 
     if (app.description) {
-      commands.push(`set applications application ${name} description "${app.description}"`);
+      commands.push(`set applications application ${name} description ${setQuoted(app.description, 'applications.description')}`);
     }
   }
 
@@ -1489,7 +1525,7 @@ function convertIdpPolicies(policies, warnings, profileDefs = {}) {
           const idpAction = idpActionMap[sourceAction] || 'recommended';
           const attackGroup = severity.charAt(0).toUpperCase() + severity.slice(1);
 
-          idpCommands.push(`set ${base} match attacks predefined-attack-groups "${attackGroup} - Recommended"`);
+          idpCommands.push(`set ${base} match attacks predefined-attack-groups ${setQuoted(`${attackGroup} - Recommended`, 'security_profiles.idp.attack_group')}`);
           idpCommands.push(`set ${base} then action ${idpAction}`);
           idpCommands.push(`set ${base} then notification log-attacks`);
           idpCommands.push(`# Mapped from ${pType} "${pValue}" severity ${severity} (${sourceAction}) → SRX ${idpAction}`);
@@ -1596,7 +1632,7 @@ function convertSchedules(schedules, commands, warnings) {
         commands.push(`set schedulers scheduler ${name} ${junosDay} start-time ${sched.start} stop-time ${sched.end}`);
       }
     } else if (sched.type === 'onetime') {
-      commands.push(`set schedulers scheduler ${name} start-date "${sched.start}" stop-date "${sched.end}"`);
+      commands.push(`set schedulers scheduler ${name} start-date ${setQuoted(sched.start, 'schedules.start')} stop-date ${setQuoted(sched.end, 'schedules.end')}`);
     } else {
       commands.push(`# WARNING: Schedule "${sched.name}" has unknown type "${sched.type}" — skipping`);
     }
@@ -1680,7 +1716,7 @@ function convertSecurityPolicies(policies, commands, warnings, summary, profileM
     const ruleGroup = groupByIndex[pIdx] || policy._group || null;
     if (ruleGroup && ruleGroup !== currentGroup) {
       commands.push('');
-      commands.push(`/* ===== Group: ${ruleGroup} ===== */`);
+      commands.push(setComment(`===== Group: ${ruleGroup} =====`, `ruleGroups[${pIdx}]`));
       currentGroup = ruleGroup;
     }
 
@@ -1719,7 +1755,7 @@ function convertSecurityPolicies(policies, commands, warnings, summary, profileM
           fullDescription = fullDescription ? `${fullDescription} ${tagNote}` : tagNote;
         }
         if (fullDescription) {
-          commands.push(`set ${policyPath} description "${fullDescription}"`);
+          commands.push(`set ${policyPath} description ${setQuoted(fullDescription, `security_policies[${pIdx}].description`)}`);
         }
 
         // Match criteria: source addresses
@@ -1747,7 +1783,7 @@ function convertSecurityPolicies(policies, commands, warnings, summary, profileM
         // Match criteria: source identity (user/group via JIMS)
         if (policy.source_users && policy.source_users.length > 0) {
           for (const identity of policy.source_users) {
-            commands.push(`set ${policyPath} match source-identity "${sanitizeJunosName(identity)}"`);
+            commands.push(`set ${policyPath} match source-identity ${setQuoted(sanitizeJunosName(identity), `security_policies[${pIdx}].source_users`)}`);
           }
         }
 
@@ -2415,7 +2451,7 @@ function convertBgpConfig(bgpConfig, commands, warnings, summary) {
           commands.push(`${nBase} peer-as ${neighbor.peer_as}`);
         }
         if (neighbor.description) {
-          commands.push(`${nBase} description "${neighbor.description}"`);
+          commands.push(`${nBase} description ${setQuoted(neighbor.description, 'bgp_config.neighbors.description')}`);
         }
         if (neighbor.local_address) {
           commands.push(`${nBase} local-address ${neighbor.local_address}`);
@@ -2427,7 +2463,7 @@ function convertBgpConfig(bgpConfig, commands, warnings, summary) {
           commands.push(`${nBase} export ${neighbor.export_policy}`);
         }
         if (neighbor.authentication_key) {
-          commands.push(`${nBase} authentication-key "${neighbor.authentication_key}"`);
+          commands.push(`${nBase} authentication-key ${setQuoted(neighbor.authentication_key, 'bgp_config.neighbors.authentication_key')}`);
         }
         if (neighbor.enabled === false) {
           warnings.push(createWarning(
@@ -2547,9 +2583,9 @@ function convertOspfConfig(ospfConfig, commands, warnings, summary, interfaceMap
         if (iface.authentication) {
           if (iface.authentication.type === 'md5') {
             const keyId = iface.authentication.key_id || 1;
-            commands.push(`${ifBase} authentication md5 ${keyId} key "${iface.authentication.key || ''}"`);
+            commands.push(`${ifBase} authentication md5 ${keyId} key ${setQuoted(iface.authentication.key || '', 'ospf_config.areas.interfaces.authentication.key')}`);
           } else if (iface.authentication.type === 'simple') {
-            commands.push(`${ifBase} authentication simple-password "${iface.authentication.key || ''}"`);
+            commands.push(`${ifBase} authentication simple-password ${setQuoted(iface.authentication.key || '', 'ospf_config.areas.interfaces.authentication.key')}`);
           }
         }
 
@@ -3358,7 +3394,7 @@ function convertAaaConfig(aaaConfig, commands, warnings, summary) {
       if (!entry.server) continue;
       commands.push(`set system radius-server ${entry.server} port ${entry.port || 1812}`);
       if (entry.secret) {
-        commands.push(`set system radius-server ${entry.server} secret "${entry.secret}"`);
+        commands.push(`set system radius-server ${entry.server} secret ${setQuoted(entry.secret, 'aaa_config.radius.secret')}`);
       } else {
         commands.push(`# set system radius-server ${entry.server} secret "<SHARED-SECRET>" /* requires manual configuration */`);
       }
@@ -3378,7 +3414,7 @@ function convertAaaConfig(aaaConfig, commands, warnings, summary) {
       if (!entry.server) continue;
       commands.push(`set system tacplus-server ${entry.server} port ${entry.port || 49}`);
       if (entry.secret) {
-        commands.push(`set system tacplus-server ${entry.server} secret "${entry.secret}"`);
+        commands.push(`set system tacplus-server ${entry.server} secret ${setQuoted(entry.secret, 'aaa_config.tacacs.secret')}`);
       } else {
         commands.push(`# set system tacplus-server ${entry.server} secret "<SHARED-SECRET>" /* requires manual configuration */`);
       }
@@ -3454,10 +3490,10 @@ function convertSnmpConfig(snmpConfig, commands, warnings, summary) {
   const contactEntry = snmpConfig.find(e => e.contact);
   const locationEntry = snmpConfig.find(e => e.location);
   if (contactEntry?.contact) {
-    commands.push(`set snmp contact "${contactEntry.contact}"`);
+    commands.push(`set snmp contact ${setQuoted(contactEntry.contact, 'snmp_config.contact')}`);
   }
   if (locationEntry?.location) {
-    commands.push(`set snmp location "${locationEntry.location}"`);
+    commands.push(`set snmp location ${setQuoted(locationEntry.location, 'snmp_config.location')}`);
   }
 
   for (const entry of snmpConfig) {
@@ -4241,6 +4277,17 @@ function groupByZonePair(rules) {
  * @returns {{ commands: string[], warnings: Object[], summary: Object }}
  */
 export function convertMergedToSrxSetCommands(configSlots, crossLsLinks = [], globalConfig = {}) {
+  if (!Array.isArray(configSlots) || !Array.isArray(crossLsLinks)) {
+    throw new TypeError('configSlots and crossLsLinks must be arrays');
+  }
+  validateJunosInput(globalConfig, 'globalConfig');
+  configSlots.forEach((slot, index) => {
+    validateJunosInput({ lsName: slot.lsName }, `configSlots[${index}]`);
+    validateJunosInput(slot.intermediateConfig, `configSlots[${index}].intermediateConfig`);
+    validateJunosInput(slot.interfaceMappings || {}, `configSlots[${index}].interfaceMappings`);
+  });
+  validateJunosInput({ crossLsLinks }, 'merge');
+
   const allCommands = [];
   const allWarnings = [];
   const perLsSummaries = [];
@@ -4249,7 +4296,10 @@ export function convertMergedToSrxSetCommands(configSlots, crossLsLinks = [], gl
   allCommands.push('# =============================================');
   allCommands.push('# Multi-Firewall Merge — Chassis-Level Config');
   allCommands.push('# =============================================');
-  allCommands.push(`# Logical-systems: ${configSlots.map(s => s.lsName).join(', ')}`);
+  allCommands.push(setComment(
+    `Logical-systems: ${configSlots.map(s => s.lsName).join(', ')}`,
+    'configSlots',
+  ));
   allCommands.push('');
 
   // HA config at chassis level
@@ -4288,20 +4338,22 @@ export function convertMergedToSrxSetCommands(configSlots, crossLsLinks = [], gl
   }
 
   // 2. Per-LS sections
-  for (const slot of configSlots) {
+  for (let slotIndex = 0; slotIndex < configSlots.length; slotIndex += 1) {
+    const slot = configSlots[slotIndex];
     const { lsName, intermediateConfig: config, interfaceMappings = {} } = slot;
+    const safeLsName = setIdentifier(lsName, `configSlots[${slotIndex}].lsName`);
 
     allCommands.push('# =============================================');
-    allCommands.push(`# Logical-System: ${lsName}`);
+    allCommands.push(setComment(`Logical-System: ${lsName}`, `configSlots[${slotIndex}].lsName`));
     allCommands.push('# =============================================');
 
     // Use existing converter with targetContext set to logical-system
-    const targetContext = { type: 'logical-system', name: lsName };
+    const targetContext = { type: 'logical-system', name: safeLsName };
     const result = convertToSrxSetCommands(config, interfaceMappings, targetContext);
 
     allCommands.push(...result.commands);
-    allWarnings.push(...result.warnings.map(w => ({ ...w, _ls: lsName })));
-    perLsSummaries.push({ lsName, summary: result.summary });
+    allWarnings.push(...result.warnings.map(w => ({ ...w, _ls: safeLsName })));
+    perLsSummaries.push({ lsName: safeLsName, summary: result.summary });
     allCommands.push('');
   }
 
@@ -4313,14 +4365,18 @@ export function convertMergedToSrxSetCommands(configSlots, crossLsLinks = [], gl
     allCommands.push('# Auto-detected from shared zone names across logical-systems');
     allCommands.push('');
 
-    for (const link of crossLsLinks) {
-      const ls1 = sanitizeJunosName(link.ls1);
-      const ls2 = sanitizeJunosName(link.ls2);
-      const u1 = link.lt1Unit;
-      const u2 = link.lt2Unit;
-      const zone = sanitizeJunosName(link.sharedZone);
+    for (let linkIndex = 0; linkIndex < crossLsLinks.length; linkIndex += 1) {
+      const link = crossLsLinks[linkIndex];
+      const ls1 = setIdentifier(link.ls1, `crossLsLinks[${linkIndex}].ls1`);
+      const ls2 = setIdentifier(link.ls2, `crossLsLinks[${linkIndex}].ls2`);
+      const u1 = setInteger(link.lt1Unit, { min: 0, max: 16385 }, `crossLsLinks[${linkIndex}].lt1Unit`);
+      const u2 = setInteger(link.lt2Unit, { min: 0, max: 16385 }, `crossLsLinks[${linkIndex}].lt2Unit`);
+      const zone = setIdentifier(link.sharedZone, `crossLsLinks[${linkIndex}].sharedZone`);
 
-      allCommands.push(`# ${link.ls1} <-> ${link.ls2} via zone "${link.sharedZone}"`);
+      allCommands.push(setComment(
+        `${link.ls1} <-> ${link.ls2} via zone "${link.sharedZone}"`,
+        `crossLsLinks[${linkIndex}]`,
+      ));
 
       // Side A
       allCommands.push(`set logical-systems ${ls1} interfaces lt-0/0/0 unit ${u1} encapsulation ethernet`);
@@ -4347,5 +4403,7 @@ export function convertMergedToSrxSetCommands(configSlots, crossLsLinks = [], gl
     total_warnings: allWarnings.length,
   };
 
+  serializeSetComments(allCommands);
+  validateSetOutput(allCommands);
   return { commands: allCommands, warnings: allWarnings, summary: mergedSummary };
 }

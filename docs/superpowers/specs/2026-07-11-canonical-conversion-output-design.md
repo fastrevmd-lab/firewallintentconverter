@@ -116,6 +116,8 @@ The current validation rules are set-command rules. When the UI holds XML output
 
 When enforcement removes commands, `replaceSetCommands` creates the updated canonical object. Warnings, summary data, and other metadata remain unchanged. The same updated object is subsequently displayed, exported, saved, and pushed.
 
+If enforcement removes every generated command, the application clears `srxOutput` while retaining the enforcement findings and shows a blocking error. This preserves the non-empty canonical contract and disables render, export, and push actions instead of leaving the original unlicensed output available.
+
 ### Consumers
 
 Security-sensitive consumers must not independently default missing content to an empty string. `SRXOutput`, `usePush`, PDF generation, configuration diff, report generation, Terraform/Ansible export, and workflow enablement will use the shared contract helpers or receive already-extracted canonical text/commands.
@@ -126,7 +128,7 @@ Batch migration will read `convertResult.output`, validate it as canonical set o
 
 All malformed-output failures are blocking. The application clears stale conversion output before conversion, as it already does, and displays a safe error that identifies the invalid contract without echoing configuration content.
 
-Validation failures leave the canonical output untouched but do not create or retain a success result for that validation attempt. License enforcement cannot update output unless it received valid set output and produced a non-empty canonical replacement.
+Validation failures leave the canonical output untouched but do not create or retain a success result for that validation attempt. License enforcement cannot update output unless it received valid set output and produced a non-empty canonical replacement; an all-removed enforcement result clears output as described above.
 
 Push, copy, download, infrastructure-as-code export, PDF export, and project save controls must be disabled or throw a handled blocking error when no valid canonical output exists. They must never submit or download an empty fallback caused by a shape mismatch.
 

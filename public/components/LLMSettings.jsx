@@ -27,8 +27,11 @@ import {
 } from '../utils/device-registration.js';
 import {
   bridgeDisplayError,
+  confirmedHostKeyVerification,
   createExclusiveBridgeMutationLock,
   createLatestBridgeAttemptGuard,
+  isHostKeyVerificationDisabledForUrl,
+  retainHostKeyVerificationForUrl,
 } from '../utils/bridge-ui-security.js';
 import { useUIContext } from '../contexts/UIContext.jsx';
 
@@ -102,7 +105,10 @@ export default function LLMSettings({ onClose, initialTab }) {
   const [bridgeDevices, setBridgeDevices] = useState([]);
   const [showAddDevice, setShowAddDevice] = useState(false);
   const [newDevice, setNewDevice] = useState({ ...EMPTY_DEVICE_REGISTRATION });
-  const [hostKeyVerification, setHostKeyVerification] = useState('strict');
+  const [hostKeyVerification, setHostKeyVerification] = useState({
+    url: '',
+    mode: 'strict',
+  });
   const [bridgeMutationPending, setBridgeMutationPending] = useState(false);
   const bridgeAttemptGuardRef = useRef(null);
   if (!bridgeAttemptGuardRef.current) {
@@ -165,11 +171,11 @@ export default function LLMSettings({ onClose, initialTab }) {
           if (!attempt.isCurrent()) return;
           if (health.status !== 'ok' || health.service !== 'pyez-bridge') return;
           attempt.commit(() => {
-            setHostKeyVerification(
-              health.host_key_verification === 'disabled-development'
-                ? 'disabled-development'
-                : 'strict',
-            );
+            setHostKeyVerification(previous => confirmedHostKeyVerification(
+              base,
+              health.host_key_verification,
+              previous,
+            ));
           });
 
           const deviceResponse = await bridgeFetch(base + '/devices');
@@ -214,12 +220,15 @@ export default function LLMSettings({ onClose, initialTab }) {
     setBridgeTesting(false);
     setBridgeConnected(false);
     setBridgeDevices([]);
-    setHostKeyVerification('strict');
     setBridgeTestResult('');
   };
 
   const handleBridgeUrlChange = (value) => {
     invalidateBridgeConnection();
+    setHostKeyVerification(current => retainHostKeyVerificationForUrl(
+      current,
+      normalizeBridgeUrl(value),
+    ));
     setBridgeUrl(value);
   };
 
@@ -261,7 +270,6 @@ export default function LLMSettings({ onClose, initialTab }) {
     saveBridgeSettings({ url: base, token: bridgeToken });
     setBridgeTesting(true);
     setBridgeConnected(false);
-    setHostKeyVerification('strict');
     setBridgeTestResult('');
     setBridgeDevices([]);
     try {
@@ -294,11 +302,11 @@ export default function LLMSettings({ onClose, initialTab }) {
         return;
       }
       attempt.commit(() => {
-        setHostKeyVerification(
-          data.host_key_verification === 'disabled-development'
-            ? 'disabled-development'
-            : 'strict',
-        );
+        setHostKeyVerification(previous => confirmedHostKeyVerification(
+          base,
+          data.host_key_verification,
+          previous,
+        ));
       });
       const devResp = await bridgeFetch(base + '/devices', { method: 'GET' });
       if (!attempt.isCurrent()) return;
@@ -545,7 +553,10 @@ export default function LLMSettings({ onClose, initialTab }) {
               )}
             </div>
 
-            {hostKeyVerification === 'disabled-development' && (
+            {isHostKeyVerificationDisabledForUrl(
+              hostKeyVerification,
+              normalizeBridgeUrl(bridgeUrl),
+            ) && (
               <div role="alert" style={{ color: 'var(--error)', marginBottom: 12 }}>
                 Warning: NETCONF SSH host-key verification is disabled for development.
                 Devices can be impersonated on the network.

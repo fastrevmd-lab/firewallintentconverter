@@ -19,6 +19,40 @@ const REGISTRATION_MESSAGES = new Set([
   'Password environment variable name is invalid.',
 ]);
 
+const DEFAULT_HOST_KEY_VERIFICATION = Object.freeze({
+  url: '',
+  mode: 'strict',
+});
+
+export function confirmedHostKeyVerification(
+  normalizedUrl,
+  reportedMode,
+  previousVerification = DEFAULT_HOST_KEY_VERIFICATION,
+) {
+  const url = String(normalizedUrl || '');
+  if (!url) return DEFAULT_HOST_KEY_VERIFICATION;
+  if (!['strict', 'disabled-development'].includes(reportedMode)) {
+    return retainHostKeyVerificationForUrl(previousVerification, url);
+  }
+  return Object.freeze({
+    url,
+    mode: reportedMode,
+  });
+}
+
+export function retainHostKeyVerificationForUrl(verification, normalizedUrl) {
+  if (normalizedUrl && verification?.url === normalizedUrl) return verification;
+  return DEFAULT_HOST_KEY_VERIFICATION;
+}
+
+export function isHostKeyVerificationDisabledForUrl(verification, normalizedUrl) {
+  return Boolean(
+    normalizedUrl
+    && verification?.url === normalizedUrl
+    && verification.mode === 'disabled-development',
+  );
+}
+
 export function bridgeDisplayError(operation, error) {
   if (
     error instanceof DeviceRegistrationError

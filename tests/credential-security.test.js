@@ -11,8 +11,11 @@ import {
 } from '../public/utils/device-registration.js';
 import {
   bridgeDisplayError,
+  confirmedHostKeyVerification,
   createExclusiveBridgeMutationLock,
   createLatestBridgeAttemptGuard,
+  isHostKeyVerificationDisabledForUrl,
+  retainHostKeyVerificationForUrl,
 } from '../public/utils/bridge-ui-security.js';
 
 const read = path => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
@@ -69,7 +72,7 @@ describe('credential source invariants', () => {
     expect(source).not.toMatch(/newDevice\.(?:password|ssh_key)\b/);
     expect(source).not.toContain('SSH Key Path');
     expect(source).toContain('Password Environment Variable');
-    expect(source).toContain('disabled-development');
+    expect(read('public/utils/bridge-ui-security.js')).toContain('disabled-development');
   });
 
   it('maps hostile bridge and parser errors to fixed display messages', async () => {
@@ -171,6 +174,38 @@ describe('credential source invariants', () => {
     expect(lock.acquire()).not.toBeNull();
   });
 
+  it('preserves a confirmed disabled warning until that endpoint reports strict', () => {
+    const bridgeUrl = 'http://localhost:8830';
+    const disabled = confirmedHostKeyVerification(
+      bridgeUrl,
+      'disabled-development',
+    );
+
+    const afterTokenEdit = retainHostKeyVerificationForUrl(disabled, bridgeUrl);
+    const afterFailedRetestStart = retainHostKeyVerificationForUrl(
+      afterTokenEdit,
+      bridgeUrl,
+    );
+    expect(isHostKeyVerificationDisabledForUrl(afterFailedRetestStart, bridgeUrl)).toBe(true);
+
+    const unknownMode = confirmedHostKeyVerification(
+      bridgeUrl,
+      'SENTINEL_UNKNOWN_MODE',
+      disabled,
+    );
+    expect(isHostKeyVerificationDisabledForUrl(unknownMode, bridgeUrl)).toBe(true);
+
+    const strict = confirmedHostKeyVerification(bridgeUrl, 'strict');
+    expect(isHostKeyVerificationDisabledForUrl(strict, bridgeUrl)).toBe(false);
+
+    const changedEndpoint = retainHostKeyVerificationForUrl(
+      disabled,
+      'http://localhost:9930',
+    );
+    expect(isHostKeyVerificationDisabledForUrl(changedEndpoint, bridgeUrl)).toBe(false);
+    expect(changedEndpoint).toEqual({ url: '', mode: 'strict' });
+  });
+
   it('wires safe display errors and latest-attempt guards into the bridge UI', () => {
     const source = read('public/components/LLMSettings.jsx');
     expect(source).not.toMatch(/(?:err|error)\.message/);
@@ -190,6 +225,10 @@ describe('credential source invariants', () => {
     expect(source.match(/bridgeMutationLock\.acquire\(\)/g)).toHaveLength(2);
     expect(source).toContain('bridgeTesting || bridgeMutationPending');
     expect(source).toContain('disabled={bridgeMutationPending}');
+    expect(source.match(/confirmedHostKeyVerification\(/g)).toHaveLength(2);
+    expect(source).toContain('retainHostKeyVerificationForUrl(');
+    expect(source).toContain('isHostKeyVerificationDisabledForUrl(');
+    expect(source).not.toContain("setHostKeyVerification('strict')");
   });
 
   it('centralizes LLM storage access', () => {

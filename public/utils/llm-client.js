@@ -1490,7 +1490,7 @@ export async function translatePolicies(intermediateConfig, targetModel, srxLice
     const response = await _callLLM(user, system, MAX_TOKENS);
     const responseEstimate = Math.round(response.length / 4);
     totalResponseTokens = responseEstimate;
-    if (import.meta.env.DEV) {
+    if (import.meta.env?.DEV) {
       console.log('[translate] Raw LLM response length:', response.length, 'chars');
     }
     report({ phase: 'parsing_response', detail: `Parsing LLM response (~${responseEstimate.toLocaleString()} tokens)`, chunk: 1, totalChunks: 1, promptTokens: promptEstimate, responseTokens: responseEstimate });
@@ -1531,7 +1531,7 @@ export async function translatePolicies(intermediateConfig, targetModel, srxLice
     const response = await _callLLM(chunkUser, system, MAX_TOKENS);
     const responseEstimate = Math.round(response.length / 4);
     totalResponseTokens += responseEstimate;
-    if (import.meta.env.DEV) {
+    if (import.meta.env?.DEV) {
       console.log(`[translate] Chunk ${ci + 1}/${chunks.length} response length:`, response.length, 'chars');
     }
 

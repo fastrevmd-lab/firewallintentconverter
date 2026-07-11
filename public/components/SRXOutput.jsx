@@ -12,6 +12,7 @@
 import React, { useState, useCallback } from 'react';
 import { useUIContext } from '../contexts/UIContext.jsx';
 import { exportToTerraform, exportToAnsible } from '../utils/iac-export.js';
+import { loadBridgeSettings } from '../utils/bridge-client.js';
 
 /** Download a text string as a file */
 function downloadText(text, filename, mimeType = 'text/plain') {
@@ -152,8 +153,8 @@ export default function SRXOutput({ output, format, summary, isParsed, sanitizat
         <button
           className="btn btn-secondary btn-sm push-btn"
           onClick={() => {
-            const bridgeSettings = localStorage.getItem('pyez-bridge-settings') || localStorage.getItem('mcp-settings');
-            if (bridgeSettings) {
+            const bridgeSettings = loadBridgeSettings();
+            if (bridgeSettings.url && bridgeSettings.token) {
               uiDispatch({ type: 'SHOW_MODAL', name: 'pushModal' });
             } else {
               uiDispatch({ type: 'SHOW_MODAL', name: 'settings', value: 'mcp' });

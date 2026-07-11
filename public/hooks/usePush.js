@@ -11,54 +11,16 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { useConversionContext } from '../contexts/ConversionContext.jsx';
 import { useConfigContext } from '../contexts/ConfigContext.jsx';
-import { safeJsonParse } from '../utils/safe-json.js';
-
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-const STORAGE_KEY = 'pyez-bridge-settings';
-const OLD_STORAGE_KEY = 'mcp-settings';
-const FETCH_TIMEOUT = 30000; // 30 seconds
+import {
+  bridgeFetch,
+  bridgeResponseError,
+  loadBridgeSettings,
+  saveBridgeSettings,
+} from '../utils/bridge-client.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-/** Normalize a bridge URL — ensure http:// or https:// prefix and valid origin. */
-function normalizeBridgeUrl(raw) {
-  let url = (raw || '').trim().replace(/\/+$/, '');
-  if (!url) return '';
-  if (/^https?:\/[^/]/.test(url)) url = url.replace(/^(https?:\/)/, '$1/');
-  if (!/^https?:\/\//.test(url)) url = 'http://' + url;
-  try {
-    const parsed = new URL(url);
-    if (!['http:', 'https:'].includes(parsed.protocol)) return '';
-    if (parsed.username || parsed.password) return '';
-  } catch { return ''; }
-  return url;
-}
-
-/** Load bridge URL from localStorage with migration from old mcp-settings key. */
-function loadBridgeUrl() {
-  try {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) {
-      const data = safeJsonParse(saved);
-      return normalizeBridgeUrl(data?.url || '');
-    }
-    // Migrate from old key
-    const old = localStorage.getItem(OLD_STORAGE_KEY);
-    if (old) {
-      const data = safeJsonParse(old);
-      const url = normalizeBridgeUrl(data?.url || '');
-      if (url) {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify({ url }));
-      }
-      return url;
-    }
-  } catch { /* ignore */ }
-  return '';
-}
 
 /** Restore sanitized placeholders with original values for export. */
 function restoreForExport(text, sanitizationTable) {
@@ -72,16 +34,11 @@ function restoreForExport(text, sanitizationTable) {
   return result;
 }
 
-/** Fetch with timeout via AbortController. */
-async function fetchWithTimeout(url, options = {}, timeout = FETCH_TIMEOUT) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeout);
-  try {
-    const resp = await fetch(url, { ...options, signal: controller.signal, mode: 'cors' });
-    return resp;
-  } finally {
-    clearTimeout(timer);
+async function readBridgeJson(response) {
+  if ([401, 403, 429].includes(response.status)) {
+    throw await bridgeResponseError(response);
   }
+  return response.json();
 }
 
 /** Format timestamp for log entries. */
@@ -100,7 +57,7 @@ export default function usePush() {
   const { sanitizationTable } = configState;
 
   // Connection state
-  const [bridgeUrl, setBridgeUrl] = useState(() => loadBridgeUrl());
+  const [bridgeUrl, setBridgeUrl] = useState(() => loadBridgeSettings().url);
   const [bridgeConnected, setBridgeConnected] = useState(false);
   const [devices, setDevices] = useState([]);
 
@@ -159,30 +116,34 @@ export default function usePush() {
     const base = (url || bridgeUrl || '').replace(/\/+$/, '');
     if (!base) return false;
     try {
-      const resp = await fetchWithTimeout(base + '/health');
-      if (resp.ok) {
-        setBridgeConnected(true);
-        appendLog('success', 'Connected to PyEZ Bridge.');
-        // Quick device list (no NETCONF probe — instant)
-        try {
-          const devResp = await fetchWithTimeout(base + '/devices');
-          if (devResp.ok) {
-            const data = await devResp.json();
-            setDevices(Array.isArray(data) ? data : data.devices || []);
-          }
-        } catch { /* device list optional on first connect */ }
-        // Background probe for live status (may take seconds per device)
-        fetchWithTimeout(base + '/devices?probe=true', {}, 60000).then(async (r) => {
-          if (r.ok) {
-            const data = await r.json();
-            setDevices(Array.isArray(data) ? data : data.devices || []);
-          }
-        }).catch(() => {});
-        return true;
+      const healthResponse = await bridgeFetch(
+        base + '/health',
+        {},
+        { authenticated: false },
+      );
+      if (!healthResponse.ok) {
+        throw await bridgeResponseError(healthResponse);
       }
-      setBridgeConnected(false);
-      appendLog('error', `Bridge returned HTTP ${resp.status}.`);
-      return false;
+
+      const deviceResponse = await bridgeFetch(base + '/devices');
+      if (!deviceResponse.ok) throw await bridgeResponseError(deviceResponse);
+      const data = await deviceResponse.json();
+      setDevices(Array.isArray(data) ? data : data.devices || []);
+      setBridgeConnected(true);
+      appendLog('success', 'Connected to authenticated PyEZ Bridge.');
+
+      // Background probe for live status (may take seconds per device)
+      bridgeFetch(
+        base + '/devices?probe=true',
+        {},
+        { timeout: 60000 },
+      ).then(async (response) => {
+        if (response.ok) {
+          const probed = await response.json();
+          setDevices(Array.isArray(probed) ? probed : probed.devices || []);
+        }
+      }).catch(() => {});
+      return true;
     } catch (err) {
       setBridgeConnected(false);
       appendLog('error', `Connection failed: ${err.message}`);
@@ -191,8 +152,11 @@ export default function usePush() {
   }, [bridgeUrl, appendLog]);
 
   const saveSettings = useCallback((url) => {
-    setBridgeUrl(url);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ url }));
+    const saved = saveBridgeSettings({
+      url,
+      token: loadBridgeSettings().token,
+    });
+    setBridgeUrl(saved.url);
   }, []);
 
   // -----------------------------------------------------------------------
@@ -200,9 +164,9 @@ export default function usePush() {
   // -----------------------------------------------------------------------
   const refreshDevices = useCallback(async () => {
     try {
-      const resp = await fetchWithTimeout(baseUrl() + '/devices');
+      const resp = await bridgeFetch(baseUrl() + '/devices');
+      const data = await readBridgeJson(resp);
       if (resp.ok) {
-        const data = await resp.json();
         setDevices(Array.isArray(data) ? data : data.devices || []);
       }
     } catch (err) {
@@ -212,12 +176,12 @@ export default function usePush() {
 
   const addDevice = useCallback(async (deviceInfo) => {
     try {
-      const resp = await fetchWithTimeout(baseUrl() + '/devices', {
+      const resp = await bridgeFetch(baseUrl() + '/devices', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(deviceInfo),
       });
-      const data = await resp.json();
+      const data = await readBridgeJson(resp);
       if (data.ok) {
         appendLog('success', `Device '${deviceInfo.name}' added.`);
         await refreshDevices();
@@ -233,10 +197,10 @@ export default function usePush() {
 
   const removeDevice = useCallback(async (deviceName) => {
     try {
-      const resp = await fetchWithTimeout(baseUrl() + `/devices/${encodeURIComponent(deviceName)}`, {
+      const resp = await bridgeFetch(baseUrl() + `/devices/${encodeURIComponent(deviceName)}`, {
         method: 'DELETE',
       });
-      const data = await resp.json();
+      const data = await readBridgeJson(resp);
       if (data.ok) {
         appendLog('info', `Device '${deviceName}' removed.`);
         await refreshDevices();
@@ -260,10 +224,10 @@ export default function usePush() {
     const name = deviceName || selectedDevice;
     if (!name) return false;
     try {
-      const resp = await fetchWithTimeout(baseUrl() + `/devices/${encodeURIComponent(name)}/unlock`, {
+      const resp = await bridgeFetch(baseUrl() + `/devices/${encodeURIComponent(name)}/unlock`, {
         method: 'POST',
       });
-      const data = await resp.json();
+      const data = await readBridgeJson(resp);
       return data.ok;
     } catch { return false; }
   }, [selectedDevice, baseUrl]);
@@ -291,12 +255,12 @@ export default function usePush() {
         configText = lines.join('\n');
         appendLog('info', `Sending ${lines.length} set commands (comments stripped).`);
       }
-      const resp = await fetchWithTimeout(baseUrl() + `/devices/${encodeURIComponent(name)}/load`, {
+      const resp = await bridgeFetch(baseUrl() + `/devices/${encodeURIComponent(name)}/load`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ config: configText, format: fmt }),
       });
-      const data = await resp.json();
+      const data = await readBridgeJson(resp);
       if (data.ok) {
         appendLog('success', data.message || 'Configuration loaded into candidate.');
         // Show skipped lines as warnings
@@ -347,8 +311,8 @@ export default function usePush() {
     setIsWorking(true);
     appendLog('info', 'Fetching configuration diff...');
     try {
-      const resp = await fetchWithTimeout(baseUrl() + `/devices/${encodeURIComponent(name)}/diff`);
-      const data = await resp.json();
+      const resp = await bridgeFetch(baseUrl() + `/devices/${encodeURIComponent(name)}/diff`);
+      const data = await readBridgeJson(resp);
       if (data.ok) {
         setConfigDiff(data.diff || '');
         if (!data.diff) {
@@ -377,10 +341,10 @@ export default function usePush() {
     setIsWorking(true);
     appendLog('info', 'Running commit check (dry run)...');
     try {
-      const resp = await fetchWithTimeout(baseUrl() + `/devices/${encodeURIComponent(name)}/commit-check`, {
+      const resp = await bridgeFetch(baseUrl() + `/devices/${encodeURIComponent(name)}/commit-check`, {
         method: 'POST',
       });
-      const data = await resp.json();
+      const data = await readBridgeJson(resp);
       setCommitCheckResult(data);
       if (data.ok) {
         appendLog('success', 'Commit check passed.');
@@ -412,7 +376,7 @@ export default function usePush() {
       ? `Committing with ${confirmMin}-minute confirm timer...`
       : 'Committing configuration...');
     try {
-      const resp = await fetchWithTimeout(baseUrl() + `/devices/${encodeURIComponent(name)}/commit`, {
+      const resp = await bridgeFetch(baseUrl() + `/devices/${encodeURIComponent(name)}/commit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -420,7 +384,7 @@ export default function usePush() {
           confirm_minutes: confirmMin || undefined,
         }),
       });
-      const data = await resp.json();
+      const data = await readBridgeJson(resp);
       setCommitResult(data);
 
       if (data.ok) {
@@ -461,10 +425,10 @@ export default function usePush() {
     setIsWorking(true);
     appendLog('info', 'Confirming commit...');
     try {
-      const resp = await fetchWithTimeout(baseUrl() + `/devices/${encodeURIComponent(name)}/confirm`, {
+      const resp = await bridgeFetch(baseUrl() + `/devices/${encodeURIComponent(name)}/confirm`, {
         method: 'POST',
       });
-      const data = await resp.json();
+      const data = await readBridgeJson(resp);
       if (data.ok) {
         appendLog('success', 'Commit confirmed. Auto-rollback cancelled.');
         if (confirmIntervalRef.current) {
@@ -491,12 +455,12 @@ export default function usePush() {
     setIsWorking(true);
     appendLog('info', 'Rolling back configuration...');
     try {
-      const resp = await fetchWithTimeout(baseUrl() + `/devices/${encodeURIComponent(name)}/rollback`, {
+      const resp = await bridgeFetch(baseUrl() + `/devices/${encodeURIComponent(name)}/rollback`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: 0 }),
       });
-      const data = await resp.json();
+      const data = await readBridgeJson(resp);
       if (data.ok) {
         appendLog('success', 'Configuration rolled back successfully.');
         if (confirmIntervalRef.current) {

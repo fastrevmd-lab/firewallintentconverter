@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  web:
+    name: Web
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install web dependencies
+        run: npm ci
+
+      - name: Run Vitest suites
+        run: npx vitest run tests/context-reducers.test.js tests/triage.test.js tests/workflow-steps.test.js
+
+      - name: Run self-contained JavaScript suites
+        shell: bash
+        run: |
+          for test_file in tests/*.test.js; do
+            if grep -q "from 'vitest'" "$test_file"; then
+              continue
+            fi
+            node "$test_file"
+          done
+
+      - name: Build web application
+        run: npm run build
+
+  pyez-bridge:
+    name: PyEZ bridge
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: tools/pyez-bridge/requirements.txt
+
+      - name: Install bridge dependencies
+        run: python -m pip install -r tools/pyez-bridge/requirements.txt
+
+      - name: Run bridge tests
+        run: python -m unittest discover tools/pyez-bridge/tests -v

@@ -14,9 +14,9 @@ import { useUIContext } from '../contexts/UIContext.jsx';
 import { exportToTerraform, exportToAnsible } from '../utils/iac-export.js';
 import { loadBridgeSettings } from '../utils/bridge-client.js';
 import {
-  getConversionOutputText,
-  getSetCommands,
-} from '../../src/conversion/conversion-output.js';
+  getConversionOutputPresentation,
+  getSetExportCommands,
+} from '../utils/conversion-output-consumer.js';
 
 /** Download a text string as a file */
 function downloadText(text, filename, mimeType = 'text/plain') {
@@ -29,12 +29,12 @@ function downloadText(text, filename, mimeType = 'text/plain') {
   URL.revokeObjectURL(url);
 }
 
-export default function SRXOutput({ output, format, summary, isParsed, sanitizationTable }) {
+export default function SRXOutput({ output, summary, isParsed, sanitizationTable }) {
   const { dispatch: uiDispatch } = useUIContext();
   const [copied, setCopied] = useState(false);
 
-  /** Get the raw output text based on format */
-  const getOutputText = useCallback(() => getConversionOutputText(output), [output]);
+  /** Get validated output text and every format-sensitive presentation property. */
+  const getPresentation = useCallback(() => getConversionOutputPresentation(output), [output]);
 
   /**
    * Restore sanitized values that should be put back on export.
@@ -54,7 +54,7 @@ export default function SRXOutput({ output, format, summary, isParsed, sanitizat
 
   /** Copy output to clipboard — restores public IPs */
   const handleCopy = useCallback(async () => {
-    const text = restoreForExport(getOutputText());
+    const text = restoreForExport(getPresentation().text);
     try {
       await navigator.clipboard.writeText(text);
       setCopied(true);
@@ -70,25 +70,24 @@ export default function SRXOutput({ output, format, summary, isParsed, sanitizat
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     }
-  }, [getOutputText, restoreForExport]);
+  }, [getPresentation, restoreForExport]);
 
   /** Download output as file — restores public IPs */
   const handleDownload = useCallback(() => {
-    const text = restoreForExport(getOutputText());
-    const extension = format === 'xml' ? 'xml' : 'txt';
-    const mimeType = format === 'xml' ? 'application/xml' : 'text/plain';
+    const presentation = getPresentation();
+    const text = restoreForExport(presentation.text);
     const now = new Date();
     const ts = now.toISOString().slice(0, 10) + '_' + now.toTimeString().slice(0, 8).replace(/:/g, '');
-    const filename = `srx-config-${ts}.${extension}`;
+    const filename = `srx-config-${ts}.${presentation.extension}`;
 
-    const blob = new Blob([text], { type: mimeType });
+    const blob = new Blob([text], { type: presentation.mimeType });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
     a.download = filename;
     a.click();
     URL.revokeObjectURL(url);
-  }, [getOutputText, restoreForExport, format]);
+  }, [getPresentation, restoreForExport]);
 
   // --- Not yet parsed ---
   if (!isParsed) {
@@ -113,7 +112,8 @@ export default function SRXOutput({ output, format, summary, isParsed, sanitizat
     );
   }
 
-  const outputText = getOutputText();
+  const presentation = getPresentation();
+  const outputText = presentation.text;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, padding: '0 12px 12px' }}>
@@ -138,7 +138,7 @@ export default function SRXOutput({ output, format, summary, isParsed, sanitizat
             <polyline points="7 10 12 15 17 10" />
             <line x1="12" y1="15" x2="12" y2="3" />
           </svg>
-          Download .{format === 'xml' ? 'xml' : 'txt'}
+          Download .{presentation.extension}
         </button>
         <button
           className="btn btn-secondary btn-sm"
@@ -168,24 +168,24 @@ export default function SRXOutput({ output, format, summary, isParsed, sanitizat
         <button
           className="btn btn-secondary btn-sm"
           onClick={() => {
-            const commands = getSetCommands(output);
+            const commands = getSetExportCommands(output);
             const text = exportToTerraform(commands);
             downloadText(text, 'srx-config.tf', 'text/plain');
           }}
           title="Export as Terraform HCL (Junos provider)"
-          disabled={format === 'xml'}
+          disabled={!presentation.setExportEligible}
         >
           Terraform
         </button>
         <button
           className="btn btn-secondary btn-sm"
           onClick={() => {
-            const commands = getSetCommands(output);
+            const commands = getSetExportCommands(output);
             const text = exportToAnsible(commands);
             downloadText(text, 'srx-playbook.yml', 'text/yaml');
           }}
           title="Export as Ansible playbook (junos_config)"
-          disabled={format === 'xml'}
+          disabled={!presentation.setExportEligible}
         >
           Ansible
         </button>
@@ -196,7 +196,7 @@ export default function SRXOutput({ output, format, summary, isParsed, sanitizat
 
       {/* Output code block — fills remaining space */}
       <pre className="output-code" style={{ flex: 1, minHeight: 0, overflow: 'auto', margin: 0 }}>
-        {format === 'xml' ? (
+        {presentation.renderMode === 'xml' ? (
           outputText
         ) : (
           // Syntax highlighting for set commands

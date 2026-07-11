@@ -5,7 +5,7 @@
  * config loading, diff, commit check, commit (with optional confirm),
  * and rollback operations.
  *
- * Reads srxOutput + outputFormat from ConversionContext.
+ * Reads canonical srxOutput from ConversionContext.
  * Reads sanitizationTable from ConfigContext for IP restoration.
  */
 import { useState, useCallback, useRef, useEffect } from 'react';
@@ -18,9 +18,10 @@ import {
   saveBridgeSettings,
 } from '../utils/bridge-client.js';
 import {
-  getConversionOutputText,
-  hasConversionOutput,
-} from '../../src/conversion/conversion-output.js';
+  buildDeviceLoadPayload,
+  getConversionOutputPresentation,
+} from '../utils/conversion-output-consumer.js';
+import { hasConversionOutput } from '../../src/conversion/conversion-output.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -57,7 +58,7 @@ export default function usePush() {
   const { state: convState } = useConversionContext();
   const { state: configState } = useConfigContext();
 
-  const { srxOutput, outputFormat } = convState;
+  const { srxOutput } = convState;
   const { sanitizationTable } = configState;
 
   // Connection state
@@ -103,9 +104,14 @@ export default function usePush() {
   // Get config text (with sanitization restore)
   // -----------------------------------------------------------------------
   const getConfigText = useCallback(() => {
-    const text = getConversionOutputText(srxOutput);
+    const text = getConversionOutputPresentation(srxOutput).text;
     return restoreForExport(text, sanitizationTable);
   }, [srxOutput, sanitizationTable]);
+
+  const hasSrxOutput = hasConversionOutput(srxOutput);
+  const outputPresentation = hasSrxOutput
+    ? getConversionOutputPresentation(srxOutput)
+    : null;
 
   // -----------------------------------------------------------------------
   // Connection
@@ -236,27 +242,23 @@ export default function usePush() {
     setIsWorking(true);
     appendLog('info', `Loading configuration to ${name}...`);
     try {
-      let configText = getConfigText();
-      if (!configText) {
+      const payload = buildDeviceLoadPayload(
+        srxOutput,
+        text => restoreForExport(text, sanitizationTable),
+      );
+      if (!payload.config) {
         appendLog('error', 'No SRX output to push.');
         setIsWorking(false);
         return false;
       }
 
-      const fmt = outputFormat === 'xml' ? 'xml' : 'set';
-      // For set format, strip comment lines and blanks — NETCONF rejects non-command lines
-      if (fmt === 'set') {
-        const lines = configText.split('\n').filter(l => {
-          const trimmed = l.trim();
-          return trimmed && !trimmed.startsWith('#');
-        });
-        configText = lines.join('\n');
-        appendLog('info', `Sending ${lines.length} set commands (comments stripped).`);
+      if (payload.format === 'set') {
+        appendLog('info', `Sending ${payload.config.split('\n').length} set commands (comments stripped).`);
       }
       const resp = await bridgeFetch(baseUrl() + `/devices/${encodeURIComponent(name)}/load`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ config: configText, format: fmt }),
+        body: JSON.stringify(payload),
       });
       const data = await readBridgeJson(resp);
       if (data.ok) {
@@ -301,7 +303,7 @@ export default function usePush() {
       setIsWorking(false);
       return false;
     }
-  }, [selectedDevice, getConfigText, outputFormat, baseUrl, appendLog, unlockConfig]);
+  }, [selectedDevice, srxOutput, sanitizationTable, baseUrl, appendLog, unlockConfig]);
 
   const fetchDiff = useCallback(async (deviceName) => {
     const name = deviceName || selectedDevice;
@@ -536,7 +538,7 @@ export default function usePush() {
 
     // Config info
     getConfigText,
-    outputFormat,
-    hasSrxOutput: hasConversionOutput(srxOutput),
+    outputFormat: outputPresentation?.format ?? null,
+    hasSrxOutput,
   };
 }

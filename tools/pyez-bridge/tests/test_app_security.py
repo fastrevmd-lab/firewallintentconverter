@@ -104,6 +104,45 @@ class BridgeApplicationSecurityTests(unittest.TestCase):
             {"ok": False, "error": "Request body is too large."},
         )
 
+    def test_load_validation_rejects_before_connect(self):
+        self.devices_file.write_text(
+            "devices:\n"
+            "  - name: edge\n"
+            "    host: 127.0.0.1\n"
+            "    username: user\n"
+            "    password: pass\n",
+            encoding="utf-8",
+        )
+        payloads = (
+            {"format": "set", "config": "set system services telnet"},
+            {
+                "format": "set",
+                "config": "set system host-name x\n"
+                "set system root-authentication plain-text-password-value x",
+            },
+            {
+                "format": "xml",
+                "config": "<configuration><system><services>"
+                "<telnet/></services></system></configuration>",
+            },
+            {"format": "text", "config": "system { host-name edge; }"},
+        )
+        with patch.object(app_module, "_connect") as connect:
+            for payload in payloads:
+                with self.subTest(payload=payload):
+                    response = self.client.post(
+                        "/devices/edge/load",
+                        headers=self.auth,
+                        json=payload,
+                    )
+                    self.assertEqual(response.status_code, 400)
+                    body = response.get_json()
+                    self.assertEqual(
+                        body["error"], "Configuration validation failed."
+                    )
+                    self.assertNotIn(payload["config"], str(body))
+        connect.assert_not_called()
+
     def test_generated_token_is_marked_but_not_returned_by_health(self):
         generated_app = create_app(
             {

@@ -1,4 +1,5 @@
 junos-eznc>=2.7.0
 flask>=3.0
 flask-cors>=4.0
+lxml>=5.0
 pyyaml>=6.0

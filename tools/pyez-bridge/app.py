@@ -26,6 +26,10 @@ from security import (
     resolve_token,
     validate_loopback_bind,
 )
+from config_validation import (
+    ConfigurationValidationError,
+    validate_config_payload,
+)
 
 # PyEZ imports
 from jnpr.junos import Device
@@ -346,16 +350,17 @@ def load_config(name):
         return _error_response("Request body must include 'config' field.")
 
     fmt = data.get("format", "set")
-    if fmt not in ("set", "xml", "text"):
-        return _error_response("Format must be 'set', 'xml', or 'text'.")
-
-    config_text = data["config"]
-    # Strip comment lines and blanks for set format — NETCONF rejects non-command lines
-    if fmt == "set":
-        lines = [l for l in config_text.splitlines() if l.strip() and not l.strip().startswith("#")]
-        config_text = "\n".join(lines)
-    if not config_text.strip():
-        return _error_response("Configuration is empty after filtering.")
+    try:
+        config_text = validate_config_payload(data["config"], fmt)
+    except ConfigurationValidationError as error:
+        details = {"reason": error.reason}
+        if error.line is not None:
+            details["line"] = error.line
+        if error.path is not None:
+            details["path"] = error.path
+        return _error_response(
+            "Configuration validation failed.", 400, details
+        )
 
     dev = None
     locked = False

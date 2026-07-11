@@ -5,40 +5,25 @@
  * Calls GET /devices/<name>/pull-config and returns the config text
  * to the caller via onConfigPulled callback.
  */
-import React, { useState, useCallback, useEffect } from 'react';
-import { safeJsonParse } from '../utils/safe-json.js';
-
-const STORAGE_KEY = 'pyez-bridge-settings';
-const FETCH_TIMEOUT = 30000;
-
-/** @param {string} raw */
-function normalizeBridgeUrl(raw) {
-  let url = (raw || '').trim().replace(/\/+$/, '');
-  if (!url) return '';
-  if (!/^https?:\/\//.test(url)) url = 'http://' + url;
-  try {
-    const parsed = new URL(url);
-    if (!['http:', 'https:'].includes(parsed.protocol)) return '';
-  } catch { return ''; }
-  return url;
-}
+import React, { useState, useCallback } from 'react';
+import {
+  bridgeFetch,
+  bridgeResponseError,
+  loadBridgeSettings,
+  normalizeBridgeUrl,
+  saveBridgeSettings,
+} from '../utils/bridge-client.js';
 
 export default function PullModal({ onClose, onConfigPulled }) {
-  const [bridgeUrl, setBridgeUrl] = useState('http://127.0.0.1:8830');
+  const [bridgeUrl, setBridgeUrl] = useState(
+    () => loadBridgeSettings().url || 'http://127.0.0.1:8830',
+  );
   const [devices, setDevices] = useState([]);
   const [selectedDevice, setSelectedDevice] = useState('');
   const [pullFormat, setPullFormat] = useState('set');
   const [status, setStatus] = useState(''); // idle, loading-devices, pulling, done, error
   const [error, setError] = useState('');
   const [pulledConfig, setPulledConfig] = useState('');
-
-  // Load saved bridge URL
-  useEffect(() => {
-    try {
-      const saved = safeJsonParse(localStorage.getItem(STORAGE_KEY));
-      if (saved?.bridgeUrl) setBridgeUrl(saved.bridgeUrl);
-    } catch {}
-  }, []);
 
   /** Fetch device list from bridge */
   const handleLoadDevices = useCallback(async () => {
@@ -48,11 +33,10 @@ export default function PullModal({ onClose, onConfigPulled }) {
     setError('');
 
     try {
-      const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT);
-      const resp = await fetch(`${url}/devices`, { signal: ctrl.signal });
-      clearTimeout(timer);
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      saveBridgeSettings({ url, token: loadBridgeSettings().token });
+      setBridgeUrl(url);
+      const resp = await bridgeFetch(`${url}/devices`);
+      if (!resp.ok) throw await bridgeResponseError(resp);
       const data = await resp.json();
       setDevices(data.devices || []);
       if (data.devices?.length > 0) setSelectedDevice(data.devices[0].name);
@@ -72,16 +56,12 @@ export default function PullModal({ onClose, onConfigPulled }) {
     setPulledConfig('');
 
     try {
-      const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 60000); // longer timeout for config pull
-      const resp = await fetch(`${url}/devices/${encodeURIComponent(selectedDevice)}/pull-config?format=${pullFormat}`, {
-        signal: ctrl.signal,
-      });
-      clearTimeout(timer);
-      if (!resp.ok) {
-        const body = await resp.json().catch(() => ({}));
-        throw new Error(body.error || `HTTP ${resp.status}`);
-      }
+      const resp = await bridgeFetch(
+        `${url}/devices/${encodeURIComponent(selectedDevice)}/pull-config?format=${pullFormat}`,
+        {},
+        { timeout: 60000 },
+      );
+      if (!resp.ok) throw await bridgeResponseError(resp);
       const data = await resp.json();
       if (!data.ok) throw new Error(data.error || 'Pull failed');
       setPulledConfig(data.config || '');

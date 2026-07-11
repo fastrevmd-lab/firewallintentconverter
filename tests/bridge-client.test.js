@@ -1,5 +1,7 @@
 /** Security tests for the shared browser-to-bridge client. */
 
+import { readFile } from 'node:fs/promises';
+
 import {
   bridgeFetch,
   bridgeResponseError,
@@ -180,6 +182,22 @@ await test('aborts a request after its configured timeout', async () => {
     name = error.name;
   }
   equal(name, 'AbortError', 'timeout abort error');
+});
+
+await test('all browser bridge callers use the shared authenticated client', async () => {
+  const callers = {
+    'public/hooks/usePush.js': 'bridgeFetch',
+    'public/hooks/useDay2Ops.js': 'bridgeFetch',
+    'public/components/LLMSettings.jsx': 'bridgeFetch',
+    'public/components/PullModal.jsx': 'bridgeFetch',
+    'public/components/SRXOutput.jsx': 'loadBridgeSettings',
+    'public/components/layout/WorkflowStepper.jsx': 'loadBridgeSettings',
+  };
+  for (const [file, sharedHelper] of Object.entries(callers)) {
+    const source = await readFile(new URL(`../${file}`, import.meta.url), 'utf8');
+    assert(!/\bfetch\s*\(/.test(source), `${file} still calls raw fetch`);
+    assert(source.includes(sharedHelper), `${file} does not use ${sharedHelper}`);
+  }
 });
 
 console.log(`\n✔ ${passed} passed  ${failed} failed\n`);

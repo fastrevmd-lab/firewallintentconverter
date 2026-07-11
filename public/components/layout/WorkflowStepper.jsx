@@ -5,6 +5,7 @@ import { useUIContext, isDeterministicMode } from '../../contexts/UIContext.jsx'
 import { useMergeContext } from '../../contexts/MergeContext.jsx';
 import useConfig from '../../hooks/useConfig.js';
 import useConversion from '../../hooks/useConversion.js';
+import { loadBridgeSettings } from '../../utils/bridge-client.js';
 import { computeWorkflowSteps } from '../../utils/workflow-steps.js';
 
 const VENDOR_DISPLAY = {
@@ -164,8 +165,8 @@ export default function WorkflowStepper() {
           <button
             className="btn btn-secondary btn-sm push-btn"
             onClick={() => {
-              const bridgeSettings = localStorage.getItem('pyez-bridge-settings') || localStorage.getItem('mcp-settings');
-              if (bridgeSettings) {
+              const bridgeSettings = loadBridgeSettings();
+              if (bridgeSettings.url && bridgeSettings.token) {
                 uiDispatch({ type: 'SHOW_MODAL', name: 'pushModal' });
               } else {
                 uiDispatch({ type: 'SHOW_MODAL', name: 'settings', value: 'mcp' });

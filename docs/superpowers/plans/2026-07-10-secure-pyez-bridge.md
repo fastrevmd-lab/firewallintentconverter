@@ -354,33 +354,33 @@ git commit -m "security: add authenticated bridge client"
 - Consumes: `loadBridgeSettings`, `saveBridgeSettings`, `bridgeFetch`, and `bridgeResponseError`
 - Preserves: existing hook return values and component props outside bridge settings
 
-- [ ] **Step 1: Add failing regression assertions for frontend callers**
+- [x] **Step 1: Add failing regression assertions for frontend callers**
 
 Extend browser-client coverage with an exported fetch spy and add source-contract assertions that protected bridge calls do not use raw `fetch`. The test must inspect the six caller source files and fail if a protected `/devices` request is made through raw `fetch(` rather than `bridgeFetch(`.
 
-- [ ] **Step 2: Run frontend tests and verify RED**
+- [x] **Step 2: Run frontend tests and verify RED**
 
 Run: `node tests/bridge-client.test.js`
 
 Expected: failure listing the remaining raw protected bridge calls.
 
-- [ ] **Step 3: Migrate hooks**
+- [x] **Step 3: Migrate hooks**
 
 In `usePush`, remove duplicate URL/storage/fetch helpers, initialize from `loadBridgeSettings()`, save URL through `saveBridgeSettings`, use unauthenticated `bridgeFetch(..., {}, {authenticated: false})` only for `/health`, and use authenticated `bridgeFetch` everywhere else.
 
 In `useDay2Ops`, load the URL from the shared settings module and replace its local timeout fetch helper with `bridgeFetch`. Preserve the existing 30-second request timeout and 60-second probe timeout behavior.
 
-- [ ] **Step 4: Migrate settings and add token input**
+- [x] **Step 4: Migrate settings and add token input**
 
 Initialize `bridgeUrl` and new `bridgeToken` state from `loadBridgeSettings`. Save both through `saveBridgeSettings`. Add a masked input labelled `Bridge Access Token` with autocomplete disabled and helper text stating that it is kept only for the browser session.
 
 Connection testing must call `/health` without authentication and `/devices` with authentication. Treat successful health plus `401` inventory as a token error rather than a connected bridge. Add/remove/probe calls must use `bridgeFetch`.
 
-- [ ] **Step 5: Migrate pull, output, and workflow checks**
+- [x] **Step 5: Migrate pull, output, and workflow checks**
 
 Replace protected raw calls in `PullModal`, `SRXOutput`, and `WorkflowStepper` with `bridgeFetch`; keep `/health` explicitly unauthenticated. Use `bridgeResponseError` so `401`, `403`, and `429` are shown rather than discarded.
 
-- [ ] **Step 6: Run focused and existing frontend tests**
+- [x] **Step 6: Run focused and existing frontend tests**
 
 Run each command and require zero failures:
 
@@ -390,7 +390,7 @@ node tests/day2-ops.test.js
 npm run build
 ```
 
-- [ ] **Step 7: Commit the migration**
+- [x] **Step 7: Commit the migration**
 
 ```bash
 git add public/hooks/usePush.js public/hooks/useDay2Ops.js public/components/LLMSettings.jsx public/components/PullModal.jsx public/components/SRXOutput.jsx public/components/layout/WorkflowStepper.jsx tests/bridge-client.test.js tests/day2-ops.test.js

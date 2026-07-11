@@ -5,45 +5,19 @@
  * intermediate config policies with hit count data, manages auto-refresh
  * polling, and computes summary statistics.
  *
- * Reads bridge URL from localStorage (same key as usePush).
+ * Reads bridge URL and session token through the shared bridge client.
  * Receives configDispatch and intermediateConfig as params to action functions.
  */
 import { useState, useRef, useEffect, useCallback } from 'react';
+import {
+  bridgeFetch,
+  bridgeResponseError,
+  loadBridgeSettings,
+} from '../utils/bridge-client.js';
 
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-const STORAGE_KEY = 'pyez-bridge-settings';
-const FETCH_TIMEOUT = 30000; // 30 seconds
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/** Load bridge URL from localStorage. */
-function loadBridgeUrl() {
-  try {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) {
-      const data = JSON.parse(saved);
-      let url = (data?.url || '').trim().replace(/\/+$/, '');
-      if (url && !/^https?:\/\//.test(url)) url = 'http://' + url;
-      return url;
-    }
-  } catch { /* ignore */ }
-  return '';
-}
-
-/** Fetch with timeout via AbortController. */
-async function fetchWithTimeout(url, options = {}, timeout = FETCH_TIMEOUT) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeout);
-  try {
-    const resp = await fetch(url, { ...options, signal: controller.signal, mode: 'cors' });
-    return resp;
-  } finally {
-    clearTimeout(timer);
-  }
+async function requireBridgeJson(response) {
+  if (!response.ok) throw await bridgeResponseError(response);
+  return response.json();
 }
 
 // ---------------------------------------------------------------------------
@@ -203,14 +177,12 @@ export default function useDay2Ops() {
    * Called on mount by the consuming component.
    */
   const refreshDevices = useCallback(async () => {
-    const baseUrl = loadBridgeUrl();
+    const baseUrl = loadBridgeSettings().url;
     if (!baseUrl) return;
     try {
-      const resp = await fetchWithTimeout(baseUrl + '/devices');
-      if (resp.ok) {
-        const data = await resp.json();
-        setDevices(Array.isArray(data) ? data : data.devices || []);
-      }
+      const resp = await bridgeFetch(baseUrl + '/devices');
+      const data = await requireBridgeJson(resp);
+      setDevices(Array.isArray(data) ? data : data.devices || []);
     } catch (err) {
       setError(`Failed to refresh devices: ${err.message}`);
     }
@@ -235,7 +207,7 @@ export default function useDay2Ops() {
     const targetDevice = device || deviceName;
     if (!targetDevice) return null;
 
-    const baseUrl = loadBridgeUrl();
+    const baseUrl = loadBridgeSettings().url;
     if (!baseUrl) {
       setError('No bridge URL configured.');
       return null;
@@ -249,10 +221,10 @@ export default function useDay2Ops() {
     const errors = [];
 
     const [policyResult, appResult] = await Promise.allSettled([
-      fetchWithTimeout(baseUrl + `/devices/${encodedDevice}/policy-stats`)
-        .then(resp => resp.ok ? resp.json() : Promise.reject(new Error(`HTTP ${resp.status}`))),
-      fetchWithTimeout(baseUrl + `/devices/${encodedDevice}/app-usage`)
-        .then(resp => resp.ok ? resp.json() : Promise.reject(new Error(`HTTP ${resp.status}`))),
+      bridgeFetch(baseUrl + `/devices/${encodedDevice}/policy-stats`)
+        .then(requireBridgeJson),
+      bridgeFetch(baseUrl + `/devices/${encodedDevice}/app-usage`)
+        .then(requireBridgeJson),
     ]);
 
     if (policyResult.status === 'fulfilled') {
@@ -527,6 +499,6 @@ export default function useDay2Ops() {
     disableNeverHitRules,
     tightenPermissiveRules,
     // Helpers
-    bridgeUrl: loadBridgeUrl(),
+    bridgeUrl: loadBridgeSettings().url,
   };
 }

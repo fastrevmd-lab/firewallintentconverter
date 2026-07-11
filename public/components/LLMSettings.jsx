@@ -14,6 +14,13 @@ import {
   loadVendorTranslatePrompt,
 } from '../utils/llm-client.js';
 import { safeJsonParse } from '../utils/safe-json.js';
+import {
+  bridgeFetch,
+  bridgeResponseError,
+  loadBridgeSettings,
+  normalizeBridgeUrl,
+  saveBridgeSettings,
+} from '../utils/bridge-client.js';
 import { useUIContext } from '../contexts/UIContext.jsx';
 
 const CLOUD_PROVIDER_IDS = ['claude', 'openai', 'gemini'];
@@ -77,7 +84,8 @@ export default function LLMSettings({ onClose, initialTab }) {
   const [vendorPrompts, setVendorPrompts] = useState({});
 
   // PyEZ Bridge state
-  const [bridgeUrl, setBridgeUrl] = useState('');
+  const [bridgeUrl, setBridgeUrl] = useState(() => loadBridgeSettings().url);
+  const [bridgeToken, setBridgeToken] = useState(() => loadBridgeSettings().token);
   const [bridgeConnected, setBridgeConnected] = useState(false);
   const [bridgeTesting, setBridgeTesting] = useState(false);
   const [bridgeTestResult, setBridgeTestResult] = useState('');
@@ -118,32 +126,35 @@ export default function LLMSettings({ onClose, initialTab }) {
     } catch {
       // Ignore parse errors
     }
-    let savedBridgeUrl = '';
-    try {
-      const bridgeSaved = localStorage.getItem('pyez-bridge-settings')
-        || localStorage.getItem('mcp-settings');
-      if (bridgeSaved) {
-        const bridgeSettings = safeJsonParse(bridgeSaved);
-        savedBridgeUrl = bridgeSettings.url || '';
-        setBridgeUrl(savedBridgeUrl);
-      }
-    } catch { /* ignore */ }
+    const savedBridge = loadBridgeSettings();
+    const savedBridgeUrl = savedBridge.url;
+    setBridgeUrl(savedBridge.url);
+    setBridgeToken(savedBridge.token);
     // Auto-connect to bridge if URL is saved
-    if (savedBridgeUrl) {
+    if (savedBridgeUrl && savedBridge.token) {
       const base = normalizeBridgeUrl(savedBridgeUrl);
-      fetch(base + '/health').then(r => r.json()).then(data => {
-        if (data.status === 'ok' && data.service === 'pyez-bridge') {
+      bridgeFetch(base + '/health', {}, { authenticated: false })
+        .then(async (healthResponse) => {
+          if (!healthResponse.ok) throw await bridgeResponseError(healthResponse);
+          const health = await healthResponse.json();
+          if (health.status !== 'ok' || health.service !== 'pyez-bridge') return;
+          const deviceResponse = await bridgeFetch(base + '/devices');
+          if (!deviceResponse.ok) throw await bridgeResponseError(deviceResponse);
+          const devices = await deviceResponse.json();
+          setBridgeDevices(Array.isArray(devices) ? devices : devices.devices || []);
           setBridgeConnected(true);
-          // Quick list (no NETCONF probe — instant)
-          fetch(base + '/devices').then(r => r.json()).then(devData => {
-            setBridgeDevices(Array.isArray(devData) ? devData : devData.devices || []);
-          }).catch(() => {});
-          // Background probe for live status
-          fetch(base + '/devices?probe=true').then(r => r.json()).then(devData => {
-            setBridgeDevices(Array.isArray(devData) ? devData : devData.devices || []);
-          }).catch(() => {});
-        }
-      }).catch(() => {});
+          return bridgeFetch(
+            base + '/devices?probe=true',
+            {},
+            { timeout: 60000 },
+          );
+        })
+        .then(async (probeResponse) => {
+          if (!probeResponse?.ok) return;
+          const devices = await probeResponse.json();
+          setBridgeDevices(Array.isArray(devices) ? devices : devices.devices || []);
+        })
+        .catch(() => setBridgeConnected(false));
     }
   }, []);
 
@@ -158,19 +169,8 @@ export default function LLMSettings({ onClose, initialTab }) {
       if (prompt && prompt.trim()) settings[`translateSystemPrompt_${v}`] = prompt;
     }
     localStorage.setItem('llm-settings', JSON.stringify(settings));
-    localStorage.setItem('pyez-bridge-settings', JSON.stringify({ url: normalizeBridgeUrl(bridgeUrl) }));
+    saveBridgeSettings({ url: bridgeUrl, token: bridgeToken });
     onClose();
-  };
-
-  /** Normalize a bridge URL — ensure http:// or https:// prefix. */
-  const normalizeBridgeUrl = (raw) => {
-    let url = (raw || '').trim().replace(/\/+$/, '');
-    if (!url) return '';
-    // Fix missing double-slash: "http:/host" → "http://host"
-    if (/^https?:\/[^/]/.test(url)) url = url.replace(/^(https?:\/)/, '$1/');
-    // Add http:// if no scheme at all
-    if (!/^https?:\/\//.test(url)) url = 'http://' + url;
-    return url;
   };
 
   /** Test PyEZ Bridge connection */
@@ -183,16 +183,18 @@ export default function LLMSettings({ onClose, initialTab }) {
     }
     // Update the input to the normalized URL
     if (base !== bridgeUrl) setBridgeUrl(base);
+    saveBridgeSettings({ url: base, token: bridgeToken });
     setBridgeTesting(true);
     setBridgeTestResult('');
     setBridgeDevices([]);
     try {
-      const resp = await fetch(base + '/health', { method: 'GET' });
+      const resp = await bridgeFetch(
+        base + '/health',
+        { method: 'GET' },
+        { authenticated: false },
+      );
       if (!resp.ok) {
-        setBridgeConnected(false);
-        setBridgeResultOk(false);
-        setBridgeTestResult(`Connection failed: HTTP ${resp.status}`);
-        return;
+        throw await bridgeResponseError(resp);
       }
       // Verify it's actually the PyEZ Bridge (not a Vite SPA fallback)
       let data;
@@ -208,19 +210,21 @@ export default function LLMSettings({ onClose, initialTab }) {
         setBridgeTestResult('URL responded but is not a PyEZ Bridge service. Check the URL and port.');
         return;
       }
+      const devResp = await bridgeFetch(base + '/devices', { method: 'GET' });
+      if (!devResp.ok) throw await bridgeResponseError(devResp);
+      const devData = await devResp.json();
+      setBridgeDevices(Array.isArray(devData) ? devData : devData.devices || []);
       setBridgeConnected(true);
       setBridgeResultOk(true);
-      setBridgeTestResult('Connected successfully.');
-      // Quick device list (instant), then background probe for live status
-      try {
-        const devResp = await fetch(base + '/devices', { method: 'GET' });
-        if (devResp.ok) {
-          const devData = await devResp.json();
-          setBridgeDevices(Array.isArray(devData) ? devData : devData.devices || []);
-        }
-      } catch { /* devices endpoint optional */ }
-      fetch(base + '/devices?probe=true').then(r => r.json()).then(devData => {
-        setBridgeDevices(Array.isArray(devData) ? devData : devData.devices || []);
+      setBridgeTestResult('Connected successfully with access token.');
+      bridgeFetch(
+        base + '/devices?probe=true',
+        {},
+        { timeout: 60000 },
+      ).then(async (probeResponse) => {
+        if (!probeResponse.ok) return;
+        const probed = await probeResponse.json();
+        setBridgeDevices(Array.isArray(probed) ? probed : probed.devices || []);
       }).catch(() => {});
     } catch (err) {
       setBridgeConnected(false);
@@ -248,11 +252,14 @@ export default function LLMSettings({ onClose, initialTab }) {
     setBridgeResultOk(true);
     setBridgeTestResult('Adding device...');
     try {
-      const resp = await fetch(url, {
+      const resp = await bridgeFetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
+      if (!resp.ok && [401, 403, 429].includes(resp.status)) {
+        throw await bridgeResponseError(resp);
+      }
       const data = await resp.json();
       if (data.ok) {
         setNewDevice({ name: '', host: '', port: 830, username: '', password: '', ssh_key: '' });
@@ -261,11 +268,10 @@ export default function LLMSettings({ onClose, initialTab }) {
         setBridgeTestResult('Device added successfully.');
         // Refresh device list
         try {
-          const devResp = await fetch(base + '/devices');
-          if (devResp.ok) {
-            const devData = await devResp.json();
-            setBridgeDevices(Array.isArray(devData) ? devData : devData.devices || []);
-          }
+          const devResp = await bridgeFetch(base + '/devices');
+          if (!devResp.ok) throw await bridgeResponseError(devResp);
+          const devData = await devResp.json();
+          setBridgeDevices(Array.isArray(devData) ? devData : devData.devices || []);
         } catch { /* ignore refresh failure */ }
       } else {
         setBridgeResultOk(false);
@@ -281,11 +287,18 @@ export default function LLMSettings({ onClose, initialTab }) {
   const handleRemoveDevice = async (deviceName) => {
     const base = bridgeUrl.replace(/\/+$/, '');
     try {
-      const resp = await fetch(base + `/devices/${encodeURIComponent(deviceName)}`, { method: 'DELETE' });
+      const resp = await bridgeFetch(
+        base + `/devices/${encodeURIComponent(deviceName)}`,
+        { method: 'DELETE' },
+      );
+      if (!resp.ok) throw await bridgeResponseError(resp);
       if (resp.ok) {
         setBridgeDevices(prev => prev.filter(d => (d.name || d.hostname) !== deviceName));
       }
-    } catch { /* ignore */ }
+    } catch (error) {
+      setBridgeResultOk(false);
+      setBridgeTestResult(`Failed to remove device: ${error.message}`);
+    }
   };
 
   /** Update defaults when provider changes */
@@ -364,6 +377,20 @@ export default function LLMSettings({ onClose, initialTab }) {
               />
               <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '4px' }}>
                 URL of the PyEZ Bridge service. Run <code style={{ fontSize: 10 }}>python tools/pyez-bridge/app.py</code> locally.
+              </div>
+            </SettingsField>
+
+            <SettingsField label="Bridge Access Token">
+              <input
+                type="password"
+                value={bridgeToken}
+                onChange={(e) => setBridgeToken(e.target.value)}
+                autoComplete="off"
+                placeholder="Paste the token printed when the bridge starts"
+                style={inputStyle}
+              />
+              <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                Kept only for this browser session and removed when the session ends.
               </div>
             </SettingsField>
 
@@ -507,10 +534,11 @@ export default function LLMSettings({ onClose, initialTab }) {
                   <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, background: 'var(--bg-primary)', padding: '6px 10px', borderRadius: 'var(--radius)', marginTop: 4 }}>
                     python app.py
                   </div>
+                  <div style={{ marginTop: 4 }}>Copy the access token printed at startup.</div>
                 </div>
                 <div>
                   <strong style={{ color: 'var(--text-primary)' }}>4. Connect</strong>
-                  <span> — Enter <code style={{ fontSize: 10 }}>http://localhost:8830</code> above and click Test Connection.</span>
+                  <span> — Enter <code style={{ fontSize: 10 }}>http://localhost:8830</code>, paste the access token, and click Test Connection.</span>
                 </div>
               </div>
               <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 10, borderTop: '1px solid var(--border-color)', paddingTop: 8 }}>

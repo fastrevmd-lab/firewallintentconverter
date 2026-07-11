@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { buildProjectPayload, validateProjectFile } from '../public/utils/project-io.js';
+import { ConversionOutputError } from '../src/conversion/conversion-output.js';
 
 const baseState = {
   configText: 'set system host-name source',
@@ -29,6 +30,40 @@ describe('canonical project output', () => {
       format: 'set',
       commands: ['set system host-name edge-1'],
     });
+  });
+
+  it('rejects legacy string output at the new-project save boundary', () => {
+    expect(() => buildProjectPayload({
+      ...baseState,
+      srxOutput: 'set system host-name legacy',
+      outputFormat: 'set',
+    }, 'legacy-string')).toThrow(ConversionOutputError);
+  });
+
+  it('rejects pre-discriminant command output at the new-project save boundary', () => {
+    expect(() => buildProjectPayload({
+      ...baseState,
+      srxOutput: { commands: ['set system host-name legacy-object'] },
+      outputFormat: 'set',
+    }, 'legacy-object')).toThrow(ConversionOutputError);
+  });
+
+  it('rejects srxCommands output at the new-project save boundary', () => {
+    expect(() => buildProjectPayload({
+      ...baseState,
+      srxOutput: { srxCommands: 'set system host-name bypass' },
+      outputFormat: 'set',
+    }, 'unsupported-field')).toThrow(ConversionOutputError);
+  });
+
+  it('corrects a stale output format when saving canonical Set Commands output', () => {
+    const payload = buildProjectPayload({
+      ...baseState,
+      srxOutput: { format: 'set', commands: ['set system host-name edge-1'] },
+      outputFormat: 'xml',
+    }, 'stale-format');
+
+    expect(payload.state.outputFormat).toBe('set');
   });
 
   it('migrates version 2 string, set-object, and XML-object output', () => {

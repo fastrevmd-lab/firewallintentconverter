@@ -49,6 +49,8 @@ def _validate_origin(origin):
 
     if parsed.scheme not in ("http", "https") or not parsed.hostname:
         raise ValueError("Allowed origins must use HTTP or HTTPS.")
+    if not parsed.hostname.isascii():
+        raise ValueError("Allowed-origin hostnames must use ASCII form.")
     if parsed.username or parsed.password:
         raise ValueError("Allowed origins cannot contain credentials.")
     if parsed.path or parsed.query or parsed.fragment:
@@ -58,7 +60,13 @@ def _validate_origin(origin):
     ):
         raise ValueError("Default ports must be omitted from allowed origins.")
 
-    canonical = f"{parsed.scheme}://{parsed.netloc}"
+    canonical_host = (
+        f"[{parsed.hostname}]" if ":" in parsed.hostname else parsed.hostname
+    )
+    canonical_netloc = (
+        f"{canonical_host}:{port}" if port is not None else canonical_host
+    )
+    canonical = f"{parsed.scheme}://{canonical_netloc}"
     if value != canonical:
         raise ValueError("Allowed origins must use their exact canonical form.")
     return value

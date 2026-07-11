@@ -223,7 +223,7 @@ git commit -m "security: add PyEZ bridge request controls"
 - Produces: `bridge = Blueprint("bridge", __name__)`
 - Produces: `create_app(config: dict | None = None) -> Flask`
 
-- [ ] **Step 1: Write failing integration tests against `create_app`**
+- [x] **Step 1: Write failing integration tests against `create_app`**
 
 Patch `DEVICES_FILE` to a temporary empty YAML file and create the application with:
 
@@ -238,13 +238,13 @@ app = create_app({
 
 Assert public health, protected inventory, authorized inventory, allowed and denied preflights, oversized device JSON rejection, and that a rejected request never calls `_connect`.
 
-- [ ] **Step 2: Run integration tests and verify RED**
+- [x] **Step 2: Run integration tests and verify RED**
 
 Run: `python -m unittest tools/pyez-bridge/tests/test_app_security.py -v`
 
 Expected: import or attribute failure because `create_app` does not exist.
 
-- [ ] **Step 3: Convert routes to a blueprint and add the factory**
+- [x] **Step 3: Convert routes to a blueprint and add the factory**
 
 Replace `app = Flask(__name__)`, unrestricted `CORS(app)`, and every `@app.route` with a `Blueprint` registered by `create_app`. The factory resolves the token and allowed origins unless explicitly injected by tests, installs security, registers the blueprint, and records only these non-response configuration values:
 
@@ -256,19 +256,19 @@ app.config["BRIDGE_ALLOWED_ORIGINS"] = allowed_origins
 
 Do not change endpoint bodies or PyEZ calls.
 
-- [ ] **Step 4: Make CLI startup fail closed**
+- [x] **Step 4: Make CLI startup fail closed**
 
 Add repeatable `--allow-origin`. Validate `--bind` before creating the runnable app. Build allowed origins from CLI arguments and `PYEZ_BRIDGE_ALLOWED_ORIGINS`; build the token from `PYEZ_BRIDGE_TOKEN`. Print a generated token once, but never print an environment-provided token. Remove support for non-loopback binding.
 
 For module/WSGI import, expose `app = create_app()` only when `__name__ != "__main__"`; WSGI deployments must set `PYEZ_BRIDGE_TOKEN` to know the token.
 
-- [ ] **Step 5: Run bridge integration and security suites**
+- [x] **Step 5: Run bridge integration and security suites**
 
 Run: `python -m unittest discover tools/pyez-bridge/tests -v`
 
 Expected: all tests pass and no NETCONF connection is attempted.
 
-- [ ] **Step 6: Commit the secured application**
+- [x] **Step 6: Commit the secured application**
 
 ```bash
 git add tools/pyez-bridge/app.py tools/pyez-bridge/tests/test_app_security.py

@@ -75,6 +75,7 @@ class SecurityConfigurationTests(unittest.TestCase):
             "https://example.test/",
             "https://example.test:443",
             "HTTPS://example.test",
+            "https://EXAMPLE.test",
             "",
         ):
             with self.subTest(value=value):

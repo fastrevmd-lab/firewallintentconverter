@@ -9,19 +9,23 @@ Usage:
     pip install -r requirements.txt
     python app.py                     # starts on 127.0.0.1:8830
     python app.py --port 9000         # custom port
-    python app.py --bind 0.0.0.0      # listen on all interfaces (use with care)
+    python app.py --allow-origin http://localhost:5173
 """
 
 import argparse
 import os
-import sys
 import time
-import traceback
 from pathlib import Path
 
 import yaml
-from flask import Flask, jsonify, request
-from flask_cors import CORS
+from flask import Blueprint, Flask, jsonify, request
+
+from security import (
+    install_security,
+    parse_allowed_origins,
+    resolve_token,
+    validate_loopback_bind,
+)
 
 # PyEZ imports
 from jnpr.junos import Device
@@ -45,8 +49,43 @@ DEVICES_FILE = Path(__file__).parent / "devices.yaml"
 CONNECT_TIMEOUT = 10   # seconds
 OPERATION_TIMEOUT = 30  # seconds
 
-app = Flask(__name__)
-CORS(app)
+bridge = Blueprint("bridge", __name__)
+
+
+def create_app(config=None):
+    """Create a secured bridge application."""
+    supplied = dict(config or {})
+    app = Flask(__name__)
+    app.config.update(supplied)
+
+    configured_token = (
+        supplied["BRIDGE_TOKEN"]
+        if "BRIDGE_TOKEN" in supplied
+        else os.environ.get("PYEZ_BRIDGE_TOKEN")
+    )
+    token, generated = resolve_token(configured_token)
+
+    if "BRIDGE_ALLOWED_ORIGINS" in supplied:
+        allowed_origins = parse_allowed_origins(
+            supplied["BRIDGE_ALLOWED_ORIGINS"], None
+        )
+    else:
+        allowed_origins = parse_allowed_origins(
+            None, os.environ.get("PYEZ_BRIDGE_ALLOWED_ORIGINS")
+        )
+
+    app.config["BRIDGE_TOKEN"] = token
+    app.config["BRIDGE_TOKEN_GENERATED"] = generated
+    app.config["BRIDGE_ALLOWED_ORIGINS"] = allowed_origins
+
+    app.register_blueprint(bridge)
+    install_security(
+        app,
+        token,
+        allowed_origins,
+        limiter=supplied.get("BRIDGE_RATE_LIMITER"),
+    )
+    return app
 
 
 # ---------------------------------------------------------------------------
@@ -120,13 +159,13 @@ def _error_response(message, status=400, details=None):
 # Endpoints
 # ---------------------------------------------------------------------------
 
-@app.route("/health", methods=["GET"])
+@bridge.route("/health", methods=["GET"])
 def health():
     """Liveness check — matches the existing UI expectation."""
     return jsonify({"status": "ok", "version": "1.0.0", "service": "pyez-bridge"})
 
 
-@app.route("/devices", methods=["GET"])
+@bridge.route("/devices", methods=["GET"])
 def list_devices():
     """List configured devices. Use ?probe=true to test connectivity (slower)."""
     devices = _load_devices()
@@ -151,7 +190,7 @@ def list_devices():
     return jsonify({"devices": result})
 
 
-@app.route("/devices", methods=["POST"])
+@bridge.route("/devices", methods=["POST"])
 def add_device():
     """Add a new device to devices.yaml."""
     data = request.get_json(silent=True)
@@ -190,7 +229,7 @@ def add_device():
     return jsonify({"ok": True, "device": _safe_device_info(entry)}), 201
 
 
-@app.route("/devices/<name>", methods=["DELETE"])
+@bridge.route("/devices/<name>", methods=["DELETE"])
 def remove_device(name):
     """Remove a device from devices.yaml."""
     devices = _load_devices()
@@ -201,7 +240,7 @@ def remove_device(name):
     return jsonify({"ok": True})
 
 
-@app.route("/devices/<name>/facts", methods=["GET"])
+@bridge.route("/devices/<name>/facts", methods=["GET"])
 def device_facts(name):
     """Fetch device facts via PyEZ."""
     dev_dict, _ = _find_device(name)
@@ -228,7 +267,7 @@ def device_facts(name):
         return _error_response(f"Unexpected error: {e}", 500)
 
 
-@app.route("/devices/<name>/unlock", methods=["POST"])
+@bridge.route("/devices/<name>/unlock", methods=["POST"])
 def unlock_config(name):
     """Clear any stale configuration lock on the device.
 
@@ -295,7 +334,7 @@ def _acquire_lock(dev_dict, cu, dev):
         return cu, dev
 
 
-@app.route("/devices/<name>/load", methods=["POST"])
+@bridge.route("/devices/<name>/load", methods=["POST"])
 def load_config(name):
     """Load configuration into candidate configuration."""
     dev_dict, _ = _find_device(name)
@@ -408,7 +447,7 @@ def load_config(name):
         return _error_response(f"Unexpected error: {e}", 500)
 
 
-@app.route("/devices/<name>/diff", methods=["GET"])
+@bridge.route("/devices/<name>/diff", methods=["GET"])
 def config_diff(name):
     """Show candidate vs active configuration diff."""
     dev_dict, _ = _find_device(name)
@@ -433,7 +472,7 @@ def config_diff(name):
         return _error_response(f"Unexpected error: {e}", 500)
 
 
-@app.route("/devices/<name>/commit-check", methods=["POST"])
+@bridge.route("/devices/<name>/commit-check", methods=["POST"])
 def commit_check(name):
     """Dry-run commit check — validates candidate without applying."""
     dev_dict, _ = _find_device(name)
@@ -474,7 +513,7 @@ def commit_check(name):
         return _error_response(f"Unexpected error: {e}", 500)
 
 
-@app.route("/devices/<name>/commit", methods=["POST"])
+@bridge.route("/devices/<name>/commit", methods=["POST"])
 def commit(name):
     """Commit the candidate configuration."""
     dev_dict, _ = _find_device(name)
@@ -524,7 +563,7 @@ def commit(name):
         return _error_response(f"Unexpected error: {e}", 500)
 
 
-@app.route("/devices/<name>/confirm", methods=["POST"])
+@bridge.route("/devices/<name>/confirm", methods=["POST"])
 def confirm_commit(name):
     """Confirm a pending commit-confirm (cancel the auto-rollback timer)."""
     dev_dict, _ = _find_device(name)
@@ -556,7 +595,7 @@ def confirm_commit(name):
         return _error_response(f"Unexpected error: {e}", 500)
 
 
-@app.route("/devices/<name>/rollback", methods=["POST"])
+@bridge.route("/devices/<name>/rollback", methods=["POST"])
 def rollback(name):
     """Rollback the candidate configuration to the last committed state."""
     dev_dict, _ = _find_device(name)
@@ -596,7 +635,7 @@ def rollback(name):
 # Pull Config (GET running config from device)
 # ---------------------------------------------------------------------------
 
-@app.route("/devices/<name>/pull-config", methods=["GET"])
+@bridge.route("/devices/<name>/pull-config", methods=["GET"])
 def pull_config(name):
     """Pull the running configuration from an SRX device via NETCONF.
 
@@ -662,7 +701,7 @@ def pull_config(name):
 # Pull Policy Hit Counts
 # ---------------------------------------------------------------------------
 
-@app.route("/devices/<name>/policy-stats", methods=["GET"])
+@bridge.route("/devices/<name>/policy-stats", methods=["GET"])
 def policy_stats(name):
     """Pull security policy hit count statistics from an SRX device.
 
@@ -752,7 +791,7 @@ def policy_stats(name):
 # App Usage — Per-policy hit counts + active sessions by application
 # ---------------------------------------------------------------------------
 
-@app.route("/devices/<name>/app-usage", methods=["GET"])
+@bridge.route("/devices/<name>/app-usage", methods=["GET"])
 def app_usage(name):
     """Pull per-policy hit counts and active sessions grouped by application.
 
@@ -874,13 +913,51 @@ def app_usage(name):
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
-if __name__ == "__main__":
+def main(argv=None):
+    """Validate local-only startup options and run the bridge."""
     parser = argparse.ArgumentParser(description="PyEZ Bridge — REST API for SRX device management")
     parser.add_argument("--port", type=int, default=8830, help="Port to listen on (default: 8830)")
-    parser.add_argument("--bind", default="127.0.0.1", help="Address to bind to (default: 127.0.0.1)")
-    args = parser.parse_args()
+    parser.add_argument(
+        "--bind",
+        default="127.0.0.1",
+        help="Numeric loopback address to bind to (default: 127.0.0.1)",
+    )
+    parser.add_argument(
+        "--allow-origin",
+        action="append",
+        default=None,
+        help="Exact browser origin to allow; repeat for multiple origins",
+    )
+    args = parser.parse_args(argv)
 
-    print(f"PyEZ Bridge starting on {args.bind}:{args.port}")
+    try:
+        bind_address = validate_loopback_bind(args.bind)
+        allowed_origins = parse_allowed_origins(
+            args.allow_origin,
+            os.environ.get("PYEZ_BRIDGE_ALLOWED_ORIGINS"),
+        )
+        runnable_app = create_app(
+            {
+                "BRIDGE_TOKEN": os.environ.get("PYEZ_BRIDGE_TOKEN"),
+                "BRIDGE_ALLOWED_ORIGINS": allowed_origins,
+            }
+        )
+    except ValueError as exc:
+        parser.error(str(exc))
+
+    print(f"PyEZ Bridge starting on {bind_address}:{args.port}")
     print(f"Device config: {DEVICES_FILE}")
     print(f"Devices configured: {len(_load_devices())}")
-    app.run(host=args.bind, port=args.port, debug=False)
+    print(f"Allowed browser origins: {', '.join(allowed_origins)}")
+    if runnable_app.config["BRIDGE_TOKEN_GENERATED"]:
+        print("Bridge access token (valid for this run):")
+        print(runnable_app.config["BRIDGE_TOKEN"])
+    else:
+        print("Bridge access token loaded from PYEZ_BRIDGE_TOKEN.")
+    runnable_app.run(host=bind_address, port=args.port, debug=False)
+
+
+if __name__ == "__main__":
+    main()
+else:
+    app = create_app()

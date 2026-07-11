@@ -71,6 +71,8 @@ Copy the printed token into **Settings → SRX Device Connection → Bridge Acce
 
 Use an environment variable when repeated restarts should retain the same token. The token must contain at least 32 characters and is not accepted as a command-line argument because command arguments can be visible to other users.
 
+Set `PYEZ_BRIDGE_TOKEN` before importing `app` from a WSGI server as well. Only direct `python app.py` startup can display an automatically generated token on its controlling terminal.
+
 ```bash
 export PYEZ_BRIDGE_TOKEN="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
 venv/bin/python app.py --allow-origin https://converter.example.test

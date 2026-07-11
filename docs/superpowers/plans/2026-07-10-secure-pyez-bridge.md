@@ -468,7 +468,7 @@ git commit -m "ci: verify web and PyEZ bridge security"
 **Interfaces:**
 - Produces: pushed branch, ready PR linked to issue #7, green required checks, merged PR, closed issue
 
-- [ ] **Step 1: Perform the pre-publish audit**
+- [x] **Step 1: Perform the pre-publish audit**
 
 Confirm `git status --short` is empty, review `git diff origin/main...HEAD`, and map every issue #7 acceptance criterion to a passing test or documented startup behavior.
 

@@ -5,6 +5,7 @@
  * output format selection, and target routing context.
  */
 import React, { createContext, useContext, useReducer } from 'react';
+import { assertConversionOutput } from '../../src/conversion/conversion-output.js';
 
 // ---------------------------------------------------------------------------
 // Initial state
@@ -28,15 +29,17 @@ export function conversionReducer(state, action) {
       return { ...state, [action.field]: action.value };
 
     // Bulk set after a successful conversion
-    case 'SET_CONVERSION_RESULT':
+    case 'SET_CONVERSION_RESULT': {
+      const output = assertConversionOutput(action.output);
       return {
         ...state,
-        srxOutput: action.output ?? null,
+        srxOutput: output,
         convertWarnings: action.warnings ?? [],
-        conversionSummary: action.summary ?? null,
-        outputFormat: action.format ?? state.outputFormat,
+        conversionSummary: action.summary ?? output.summary ?? null,
+        outputFormat: output.format,
         validationFindings: action.validationFindings ?? state.validationFindings,
       };
+    }
 
     // Clear all output state
     case 'CLEAR_OUTPUT':

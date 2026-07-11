@@ -18,6 +18,32 @@ describe('conversionReducer RESET', () => {
   });
 });
 
+describe('conversionReducer canonical output', () => {
+  it('derives outputFormat from canonical output and ignores a stale action format', () => {
+    const output = {
+      format: 'set',
+      commands: ['set system host-name edge-1'],
+      warnings: [],
+    };
+    const next = conversionReducer(conversionInitial, {
+      type: 'SET_CONVERSION_RESULT',
+      output,
+      format: 'xml',
+      warnings: [],
+    });
+
+    expect(next.srxOutput).toEqual(output);
+    expect(next.outputFormat).toBe('set');
+  });
+
+  it('rejects malformed output instead of storing it', () => {
+    expect(() => conversionReducer(conversionInitial, {
+      type: 'SET_CONVERSION_RESULT',
+      output: { commands: [] },
+    })).toThrow(/Canonical conversion output/);
+  });
+});
+
 describe('mergeReducer RESET', () => {
   it('returns a clean initial state, discarding all merge slots', () => {
     const dirty = {

@@ -12,6 +12,7 @@ from unittest.mock import patch
 BRIDGE_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BRIDGE_DIR))
 
+import inventory  # noqa: E402
 from inventory import (  # noqa: E402
     InventoryError,
     load_devices,
@@ -26,6 +27,11 @@ AGENT_DEVICE = {
     "port": 830,
     "username": "netops",
     "auth_method": "agent",
+}
+REPLACEMENT_DEVICE = {
+    **AGENT_DEVICE,
+    "name": "replacement",
+    "host": "198.51.100.50",
 }
 
 
@@ -200,6 +206,80 @@ class InventoryTests(unittest.TestCase):
 
         self.assert_generic_error(
             lambda: save_devices(linked_path, [AGENT_DEVICE])
+        )
+
+    @unittest.skipUnless(
+        inventory._can_use_secure_dir_fds(),
+        "secure dir-fd traversal is unavailable",
+    )
+    def test_load_keeps_checked_parent_after_ancestor_is_swapped(self):
+        checked_parent = self.root / "checked" / "subdir"
+        replacement_parent = self.root / "replacement" / "subdir"
+        checked_parent.mkdir(parents=True, mode=0o700)
+        replacement_parent.mkdir(parents=True, mode=0o700)
+        checked_path = checked_parent / "devices.yaml"
+        save_devices(checked_path, [AGENT_DEVICE])
+        save_devices(replacement_parent / "devices.yaml", [REPLACEMENT_DEVICE])
+
+        checked_ancestor = self.root / "checked"
+        detached_ancestor = self.root / "detached"
+        real_walk = inventory._walk_parent_with_descriptors
+
+        def walk_then_swap(path):
+            result = real_walk(path)
+            checked_ancestor.rename(detached_ancestor)
+            checked_ancestor.symlink_to(
+                self.root / "replacement", target_is_directory=True
+            )
+            return result
+
+        with patch(
+            "inventory._walk_parent_with_descriptors",
+            side_effect=walk_then_swap,
+        ):
+            loaded = load_devices(checked_path)
+
+        self.assertEqual(loaded, [AGENT_DEVICE])
+        self.assertEqual(
+            load_devices(replacement_parent / "devices.yaml"),
+            [REPLACEMENT_DEVICE],
+        )
+
+    @unittest.skipUnless(
+        inventory._can_use_secure_dir_fds(),
+        "secure dir-fd traversal is unavailable",
+    )
+    def test_save_keeps_checked_parent_after_ancestor_is_swapped(self):
+        checked_parent = self.root / "checked" / "subdir"
+        replacement_parent = self.root / "replacement" / "subdir"
+        checked_parent.mkdir(parents=True, mode=0o700)
+        replacement_parent.mkdir(parents=True, mode=0o700)
+        checked_path = checked_parent / "devices.yaml"
+        replacement_path = replacement_parent / "devices.yaml"
+        save_devices(replacement_path, [REPLACEMENT_DEVICE])
+
+        checked_ancestor = self.root / "checked"
+        detached_ancestor = self.root / "detached"
+        real_walk = inventory._walk_parent_with_descriptors
+
+        def walk_then_swap(path):
+            result = real_walk(path)
+            checked_ancestor.rename(detached_ancestor)
+            checked_ancestor.symlink_to(
+                self.root / "replacement", target_is_directory=True
+            )
+            return result
+
+        with patch(
+            "inventory._walk_parent_with_descriptors",
+            side_effect=walk_then_swap,
+        ):
+            save_devices(checked_path, [AGENT_DEVICE])
+
+        self.assertEqual(load_devices(replacement_path), [REPLACEMENT_DEVICE])
+        self.assertEqual(
+            load_devices(detached_ancestor / "subdir" / "devices.yaml"),
+            [AGENT_DEVICE],
         )
 
     def test_rejects_valid_and_dangling_destination_symlinks(self):

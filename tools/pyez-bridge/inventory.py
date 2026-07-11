@@ -2,6 +2,7 @@
 
 import os
 import re
+import secrets
 import stat
 import tempfile
 from pathlib import Path
@@ -101,11 +102,13 @@ def _walk_parent_with_descriptors(path):
     try:
         for component in components:
             next_fd = os.open(component, flags, dir_fd=directory_fd)
-            os.close(directory_fd)
+            previous_fd = directory_fd
             directory_fd = next_fd
-        return os.fstat(directory_fd)
-    finally:
+            os.close(previous_fd)
+        return directory_fd
+    except Exception:
         os.close(directory_fd)
+        raise
 
 
 def _walk_parent_with_lstat(path):
@@ -126,17 +129,20 @@ def _walk_parent_with_lstat(path):
     return current_stat
 
 
-def _check_parent(path):
-    can_walk_with_descriptors = (
+def _can_use_secure_dir_fds():
+    required_dir_fd_functions = (os.open, os.stat, os.unlink, os.rename)
+    return (
         os.name == "posix"
         and hasattr(os, "O_DIRECTORY")
         and hasattr(os, "O_NOFOLLOW")
-        and os.open in os.supports_dir_fd
+        and all(
+            function in os.supports_dir_fd
+            for function in required_dir_fd_functions
+        )
     )
-    if can_walk_with_descriptors:
-        parent_stat = _walk_parent_with_descriptors(path)
-    else:
-        parent_stat = _walk_parent_with_lstat(path)
+
+
+def _validate_parent_stat(parent_stat):
     if os.name == "posix":
         if (
             parent_stat.st_uid != os.getuid()
@@ -146,10 +152,37 @@ def _check_parent(path):
     return parent_stat
 
 
+def _open_checked_parent(path):
+    directory_fd = _walk_parent_with_descriptors(path)
+    try:
+        _validate_parent_stat(os.fstat(directory_fd))
+    except Exception:
+        os.close(directory_fd)
+        raise
+    return directory_fd
+
+
+def _check_parent(path):
+    if _can_use_secure_dir_fds():
+        directory_fd = _open_checked_parent(path)
+        try:
+            return os.fstat(directory_fd)
+        finally:
+            os.close(directory_fd)
+    return _validate_parent_stat(_walk_parent_with_lstat(path))
+
+
 def _existing_stat(path):
     """Return lstat metadata, preserving dangling symlinks as existing entries."""
     try:
         return path.lstat()
+    except FileNotFoundError:
+        return None
+
+
+def _existing_stat_at(directory_fd, name):
+    try:
+        return os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
     except FileNotFoundError:
         return None
 
@@ -196,40 +229,150 @@ def _read_bounded(fd):
     return b"".join(chunks)
 
 
+def _load_devices_at(directory_fd, name):
+    existing = _existing_stat_at(directory_fd, name)
+    if existing is None:
+        return []
+    expected = _check_existing(None, existing)
+    flags = os.O_RDONLY | os.O_NOFOLLOW
+    fd = os.open(name, flags, dir_fd=directory_fd)
+    try:
+        opened = os.fstat(fd)
+        if (opened.st_dev, opened.st_ino) != (
+            expected.st_dev,
+            expected.st_ino,
+        ):
+            raise InventoryError()
+        raw = _read_bounded(fd)
+    finally:
+        os.close(fd)
+    if len(raw) > MAX_INVENTORY_BYTES:
+        raise InventoryError()
+    return _validated_list(yaml.safe_load(raw.decode("utf-8")))
+
+
+def _load_devices_portable(path):
+    _check_parent(path)
+    existing = _existing_stat(path)
+    if existing is None:
+        return []
+    expected = _check_existing(path, existing)
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(path, flags)
+    try:
+        opened = os.fstat(fd)
+        if (opened.st_dev, opened.st_ino) != (
+            expected.st_dev,
+            expected.st_ino,
+        ):
+            raise InventoryError()
+        raw = _read_bounded(fd)
+    finally:
+        os.close(fd)
+    if len(raw) > MAX_INVENTORY_BYTES:
+        raise InventoryError()
+    return _validated_list(yaml.safe_load(raw.decode("utf-8")))
+
+
 def load_devices(path):
     """Load and validate an owner-only device inventory."""
     path = Path(path)
     try:
-        _check_parent(path)
-        existing = _existing_stat(path)
-        if existing is None:
-            return []
-        expected = _check_existing(path, existing)
-        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
-        fd = os.open(path, flags)
+        if not _can_use_secure_dir_fds():
+            return _load_devices_portable(path)
+        directory_fd = _open_checked_parent(path)
         try:
-            opened = os.fstat(fd)
-            if (opened.st_dev, opened.st_ino) != (
-                expected.st_dev,
-                expected.st_ino,
-            ):
-                raise InventoryError()
-            raw = _read_bounded(fd)
+            return _load_devices_at(directory_fd, path.name)
         finally:
-            os.close(fd)
-        if len(raw) > MAX_INVENTORY_BYTES:
-            raise InventoryError()
-        return _validated_list(yaml.safe_load(raw.decode("utf-8")))
+            os.close(directory_fd)
     except InventoryError:
         raise
     except (OSError, UnicodeError, yaml.YAMLError):
         raise InventoryError() from None
 
 
-def save_devices(path, devices):
-    """Atomically save a validated, owner-only device inventory."""
-    path = Path(path)
-    normalized = _validated_list({"devices": devices})
+def _create_temporary_at(directory_fd, destination_name):
+    flags = (
+        os.O_WRONLY
+        | os.O_CREAT
+        | os.O_EXCL
+        | os.O_NOFOLLOW
+        | getattr(os, "O_CLOEXEC", 0)
+    )
+    for _ in range(128):
+        name = f".{destination_name}.{secrets.token_hex(16)}.tmp"
+        try:
+            fd = os.open(name, flags, 0o600, dir_fd=directory_fd)
+        except FileExistsError:
+            continue
+        return fd, name
+    raise InventoryError()
+
+
+def _write_temporary(fd, normalized):
+    try:
+        os.fchmod(fd, 0o600)
+        expected = os.fstat(fd)
+        with os.fdopen(fd, "w", encoding="utf-8", closefd=True) as stream:
+            yaml.safe_dump(
+                {"devices": normalized},
+                stream,
+                default_flow_style=False,
+                sort_keys=False,
+            )
+            stream.flush()
+            os.fsync(stream.fileno())
+        return expected
+    except Exception:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+        raise
+
+
+def _save_devices_at(directory_fd, name, normalized):
+    existing = _existing_stat_at(directory_fd, name)
+    if existing is not None:
+        _check_existing(None, existing)
+
+    temp_name = None
+    try:
+        fd, temp_name = _create_temporary_at(directory_fd, name)
+        expected = _write_temporary(fd, normalized)
+
+        existing = _existing_stat_at(directory_fd, name)
+        if existing is not None:
+            _check_existing(None, existing)
+        os.replace(
+            temp_name,
+            name,
+            src_dir_fd=directory_fd,
+            dst_dir_fd=directory_fd,
+        )
+        temp_name = None
+
+        final_stat = os.stat(
+            name,
+            dir_fd=directory_fd,
+            follow_symlinks=False,
+        )
+        if (final_stat.st_dev, final_stat.st_ino) != (
+            expected.st_dev,
+            expected.st_ino,
+        ):
+            raise InventoryError()
+        _check_existing(None, final_stat)
+        os.fsync(directory_fd)
+    finally:
+        if temp_name is not None:
+            try:
+                os.unlink(temp_name, dir_fd=directory_fd)
+            except OSError:
+                pass
+
+
+def _save_devices_portable(path, normalized):
     temp_path = None
     try:
         _check_parent(path)
@@ -243,23 +386,7 @@ def save_devices(path, devices):
             dir=path.parent,
         )
         temp_path = Path(raw_temp)
-        try:
-            os.fchmod(fd, 0o600)
-            with os.fdopen(fd, "w", encoding="utf-8", closefd=True) as stream:
-                yaml.safe_dump(
-                    {"devices": normalized},
-                    stream,
-                    default_flow_style=False,
-                    sort_keys=False,
-                )
-                stream.flush()
-                os.fsync(stream.fileno())
-        except Exception:
-            try:
-                os.close(fd)
-            except OSError:
-                pass
-            raise
+        expected = _write_temporary(fd, normalized)
 
         existing = _existing_stat(path)
         if existing is not None:
@@ -276,13 +403,29 @@ def save_devices(path, devices):
                 os.fsync(parent_fd)
             finally:
                 os.close(parent_fd)
-    except InventoryError:
-        raise
-    except (OSError, UnicodeError, yaml.YAMLError):
-        raise InventoryError() from None
+        return expected
     finally:
         if temp_path is not None:
             try:
                 temp_path.unlink()
             except OSError:
                 pass
+
+
+def save_devices(path, devices):
+    """Atomically save a validated, owner-only device inventory."""
+    path = Path(path)
+    normalized = _validated_list({"devices": devices})
+    try:
+        if not _can_use_secure_dir_fds():
+            _save_devices_portable(path, normalized)
+            return
+        directory_fd = _open_checked_parent(path)
+        try:
+            _save_devices_at(directory_fd, path.name, normalized)
+        finally:
+            os.close(directory_fd)
+    except InventoryError:
+        raise
+    except (OSError, UnicodeError, yaml.YAMLError):
+        raise InventoryError() from None

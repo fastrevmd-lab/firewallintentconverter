@@ -44,6 +44,8 @@ jobs:
           tests/conversion-enforcement.test.js
           tests/project-io.test.js
           tests/conversion-consumers.test.js
+          tests/llm-settings.test.js
+          tests/credential-security.test.js
 
       - name: Run self-contained JavaScript suites
         shell: bash

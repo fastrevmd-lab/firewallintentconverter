@@ -1,6 +1,0 @@
-devices:
-- host: 192.168.1.223
-  name: vSRXtwin
-  port: 830
-  ssh_key: ~/.ssh/pyez_rsa
-  username: pyez

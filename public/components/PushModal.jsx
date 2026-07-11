@@ -81,7 +81,7 @@ export default function PushModal({ onClose }) {
   // -----------------------------------------------------------------------
   const handleLoadAndDiff = useCallback(async () => {
     goToStep('diff');
-    appendLog('info', `Pushing ${outputFormat === 'xml' ? 'XML' : 'set commands'} to ${selectedDevice}...`);
+    appendLog('info', `Preparing ${outputFormat === 'xml' ? 'XML' : 'set-command'} configuration push...`);
     const loaded = await loadConfig();
     if (loaded) {
       await fetchDiff();
@@ -301,16 +301,12 @@ export default function PushModal({ onClose }) {
               <span style={{ fontSize: 24, color: 'var(--error)' }}>{'\u2717'}</span>
               <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--error)' }}>Commit Check Failed</span>
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {(commitCheckResult.errors || []).map((err, i) => (
-                <div key={i} style={{
-                  padding: '8px 12px', background: 'rgba(248, 113, 113, 0.08)',
-                  border: '1px solid rgba(248, 113, 113, 0.2)', borderRadius: 'var(--radius)',
-                  fontSize: 12, color: 'var(--text-primary)',
-                }}>
-                  {err.message}
-                </div>
-              ))}
+            <div style={{
+              padding: '8px 12px', background: 'rgba(248, 113, 113, 0.08)',
+              border: '1px solid rgba(248, 113, 113, 0.2)', borderRadius: 'var(--radius)',
+              fontSize: 12, color: 'var(--text-primary)',
+            }}>
+              The candidate configuration did not pass the device commit check.
             </div>
           </div>
         )
@@ -342,7 +338,7 @@ export default function PushModal({ onClose }) {
           <div style={{ fontSize: 32, color: 'var(--success)', marginBottom: 8 }}>{'\u2713'}</div>
           <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--success)' }}>Commit Successful</div>
           <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 4 }}>
-            {commitResult.message}
+            The candidate configuration was committed successfully.
           </div>
         </div>
       )}

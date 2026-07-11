@@ -10,15 +10,11 @@
  */
 import { useState, useRef, useEffect, useCallback } from 'react';
 import {
+  bridgeErrorMessage,
   bridgeFetch,
-  bridgeResponseError,
+  bridgeResponseJson,
   loadBridgeSettings,
 } from '../utils/bridge-client.js';
-
-async function requireBridgeJson(response) {
-  if (!response.ok) throw await bridgeResponseError(response);
-  return response.json();
-}
 
 // ---------------------------------------------------------------------------
 // Pure functions (exported for testing)
@@ -181,10 +177,10 @@ export default function useDay2Ops() {
     if (!baseUrl) return;
     try {
       const resp = await bridgeFetch(baseUrl + '/devices');
-      const data = await requireBridgeJson(resp);
+      const data = await bridgeResponseJson(resp);
       setDevices(Array.isArray(data) ? data : data.devices || []);
-    } catch (err) {
-      setError(`Failed to refresh devices: ${err.message}`);
+    } catch (error) {
+      setError(bridgeErrorMessage(error, 'Failed to refresh devices.'));
     }
   }, []);
 
@@ -222,21 +218,27 @@ export default function useDay2Ops() {
 
     const [policyResult, appResult] = await Promise.allSettled([
       bridgeFetch(baseUrl + `/devices/${encodedDevice}/policy-stats`)
-        .then(requireBridgeJson),
+        .then(bridgeResponseJson),
       bridgeFetch(baseUrl + `/devices/${encodedDevice}/app-usage`)
-        .then(requireBridgeJson),
+        .then(bridgeResponseJson),
     ]);
 
     if (policyResult.status === 'fulfilled') {
       policyStats = policyResult.value;
     } else {
-      errors.push(`policy-stats: ${policyResult.reason?.message}`);
+      errors.push(bridgeErrorMessage(
+        policyResult.reason,
+        'Policy statistics could not be loaded.',
+      ));
     }
 
     if (appResult.status === 'fulfilled') {
       appUsage = appResult.value;
     } else {
-      errors.push(`app-usage: ${appResult.reason?.message}`);
+      errors.push(bridgeErrorMessage(
+        appResult.reason,
+        'Application usage statistics could not be loaded.',
+      ));
     }
 
     if (!policyStats && !appUsage) {

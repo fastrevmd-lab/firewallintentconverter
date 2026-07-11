@@ -17,9 +17,10 @@ import os
 import time
 from pathlib import Path
 
-import yaml
-from flask import Blueprint, Flask, jsonify, request
+from flask import Blueprint, Flask, current_app, jsonify, request
+from werkzeug.exceptions import BadRequest
 
+from connection import DeviceConnectionError, connect_device
 from security import (
     install_security,
     parse_allowed_origins,
@@ -27,18 +28,17 @@ from security import (
     validate_loopback_bind,
 )
 from config_validation import (
+    CONTEXT_WRAPPERS,
+    FORBIDDEN_PATHS,
+    SUPPORTED_TOP_LEVEL,
     ConfigurationValidationError,
     validate_config_payload,
 )
+from inventory import InventoryError, load_devices, save_devices, validate_device
 
 # PyEZ imports
-from jnpr.junos import Device
 from jnpr.junos.utils.config import Config
 from jnpr.junos.exception import (
-    ConnectError,
-    ConnectAuthError,
-    ConnectRefusedError,
-    ConnectTimeoutError,
     CommitError,
     ConfigLoadError,
     LockError,
@@ -50,8 +50,40 @@ from jnpr.junos.exception import (
 # Config
 # ---------------------------------------------------------------------------
 DEVICES_FILE = Path(__file__).parent / "devices.yaml"
-CONNECT_TIMEOUT = 10   # seconds
-OPERATION_TIMEOUT = 30  # seconds
+
+INSECURE_HOST_KEY_WARNING = (
+    "WARNING: NETCONF SSH HOST-KEY VERIFICATION IS DISABLED.\n"
+    "A network attacker can impersonate managed devices. Development use only."
+)
+
+SAFE_FAILURES = {
+    "INVENTORY_UNSAFE": ("Device inventory is unsafe or invalid.", 400),
+    "DEVICE_IDENTITY_FAILED": (
+        "NETCONF device identity verification failed.",
+        502,
+    ),
+    "DEVICE_AUTHENTICATION_FAILED": (
+        "NETCONF device authentication failed.",
+        502,
+    ),
+    "DEVICE_CREDENTIAL_UNAVAILABLE": (
+        "The configured device credential is unavailable.",
+        503,
+    ),
+    "DEVICE_UNREACHABLE": ("The NETCONF device is unreachable.", 502),
+    "DEVICE_OPERATION_FAILED": (
+        "The NETCONF device operation failed.",
+        502,
+    ),
+    "UNEXPECTED_ERROR": ("An unexpected bridge error occurred.", 500),
+}
+
+SAFE_VALIDATION_PATH_SEGMENTS = frozenset(
+    {"configuration"}
+    | set(SUPPORTED_TOP_LEVEL)
+    | set(CONTEXT_WRAPPERS)
+    | {segment for path in FORBIDDEN_PATHS for segment in path}
+)
 
 bridge = Blueprint("bridge", __name__)
 
@@ -81,6 +113,17 @@ def create_app(config=None):
     app.config["BRIDGE_TOKEN"] = token
     app.config["BRIDGE_TOKEN_GENERATED"] = generated
     app.config["BRIDGE_ALLOWED_ORIGINS"] = allowed_origins
+    app.config["ALLOW_UNKNOWN_HOSTS"] = bool(
+        supplied.get("ALLOW_UNKNOWN_HOSTS", False)
+    )
+
+    @app.errorhandler(InventoryError)
+    def handle_inventory_error(_error):
+        return _safe_failure("INVENTORY_UNSAFE")
+
+    @app.errorhandler(DeviceConnectionError)
+    def handle_connection_error(error):
+        return _safe_failure(error.code)
 
     app.register_blueprint(bridge)
     install_security(
@@ -96,18 +139,13 @@ def create_app(config=None):
 # Device store helpers
 # ---------------------------------------------------------------------------
 def _load_devices():
-    """Read devices.yaml and return the list of device dicts."""
-    if not DEVICES_FILE.exists():
-        return []
-    with open(DEVICES_FILE, "r") as f:
-        data = yaml.safe_load(f) or {}
-    return data.get("devices", []) or []
+    """Read and validate the owner-only device inventory."""
+    return load_devices(DEVICES_FILE)
 
 
 def _save_devices(devices):
-    """Write devices list back to devices.yaml."""
-    with open(DEVICES_FILE, "w") as f:
-        yaml.dump({"devices": devices}, f, default_flow_style=False)
+    """Atomically write the owner-only device inventory."""
+    save_devices(DEVICES_FILE, devices)
 
 
 def _find_device(name):
@@ -120,43 +158,92 @@ def _find_device(name):
 
 
 def _safe_device_info(dev_dict):
-    """Return device info without sensitive fields (password, ssh_key)."""
+    """Return device metadata without exposing credential references."""
+    credential_ready = (
+        True
+        if dev_dict["auth_method"] == "agent"
+        else dev_dict["password_env"] in os.environ
+    )
     return {
-        "name": dev_dict.get("name", ""),
-        "host": dev_dict.get("host", ""),
-        "port": dev_dict.get("port", 830),
-        "username": dev_dict.get("username", ""),
-        "has_password": bool(dev_dict.get("password")),
-        "has_ssh_key": bool(dev_dict.get("ssh_key")),
+        "name": dev_dict["name"],
+        "host": dev_dict["host"],
+        "port": dev_dict["port"],
+        "username": dev_dict["username"],
+        "auth_method": dev_dict["auth_method"],
+        "credential_ready": credential_ready,
     }
 
 
 def _connect(dev_dict):
     """Open a PyEZ Device connection. Caller must close it."""
-    kwargs = {
-        "host": dev_dict["host"],
-        "user": dev_dict.get("username", "root"),
-        "port": dev_dict.get("port", 830),
-        "conn_open_timeout": CONNECT_TIMEOUT,
-    }
-    if dev_dict.get("ssh_key"):
-        key_path = os.path.expanduser(dev_dict["ssh_key"])
-        kwargs["ssh_private_key_file"] = key_path
-    elif dev_dict.get("password"):
-        kwargs["passwd"] = dev_dict["password"]
-
-    dev = Device(**kwargs)
-    dev.open()
-    dev.timeout = OPERATION_TIMEOUT
-    return dev
+    return connect_device(
+        dev_dict,
+        allow_unknown_hosts=bool(
+            current_app.config.get("ALLOW_UNKNOWN_HOSTS", False)
+        ),
+    )
 
 
-def _error_response(message, status=400, details=None):
+def _error_response(message, status=400, code=None, line=None, path=None):
     """Build a standard error JSON response."""
     body = {"ok": False, "error": message}
-    if details:
-        body["details"] = details
+    if code:
+        body["code"] = code
+    if isinstance(line, int):
+        body["line"] = line
+    if isinstance(path, str):
+        body["path"] = path
     return jsonify(body), status
+
+
+def _safe_failure(code, line=None, path=None):
+    """Build a stable public response without rendering private details."""
+    message, status = SAFE_FAILURES[code]
+    return _error_response(
+        message,
+        status,
+        code=code,
+        line=line,
+        path=path,
+    )
+
+
+def _close_device(dev):
+    """Best-effort close without exposing cleanup exceptions."""
+    if dev is not None:
+        try:
+            dev.close()
+        except Exception:
+            pass
+
+
+def _cleanup_config(dev, cu=None, locked=False):
+    """Best-effort unlock and close for configuration operations."""
+    if locked and cu is not None:
+        try:
+            cu.unlock()
+        except Exception:
+            pass
+    _close_device(dev)
+
+
+def _strip_submitted_text(value):
+    """Trim submitted text while leaving type rejection to inventory validation."""
+    return value.strip() if isinstance(value, str) else value
+
+
+def _safe_validation_path(path):
+    """Return only validation paths made entirely from fixed schema names."""
+    if path == "/":
+        return path
+    if not isinstance(path, str) or not path.startswith("/"):
+        return None
+    segments = path[1:].split("/")
+    if segments and all(
+        segment in SAFE_VALIDATION_PATH_SEGMENTS for segment in segments
+    ):
+        return path
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -166,7 +253,19 @@ def _error_response(message, status=400, details=None):
 @bridge.route("/health", methods=["GET"])
 def health():
     """Liveness check — matches the existing UI expectation."""
-    return jsonify({"status": "ok", "version": "1.0.0", "service": "pyez-bridge"})
+    return jsonify({
+        "status": "ok",
+        "version": "1.0.0",
+        "service": "pyez-bridge",
+        "inventory_posix_permissions": (
+            "enforced" if os.name == "posix" else "unavailable-platform"
+        ),
+        "host_key_verification": (
+            "disabled-development"
+            if current_app.config["ALLOW_UNKNOWN_HOSTS"]
+            else "strict"
+        ),
+    })
 
 
 @bridge.route("/devices", methods=["GET"])
@@ -179,6 +278,7 @@ def list_devices():
         info = _safe_device_info(dev_dict)
         info["status"] = "unknown"
         if probe:
+            dev = None
             try:
                 dev = _connect(dev_dict)
                 facts = dev.facts or {}
@@ -187,9 +287,10 @@ def list_devices():
                 info["version"] = facts.get("version", "")
                 info["serial"] = facts.get("serialnumber", "")
                 info["status"] = "connected"
-                dev.close()
             except Exception:
                 info["status"] = "unreachable"
+            finally:
+                _close_device(dev)
         result.append(info)
     return jsonify({"devices": result})
 
@@ -197,36 +298,46 @@ def list_devices():
 @bridge.route("/devices", methods=["POST"])
 def add_device():
     """Add a new device to devices.yaml."""
-    data = request.get_json(silent=True)
-    if not data:
+    if not request.is_json:
         return _error_response("Request body must be JSON.")
+    try:
+        data = request.get_json(silent=False)
+    except BadRequest:
+        return _error_response("Request body must be JSON.")
+    if not isinstance(data, dict):
+        return _safe_failure("INVENTORY_UNSAFE")
 
-    name = (data.get("name") or "").strip()
-    host = (data.get("host") or "").strip()
-    username = (data.get("username") or "").strip()
-
-    if not name:
-        return _error_response("Device name is required.")
-    if not host:
-        return _error_response("Device host/IP is required.")
-    if not username:
-        return _error_response("Username is required.")
+    try:
+        entry = validate_device({
+            "name": _strip_submitted_text(data.get("name")),
+            "host": _strip_submitted_text(data.get("host")),
+            "port": data.get("port", 830),
+            "username": _strip_submitted_text(data.get("username")),
+            "auth_method": data.get("auth_method"),
+            **(
+                {"password_env": data.get("password_env")}
+                if "password_env" in data
+                else {}
+            ),
+            **{
+                key: data[key]
+                for key in data
+                if key not in {
+                    "name",
+                    "host",
+                    "port",
+                    "username",
+                    "auth_method",
+                    "password_env",
+                }
+            },
+        })
+    except InventoryError:
+        return _safe_failure("INVENTORY_UNSAFE")
 
     devices = _load_devices()
-    # Check duplicate name
-    if any(d.get("name") == name for d in devices):
-        return _error_response(f"Device '{name}' already exists.", 409)
-
-    entry = {
-        "name": name,
-        "host": host,
-        "port": data.get("port", 830),
-        "username": username,
-    }
-    if data.get("password"):
-        entry["password"] = data["password"]
-    if data.get("ssh_key"):
-        entry["ssh_key"] = data["ssh_key"]
+    if any(d.get("name") == entry["name"] for d in devices):
+        return _error_response("Device name already exists.", 409)
 
     devices.append(entry)
     _save_devices(devices)
@@ -239,7 +350,7 @@ def remove_device(name):
     devices = _load_devices()
     filtered = [d for d in devices if d.get("name") != name]
     if len(filtered) == len(devices):
-        return _error_response(f"Device '{name}' not found.", 404)
+        return _error_response("Device not found.", 404)
     _save_devices(filtered)
     return jsonify({"ok": True})
 
@@ -249,8 +360,9 @@ def device_facts(name):
     """Fetch device facts via PyEZ."""
     dev_dict, _ = _find_device(name)
     if not dev_dict:
-        return _error_response(f"Device '{name}' not found.", 404)
+        return _error_response("Device not found.", 404)
 
+    dev = None
     try:
         dev = _connect(dev_dict)
         facts = dev.facts or {}
@@ -263,12 +375,17 @@ def device_facts(name):
             "personality": facts.get("personality", ""),
             "fqdn": facts.get("fqdn", ""),
         }
-        dev.close()
+        _close_device(dev)
         return jsonify(result)
-    except (ConnectError, ConnectAuthError, ConnectRefusedError, ConnectTimeoutError) as e:
-        return _error_response(f"Connection failed: {e}", 502)
-    except Exception as e:
-        return _error_response(f"Unexpected error: {e}", 500)
+    except DeviceConnectionError as error:
+        _close_device(dev)
+        return _safe_failure(error.code)
+    except (CommitError, ConfigLoadError, LockError, UnlockError, RpcError):
+        _close_device(dev)
+        return _safe_failure("DEVICE_OPERATION_FAILED")
+    except Exception:
+        _close_device(dev)
+        return _safe_failure("UNEXPECTED_ERROR")
 
 
 @bridge.route("/devices/<name>/unlock", methods=["POST"])
@@ -280,7 +397,7 @@ def unlock_config(name):
     """
     dev_dict, _ = _find_device(name)
     if not dev_dict:
-        return _error_response(f"Device '{name}' not found.", 404)
+        return _error_response("Device not found.", 404)
 
     dev = None
     try:
@@ -296,17 +413,17 @@ def unlock_config(name):
             cu.unlock()
         except UnlockError:
             pass
-        dev.close()
+        _close_device(dev)
         return jsonify({"ok": True, "message": "Lock cleared (if any)."})
-    except (ConnectError, ConnectAuthError, ConnectRefusedError, ConnectTimeoutError) as e:
-        return _error_response(f"Connection failed: {e}", 502)
-    except Exception as e:
-        if dev:
-            try:
-                dev.close()
-            except Exception:
-                pass
-        return _error_response(f"Unlock failed: {e}", 500)
+    except DeviceConnectionError as error:
+        _close_device(dev)
+        return _safe_failure(error.code)
+    except (CommitError, ConfigLoadError, LockError, UnlockError, RpcError):
+        _close_device(dev)
+        return _safe_failure("DEVICE_OPERATION_FAILED")
+    except Exception:
+        _close_device(dev)
+        return _safe_failure("UNEXPECTED_ERROR")
 
 
 def _acquire_lock(dev_dict, cu, dev):
@@ -318,7 +435,6 @@ def _acquire_lock(dev_dict, cu, dev):
         # Previous session may have left a stale lock.
         # Close this connection (which releases any lock *we* hold),
         # wait briefly, reconnect, and try once more.
-        print("  Lock failed — retrying after reconnect...")
         try:
             cu.rollback(0)
         except Exception:
@@ -332,10 +448,14 @@ def _acquire_lock(dev_dict, cu, dev):
         except Exception:
             pass
         time.sleep(2)
-        dev = _connect(dev_dict)
-        cu = Config(dev)
-        cu.lock()          # If this also fails, LockError propagates to caller
-        return cu, dev
+        retry_dev = _connect(dev_dict)
+        try:
+            retry_cu = Config(retry_dev)
+            retry_cu.lock()
+        except Exception:
+            _close_device(retry_dev)
+            raise
+        return retry_cu, retry_dev
 
 
 @bridge.route("/devices/<name>/load", methods=["POST"])
@@ -343,26 +463,27 @@ def load_config(name):
     """Load configuration into candidate configuration."""
     dev_dict, _ = _find_device(name)
     if not dev_dict:
-        return _error_response(f"Device '{name}' not found.", 404)
+        return _error_response("Device not found.", 404)
 
     data = request.get_json(silent=True)
-    if not data or not data.get("config"):
+    if not isinstance(data, dict) or not data.get("config"):
         return _error_response("Request body must include 'config' field.")
 
     fmt = data.get("format", "set")
     try:
         config_text = validate_config_payload(data["config"], fmt)
     except ConfigurationValidationError as error:
-        details = {"reason": error.reason}
-        if error.line is not None:
-            details["line"] = error.line
-        if error.path is not None:
-            details["path"] = error.path
         return _error_response(
-            "Configuration validation failed.", 400, details
+            "Configuration validation failed.",
+            400,
+            line=error.line,
+            path=_safe_validation_path(error.path),
         )
+    except Exception:
+        return _safe_failure("UNEXPECTED_ERROR")
 
     dev = None
+    cu = None
     locked = False
     try:
         dev = _connect(dev_dict)
@@ -375,7 +496,7 @@ def load_config(name):
             cu.load(config_text, format=fmt)
             cu.unlock()
             locked = False
-            dev.close()
+            _close_device(dev)
             total = len(config_text.splitlines())
             return jsonify({"ok": True, "message": f"Configuration loaded ({total} lines)."})
         except ConfigLoadError:
@@ -385,8 +506,8 @@ def load_config(name):
         if fmt != "set":
             cu.unlock()
             locked = False
-            dev.close()
-            return _error_response("Configuration load failed. Check syntax.", 400)
+            _close_device(dev)
+            return _safe_failure("DEVICE_OPERATION_FAILED")
 
         errors = []
         loaded = 0
@@ -398,23 +519,19 @@ def load_config(name):
             try:
                 cu.load(line, format="set")
                 loaded += 1
-            except ConfigLoadError as e:
+            except ConfigLoadError:
                 skipped += 1
-                msg = str(e).split("\n")[0][:200] if str(e) else "syntax error"
-                errors.append({"line": i, "command": line[:120], "message": msg})
-                print(f"  Line {i} SKIP: {line[:80]}")
-                print(f"    Error: {msg}")
+                errors.append({
+                    "line": i,
+                    "code": "DEVICE_OPERATION_FAILED",
+                })
 
         cu.unlock()
         locked = False
-        dev.close()
+        _close_device(dev)
 
         if loaded == 0:
-            return _error_response(
-                f"All {skipped} lines failed to load.",
-                400,
-                details=errors[:50],
-            )
+            return _safe_failure("DEVICE_OPERATION_FAILED")
 
         return jsonify({
             "ok": True,
@@ -423,33 +540,15 @@ def load_config(name):
             "loaded": loaded,
             "skipped": skipped,
         })
-    except LockError:
-        if dev:
-            try:
-                dev.close()
-            except Exception:
-                pass
-        return _error_response(
-            "Could not lock configuration after retry. "
-            "Another CLI/NETCONF session may hold the lock. "
-            "Try 'clear system commit' on the device CLI, or use the Unlock button.",
-            409,
-        )
-    except (ConnectError, ConnectAuthError, ConnectRefusedError, ConnectTimeoutError) as e:
-        return _error_response(f"Connection failed: {e}", 502)
-    except Exception as e:
-        # Always try to unlock + close on unexpected errors
-        if dev:
-            if locked:
-                try:
-                    Config(dev).unlock()
-                except Exception:
-                    pass
-            try:
-                dev.close()
-            except Exception:
-                pass
-        return _error_response(f"Unexpected error: {e}", 500)
+    except DeviceConnectionError as error:
+        _cleanup_config(dev, cu, locked)
+        return _safe_failure(error.code)
+    except (CommitError, ConfigLoadError, LockError, UnlockError, RpcError):
+        _cleanup_config(dev, cu, locked)
+        return _safe_failure("DEVICE_OPERATION_FAILED")
+    except Exception:
+        _cleanup_config(dev, cu, locked)
+        return _safe_failure("UNEXPECTED_ERROR")
 
 
 @bridge.route("/devices/<name>/diff", methods=["GET"])
@@ -457,24 +556,24 @@ def config_diff(name):
     """Show candidate vs active configuration diff."""
     dev_dict, _ = _find_device(name)
     if not dev_dict:
-        return _error_response(f"Device '{name}' not found.", 404)
+        return _error_response("Device not found.", 404)
 
     dev = None
     try:
         dev = _connect(dev_dict)
         cu = Config(dev)
         diff = cu.diff() or ""
-        dev.close()
+        _close_device(dev)
         return jsonify({"ok": True, "diff": diff})
-    except (ConnectError, ConnectAuthError, ConnectRefusedError, ConnectTimeoutError) as e:
-        return _error_response(f"Connection failed: {e}", 502)
-    except Exception as e:
-        if dev:
-            try:
-                dev.close()
-            except Exception:
-                pass
-        return _error_response(f"Unexpected error: {e}", 500)
+    except DeviceConnectionError as error:
+        _close_device(dev)
+        return _safe_failure(error.code)
+    except (CommitError, ConfigLoadError, LockError, UnlockError, RpcError):
+        _close_device(dev)
+        return _safe_failure("DEVICE_OPERATION_FAILED")
+    except Exception:
+        _close_device(dev)
+        return _safe_failure("UNEXPECTED_ERROR")
 
 
 @bridge.route("/devices/<name>/commit-check", methods=["POST"])
@@ -482,40 +581,24 @@ def commit_check(name):
     """Dry-run commit check — validates candidate without applying."""
     dev_dict, _ = _find_device(name)
     if not dev_dict:
-        return _error_response(f"Device '{name}' not found.", 404)
+        return _error_response("Device not found.", 404)
 
     dev = None
     try:
         dev = _connect(dev_dict)
         cu = Config(dev)
         cu.commit_check()
-        dev.close()
+        _close_device(dev)
         return jsonify({"ok": True, "message": "Commit check passed."})
-    except CommitError as e:
-        if dev:
-            try:
-                dev.close()
-            except Exception:
-                pass
-        errors = []
-        if hasattr(e, "errs") and e.errs:
-            for err in e.errs:
-                errors.append({
-                    "message": err.get("message", str(err)),
-                    "severity": err.get("severity", "error"),
-                })
-        else:
-            errors.append({"message": str(e), "severity": "error"})
-        return jsonify({"ok": False, "errors": errors})
-    except (ConnectError, ConnectAuthError, ConnectRefusedError, ConnectTimeoutError) as e:
-        return _error_response(f"Connection failed: {e}", 502)
-    except Exception as e:
-        if dev:
-            try:
-                dev.close()
-            except Exception:
-                pass
-        return _error_response(f"Unexpected error: {e}", 500)
+    except DeviceConnectionError as error:
+        _close_device(dev)
+        return _safe_failure(error.code)
+    except (CommitError, ConfigLoadError, LockError, UnlockError, RpcError):
+        _close_device(dev)
+        return _safe_failure("DEVICE_OPERATION_FAILED")
+    except Exception:
+        _close_device(dev)
+        return _safe_failure("UNEXPECTED_ERROR")
 
 
 @bridge.route("/devices/<name>/commit", methods=["POST"])
@@ -523,9 +606,13 @@ def commit(name):
     """Commit the candidate configuration."""
     dev_dict, _ = _find_device(name)
     if not dev_dict:
-        return _error_response(f"Device '{name}' not found.", 404)
+        return _error_response("Device not found.", 404)
 
-    data = request.get_json(silent=True) or {}
+    data = request.get_json(silent=True)
+    if data is None:
+        data = {}
+    elif not isinstance(data, dict):
+        return _error_response("Request body must be a JSON object.")
     comment = data.get("comment", "")
     confirm_minutes = data.get("confirm_minutes")
 
@@ -541,7 +628,7 @@ def commit(name):
             kwargs["confirm"] = int(confirm_minutes)
 
         cu.commit(**kwargs)
-        dev.close()
+        _close_device(dev)
 
         msg = "Configuration committed successfully."
         if confirm_minutes and int(confirm_minutes) > 0:
@@ -550,22 +637,15 @@ def commit(name):
                 f"Run 'confirm' within {confirm_minutes} minutes or the device will auto-rollback."
             )
         return jsonify({"ok": True, "message": msg, "confirm_active": bool(confirm_minutes)})
-    except CommitError as e:
-        if dev:
-            try:
-                dev.close()
-            except Exception:
-                pass
-        return _error_response(f"Commit failed: {e}", 400, details=str(e))
-    except (ConnectError, ConnectAuthError, ConnectRefusedError, ConnectTimeoutError) as e:
-        return _error_response(f"Connection failed: {e}", 502)
-    except Exception as e:
-        if dev:
-            try:
-                dev.close()
-            except Exception:
-                pass
-        return _error_response(f"Unexpected error: {e}", 500)
+    except DeviceConnectionError as error:
+        _close_device(dev)
+        return _safe_failure(error.code)
+    except (CommitError, ConfigLoadError, LockError, UnlockError, RpcError):
+        _close_device(dev)
+        return _safe_failure("DEVICE_OPERATION_FAILED")
+    except Exception:
+        _close_device(dev)
+        return _safe_failure("UNEXPECTED_ERROR")
 
 
 @bridge.route("/devices/<name>/confirm", methods=["POST"])
@@ -573,31 +653,24 @@ def confirm_commit(name):
     """Confirm a pending commit-confirm (cancel the auto-rollback timer)."""
     dev_dict, _ = _find_device(name)
     if not dev_dict:
-        return _error_response(f"Device '{name}' not found.", 404)
+        return _error_response("Device not found.", 404)
 
     dev = None
     try:
         dev = _connect(dev_dict)
         cu = Config(dev)
         cu.commit()  # A bare commit after commit-confirm confirms it
-        dev.close()
+        _close_device(dev)
         return jsonify({"ok": True, "message": "Commit confirmed. Auto-rollback cancelled."})
-    except CommitError as e:
-        if dev:
-            try:
-                dev.close()
-            except Exception:
-                pass
-        return _error_response(f"Confirm failed: {e}", 400, details=str(e))
-    except (ConnectError, ConnectAuthError, ConnectRefusedError, ConnectTimeoutError) as e:
-        return _error_response(f"Connection failed: {e}", 502)
-    except Exception as e:
-        if dev:
-            try:
-                dev.close()
-            except Exception:
-                pass
-        return _error_response(f"Unexpected error: {e}", 500)
+    except DeviceConnectionError as error:
+        _close_device(dev)
+        return _safe_failure(error.code)
+    except (CommitError, ConfigLoadError, LockError, UnlockError, RpcError):
+        _close_device(dev)
+        return _safe_failure("DEVICE_OPERATION_FAILED")
+    except Exception:
+        _close_device(dev)
+        return _safe_failure("UNEXPECTED_ERROR")
 
 
 @bridge.route("/devices/<name>/rollback", methods=["POST"])
@@ -605,9 +678,13 @@ def rollback(name):
     """Rollback the candidate configuration to the last committed state."""
     dev_dict, _ = _find_device(name)
     if not dev_dict:
-        return _error_response(f"Device '{name}' not found.", 404)
+        return _error_response("Device not found.", 404)
 
-    data = request.get_json(silent=True) or {}
+    data = request.get_json(silent=True)
+    if data is None:
+        data = {}
+    elif not isinstance(data, dict):
+        return _error_response("Request body must be a JSON object.")
     rollback_id = data.get("id", 0)
 
     dev = None
@@ -616,24 +693,17 @@ def rollback(name):
         cu = Config(dev)
         cu.rollback(int(rollback_id))
         cu.commit(comment="Rollback via PyEZ Bridge")
-        dev.close()
+        _close_device(dev)
         return jsonify({"ok": True, "message": f"Rolled back to configuration {rollback_id}."})
-    except (CommitError, RpcError) as e:
-        if dev:
-            try:
-                dev.close()
-            except Exception:
-                pass
-        return _error_response(f"Rollback failed: {e}", 400, details=str(e))
-    except (ConnectError, ConnectAuthError, ConnectRefusedError, ConnectTimeoutError) as e:
-        return _error_response(f"Connection failed: {e}", 502)
-    except Exception as e:
-        if dev:
-            try:
-                dev.close()
-            except Exception:
-                pass
-        return _error_response(f"Unexpected error: {e}", 500)
+    except DeviceConnectionError as error:
+        _close_device(dev)
+        return _safe_failure(error.code)
+    except (CommitError, ConfigLoadError, LockError, UnlockError, RpcError):
+        _close_device(dev)
+        return _safe_failure("DEVICE_OPERATION_FAILED")
+    except Exception:
+        _close_device(dev)
+        return _safe_failure("UNEXPECTED_ERROR")
 
 
 # ---------------------------------------------------------------------------
@@ -652,7 +722,7 @@ def pull_config(name):
     """
     dev_dict, _ = _find_device(name)
     if not dev_dict:
-        return _error_response(f"Device '{name}' not found.", 404)
+        return _error_response("Device not found.", 404)
 
     fmt = request.args.get("format", "set").lower()
     if fmt not in ("set", "xml", "text"):
@@ -678,7 +748,7 @@ def pull_config(name):
             rpc_reply = dev.rpc.get_config(options={"format": "text"})
             config_text = rpc_reply.text or ""
 
-        dev.close()
+        _close_device(dev)
         dev = None
 
         return jsonify({
@@ -689,17 +759,15 @@ def pull_config(name):
             "host": dev_dict.get("host", ""),
         })
 
-    except (ConnectError, ConnectAuthError, ConnectRefusedError, ConnectTimeoutError) as e:
-        return _error_response(f"Connection failed: {e}", 502)
-    except RpcError as e:
-        return _error_response(f"RPC error: {e}", 400, details=str(e))
-    except Exception as e:
-        if dev:
-            try:
-                dev.close()
-            except Exception:
-                pass
-        return _error_response(f"Unexpected error: {e}", 500)
+    except DeviceConnectionError as error:
+        _close_device(dev)
+        return _safe_failure(error.code)
+    except (CommitError, ConfigLoadError, LockError, UnlockError, RpcError):
+        _close_device(dev)
+        return _safe_failure("DEVICE_OPERATION_FAILED")
+    except Exception:
+        _close_device(dev)
+        return _safe_failure("UNEXPECTED_ERROR")
 
 
 # ---------------------------------------------------------------------------
@@ -715,7 +783,7 @@ def policy_stats(name):
     """
     dev_dict, _ = _find_device(name)
     if not dev_dict:
-        return _error_response(f"Device '{name}' not found.", 404)
+        return _error_response("Device not found.", 404)
 
     dev = None
     try:
@@ -725,7 +793,7 @@ def policy_stats(name):
         rpc_reply = dev.rpc.cli("show security policies statistics detail", format="text")
         raw_output = rpc_reply.text or ""
 
-        dev.close()
+        _close_device(dev)
         dev = None
 
         # Parse the text output into structured data
@@ -779,17 +847,15 @@ def policy_stats(name):
             "raw_output": raw_output[:10000],  # Cap raw output at 10KB
         })
 
-    except (ConnectError, ConnectAuthError, ConnectRefusedError, ConnectTimeoutError) as e:
-        return _error_response(f"Connection failed: {e}", 502)
-    except RpcError as e:
-        return _error_response(f"RPC error: {e}", 400, details=str(e))
-    except Exception as e:
-        if dev:
-            try:
-                dev.close()
-            except Exception:
-                pass
-        return _error_response(f"Unexpected error: {e}", 500)
+    except DeviceConnectionError as error:
+        _close_device(dev)
+        return _safe_failure(error.code)
+    except (CommitError, ConfigLoadError, LockError, UnlockError, RpcError):
+        _close_device(dev)
+        return _safe_failure("DEVICE_OPERATION_FAILED")
+    except Exception:
+        _close_device(dev)
+        return _safe_failure("UNEXPECTED_ERROR")
 
 
 # ---------------------------------------------------------------------------
@@ -808,7 +874,7 @@ def app_usage(name):
     """
     dev_dict, _ = _find_device(name)
     if not dev_dict:
-        return _error_response(f"Device '{name}' not found.", 404)
+        return _error_response("Device not found.", 404)
 
     dev = None
     errors = []
@@ -850,8 +916,8 @@ def app_usage(name):
                     "session_count": 0,
                     "byte_count": 0,
                 })
-        except Exception as exc:
-            errors.append(f"hit-count RPC failed: {exc}")
+        except Exception:
+            errors.append("hit-count RPC failed.")
 
         # ------------------------------------------------------------------ #
         # RPC 2: show security flow session summary
@@ -884,10 +950,10 @@ def app_usage(name):
                     "application": parts[0],
                     "sessions": session_count,
                 })
-        except Exception as exc:
-            errors.append(f"flow session summary RPC failed: {exc}")
+        except Exception:
+            errors.append("flow session summary RPC failed.")
 
-        dev.close()
+        _close_device(dev)
         dev = None
 
         response = {
@@ -902,17 +968,15 @@ def app_usage(name):
 
         return jsonify(response)
 
-    except (ConnectError, ConnectAuthError, ConnectRefusedError, ConnectTimeoutError) as e:
-        return _error_response(f"Connection failed: {e}", 502)
-    except RpcError as e:
-        return _error_response(f"RPC error: {e}", 400, details=str(e))
-    except Exception as e:
-        if dev:
-            try:
-                dev.close()
-            except Exception:
-                pass
-        return _error_response(f"Unexpected error: {e}", 500)
+    except DeviceConnectionError as error:
+        _close_device(dev)
+        return _safe_failure(error.code)
+    except (CommitError, ConfigLoadError, LockError, UnlockError, RpcError):
+        _close_device(dev)
+        return _safe_failure("DEVICE_OPERATION_FAILED")
+    except Exception:
+        _close_device(dev)
+        return _safe_failure("UNEXPECTED_ERROR")
 
 
 # ---------------------------------------------------------------------------
@@ -933,6 +997,11 @@ def main(argv=None):
         default=None,
         help="Exact browser origin to allow; repeat for multiple origins",
     )
+    parser.add_argument(
+        "--insecure-allow-unknown-hosts",
+        action="store_true",
+        help="DEVELOPMENT ONLY: disable NETCONF SSH host-key verification",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -945,20 +1014,21 @@ def main(argv=None):
             {
                 "BRIDGE_TOKEN": os.environ.get("PYEZ_BRIDGE_TOKEN"),
                 "BRIDGE_ALLOWED_ORIGINS": allowed_origins,
+                "ALLOW_UNKNOWN_HOSTS": args.insecure_allow_unknown_hosts,
             }
         )
     except ValueError as exc:
         parser.error(str(exc))
 
     print(f"PyEZ Bridge starting on {bind_address}:{args.port}")
-    print(f"Device config: {DEVICES_FILE}")
     print(f"Devices configured: {len(_load_devices())}")
-    print(f"Allowed browser origins: {', '.join(allowed_origins)}")
+    if args.insecure_allow_unknown_hosts:
+        print(INSECURE_HOST_KEY_WARNING)
     if runnable_app.config["BRIDGE_TOKEN_GENERATED"]:
         print("Bridge access token (valid for this run):")
         print(runnable_app.config["BRIDGE_TOKEN"])
     else:
-        print("Bridge access token loaded from PYEZ_BRIDGE_TOKEN.")
+        print("Bridge access token loaded from configured source.")
     runnable_app.run(host=bind_address, port=args.port, debug=False)
 
 

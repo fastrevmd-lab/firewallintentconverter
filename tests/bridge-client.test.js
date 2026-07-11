@@ -9,6 +9,7 @@ import {
   normalizeBridgeUrl,
   saveBridgeSettings,
 } from '../public/utils/bridge-client.js';
+import * as bridgeClient from '../public/utils/bridge-client.js';
 
 
 function makeStorage() {
@@ -159,13 +160,125 @@ await test('maps authentication, origin, and rate-limit responses', async () => 
   }
 });
 
-await test('uses a server JSON error for other unsuccessful responses', async () => {
-  const response = new Response(JSON.stringify({ error: 'Device was not found.' }), {
-    status: 404,
-    headers: { 'Content-Type': 'application/json' },
-  });
-  const error = await bridgeResponseError(response);
-  equal(error.message, 'Device was not found.', 'server error message');
+await test('maps only recognized response codes and never remote diagnostics', async () => {
+  const sentinel = 'SENTINEL_REMOTE_DIAGNOSTIC';
+  const cases = [
+    [400, 'INVENTORY_UNSAFE', 'Device inventory is unsafe or invalid.'],
+    [502, 'DEVICE_IDENTITY_FAILED', 'NETCONF device identity verification failed.'],
+    [502, 'DEVICE_AUTHENTICATION_FAILED', 'NETCONF device authentication failed.'],
+    [503, 'DEVICE_CREDENTIAL_UNAVAILABLE', 'The configured device credential is unavailable.'],
+    [502, 'DEVICE_UNREACHABLE', 'The NETCONF device is unreachable.'],
+    [502, 'DEVICE_OPERATION_FAILED', 'The NETCONF device operation failed.'],
+    [500, 'UNEXPECTED_ERROR', 'An unexpected bridge error occurred.'],
+  ];
+  for (const [status, code, expected] of cases) {
+    const response = new Response(JSON.stringify({
+      code,
+      error: sentinel,
+      details: [{ message: sentinel, command: sentinel }],
+      fingerprint: sentinel,
+      message: { nested: sentinel },
+    }), {
+      status,
+      headers: { 'Content-Type': 'application/json' },
+    });
+    const error = await bridgeResponseError(response);
+    equal(error.message, expected, code);
+    assert(!error.message.includes(sentinel), `${code} reflected diagnostics`);
+  }
+});
+
+await test('uses fixed local fallbacks for unknown codes and malformed bodies', async () => {
+  const unknown = await bridgeResponseError(new Response(JSON.stringify({
+    code: 'SENTINEL_UNKNOWN_CODE',
+    error: 'SENTINEL_REMOTE_ERROR',
+  }), { status: 418 }));
+  equal(unknown.message, 'Bridge request failed.', 'unknown response fallback');
+
+  const malformed = await bridgeResponseError(new Response(
+    '{"code":"UNEXPECTED_ERROR","error":"SENTINEL_PARSER',
+    { status: 500, headers: { 'Content-Type': 'application/json' } },
+  ));
+  equal(malformed.message, 'Bridge encountered an internal error.', 'malformed response fallback');
+  assert(!malformed.message.includes('SENTINEL'), 'parser input was reflected');
+});
+
+await test('shared response helper rejects failures and malformed success JSON safely', async () => {
+  const failures = [
+    new Response(JSON.stringify({
+      code: 'DEVICE_OPERATION_FAILED',
+      error: 'SENTINEL_ERROR',
+      details: 'SENTINEL_DETAILS',
+      command: 'SENTINEL_COMMAND',
+      fingerprint: 'SENTINEL_FINGERPRINT',
+    }), { status: 502 }),
+    new Response('SENTINEL_PARSER_ERROR', { status: 200 }),
+  ];
+  const expected = [
+    'The NETCONF device operation failed.',
+    'Bridge returned an invalid JSON response.',
+  ];
+  for (let index = 0; index < failures.length; index += 1) {
+    let caught;
+    try {
+      await bridgeClient.bridgeResponseJson(failures[index]);
+    } catch (error) {
+      caught = error;
+    }
+    equal(caught?.message, expected[index], `failure ${index}`);
+    assert(!caught?.message.includes('SENTINEL'), `failure ${index} reflected input`);
+  }
+});
+
+await test('shared response helper preserves successful operational payloads', async () => {
+  const operational = {
+    ok: true,
+    config: 'set system host-name edge',
+    diff: '+ system host-name edge',
+    devices: [{ name: 'edge', host: '192.0.2.10' }],
+    policies: [{ name: 'allow-web', hit_count: 7 }],
+    app_sessions: [{ application: 'junos-https', sessions: 2 }],
+  };
+  const parsed = await bridgeClient.bridgeResponseJson(new Response(
+    JSON.stringify(operational),
+    { status: 200 },
+  ));
+  equal(JSON.stringify(parsed), JSON.stringify(operational), 'operational payload');
+});
+
+await test('arbitrary network Error messages are replaced with local copy', () => {
+  const message = bridgeClient.bridgeErrorMessage(
+    new Error('SENTINEL_NETWORK_ERROR password fingerprint command'),
+    'Connection failed. Check the bridge service and try again.',
+  );
+  equal(
+    message,
+    'Connection failed. Check the bridge service and try again.',
+    'network failure fallback',
+  );
+  assert(!message.includes('SENTINEL'), 'network error was reflected');
+});
+
+await test('line-load warnings expose only numeric lines and recognized categories', () => {
+  const warnings = bridgeClient.safeBridgeLoadWarnings([
+    {
+      line: 17,
+      code: 'DEVICE_OPERATION_FAILED',
+      error: 'SENTINEL_ERROR',
+      details: 'SENTINEL_DETAILS',
+      command: 'SENTINEL_COMMAND',
+      message: 'SENTINEL_MESSAGE',
+      fingerprint: 'SENTINEL_FINGERPRINT',
+    },
+    { line: '18', code: 'DEVICE_OPERATION_FAILED' },
+    { line: 19, code: 'SENTINEL_UNKNOWN_CODE' },
+  ]);
+  equal(JSON.stringify(warnings), JSON.stringify([{
+    line: 17,
+    code: 'DEVICE_OPERATION_FAILED',
+    category: 'The NETCONF device operation failed.',
+  }]), 'safe warnings');
+  assert(!JSON.stringify(warnings).includes('SENTINEL'), 'warning diagnostics were reflected');
 });
 
 await test('aborts a request after its configured timeout', async () => {
@@ -184,19 +297,31 @@ await test('aborts a request after its configured timeout', async () => {
   equal(name, 'AbortError', 'timeout abort error');
 });
 
-await test('all browser bridge callers use the shared authenticated client', async () => {
+await test('all response-reading bridge callers use the shared JSON boundary', async () => {
   const callers = {
-    'public/hooks/usePush.js': 'bridgeFetch',
-    'public/hooks/useDay2Ops.js': 'bridgeFetch',
-    'public/components/LLMSettings.jsx': 'bridgeFetch',
-    'public/components/PullModal.jsx': 'bridgeFetch',
-    'public/components/SRXOutput.jsx': 'loadBridgeSettings',
-    'public/components/layout/WorkflowStepper.jsx': 'loadBridgeSettings',
+    'public/hooks/usePush.js': 'bridgeResponseJson',
+    'public/hooks/useDay2Ops.js': 'bridgeResponseJson',
+    'public/components/LLMSettings.jsx': 'bridgeResponseJson',
+    'public/components/PullModal.jsx': 'bridgeResponseJson',
   };
   for (const [file, sharedHelper] of Object.entries(callers)) {
     const source = await readFile(new URL(`../${file}`, import.meta.url), 'utf8');
     assert(!/\bfetch\s*\(/.test(source), `${file} still calls raw fetch`);
     assert(source.includes(sharedHelper), `${file} does not use ${sharedHelper}`);
+    assert(!/\bresponse\.json\(\)|\bresp\.json\(\)|\bdevResp\.json\(\)|\bdeviceResponse\.json\(\)|\bhealthResponse\.json\(\)|\bprobeResponse\.json\(\)/.test(source), `${file} parses bridge JSON directly`);
+  }
+});
+
+await test('push, pull, and Day 2 UI paths never render remote diagnostics', async () => {
+  const files = [
+    'public/hooks/usePush.js',
+    'public/components/PushModal.jsx',
+    'public/hooks/useDay2Ops.js',
+    'public/components/PullModal.jsx',
+  ];
+  for (const file of files) {
+    const source = await readFile(new URL(`../${file}`, import.meta.url), 'utf8');
+    assert(!/\b(?:err|error|reason|data|w)\?*\.(?:error|details|command|fingerprint|message)\b/.test(source), `${file} reads a remote diagnostic field`);
   }
 });
 

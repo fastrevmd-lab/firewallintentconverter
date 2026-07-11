@@ -1,0 +1,12 @@
+devices:
+  - name: srx-lab-01
+    host: 192.0.2.10
+    port: 830
+    username: netops
+    auth_method: agent
+  - name: srx-prod-01
+    host: 198.51.100.10
+    port: 830
+    username: automation
+    auth_method: password-env
+    password_env: FIC_SRX_PROD_PASSWORD

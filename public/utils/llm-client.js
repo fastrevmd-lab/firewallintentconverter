@@ -1,3 +1,4 @@
+import { loadLLMSettings } from './llm-settings.js';
 import { safeJsonParse } from './safe-json.js';
 import { mapVendorApp, isLoaded as appMappingsLoaded } from '../../src/utils/app-mappings.js';
 
@@ -5,7 +6,7 @@ import { mapVendorApp, isLoaded as appMappingsLoaded } from '../../src/utils/app
  * Browser-Side LLM API Client
  * ==============================
  * Makes API calls directly from the browser to LLM providers.
- * API keys are read from localStorage ('llm-settings') and never touch the server.
+ * API keys are read through the browser settings boundary and never touch the server.
  *
  * Supported providers:
  *   - Claude (Anthropic) — api.anthropic.com/v1/messages
@@ -420,7 +421,7 @@ Source firewalls often include security profiles (AV, IPS, URL filtering, sandbo
 
 // ---------------------------------------------------------------------------
 // System Prompt Loader — loads from static/prompts/*.txt files on disk,
-// with localStorage overrides and hardcoded defaults as fallback.
+// with saved overrides and hardcoded defaults as fallback.
 // ---------------------------------------------------------------------------
 
 /** Cache for prompt files loaded from static/prompts/ */
@@ -466,7 +467,7 @@ _loadPromptFiles();
 
 /**
  * Loads the system prompt. Priority order:
- * 1. User-edited prompt in localStorage (Settings UI)
+ * 1. User-edited prompt in saved settings (Settings UI)
  * 2. Prompt file from static/prompts/*.txt (editable on disk)
  * 3. Hardcoded default constant
  *
@@ -487,34 +488,21 @@ export function loadSystemPrompt(type = 'fullReview', sourceVendor = null) {
     greenfield: 'greenfieldSystemPrompt',
     translate: 'translateSystemPrompt',
   };
+  const settings = loadSettings();
 
   // For translate type with a vendor, check vendor-specific sources first
   if (type === 'translate' && sourceVendor && VENDOR_PROMPT_KEYS.includes(sourceVendor)) {
-    // 1a. Check localStorage for vendor-specific override
-    try {
-      const saved = localStorage.getItem('llm-settings');
-      if (saved) {
-        const settings = safeJsonParse(saved);
-        const vendorKey = `translateSystemPrompt_${sourceVendor}`;
-        const prompt = settings[vendorKey];
-        if (prompt && prompt.trim()) return prompt;
-      }
-    } catch { /* ignore */ }
+    // 1a. Check saved settings for vendor-specific override
+    const override = settings[`translateSystemPrompt_${sourceVendor}`];
+    if (override && override.trim()) return override;
 
     // 2a. Check vendor-specific file cache
     if (_vendorPromptCache[sourceVendor]) return _vendorPromptCache[sourceVendor];
   }
 
-  // 1. Check localStorage (user edits in Settings UI — generic translate prompt)
-  try {
-    const saved = localStorage.getItem('llm-settings');
-    if (saved) {
-      const settings = safeJsonParse(saved);
-      const key = keys[type] || keys.fullReview;
-      const prompt = settings[key];
-      if (prompt && prompt.trim()) return prompt;
-    }
-  } catch { /* ignore */ }
+  // 1. Check saved settings (user edits in Settings UI — generic translate prompt)
+  const prompt = settings[keys[type] || keys.fullReview];
+  if (prompt && prompt.trim()) return prompt;
 
   // 2. Check file cache (loaded from static/prompts/*.txt)
   if (_promptFileCache[type]) return _promptFileCache[type];
@@ -530,16 +518,10 @@ export function loadSystemPrompt(type = 'fullReview', sourceVendor = null) {
 export function loadVendorTranslatePrompt(vendor) {
   if (!vendor || !VENDOR_PROMPT_KEYS.includes(vendor)) return null;
 
-  // 1. Check localStorage for vendor-specific override
-  try {
-    const saved = localStorage.getItem('llm-settings');
-    if (saved) {
-      const settings = safeJsonParse(saved);
-      const vendorKey = `translateSystemPrompt_${vendor}`;
-      const prompt = settings[vendorKey];
-      if (prompt && prompt.trim()) return prompt;
-    }
-  } catch { /* ignore */ }
+  // 1. Check saved settings for vendor-specific override
+  const settings = loadSettings();
+  const override = settings[`translateSystemPrompt_${vendor}`];
+  if (override && override.trim()) return override;
 
   // 2. Check vendor-specific file cache
   if (_vendorPromptCache[vendor]) return _vendorPromptCache[vendor];
@@ -662,8 +644,7 @@ async function callClaude(settings, userPrompt, systemPrompt) {
   });
 
   if (!response.ok) {
-    const err = await response.json().catch(() => ({}));
-    throw new Error(err.error?.message || `Claude API error: ${response.status}`);
+    throw new Error(`Claude API error: ${response.status}`);
   }
 
   const data = await response.json();
@@ -694,8 +675,7 @@ async function callOpenAI(settings, userPrompt, systemPrompt) {
   });
 
   if (!response.ok) {
-    const err = await response.json().catch(() => ({}));
-    throw new Error(err.error?.message || `OpenAI API error: ${response.status}`);
+    throw new Error(`OpenAI API error: ${response.status}`);
   }
 
   const data = await response.json();
@@ -729,8 +709,7 @@ async function callGemini(settings, userPrompt, systemPrompt) {
   );
 
   if (!response.ok) {
-    const err = await response.json().catch(() => ({}));
-    throw new Error(err.error?.message || `Gemini API error: ${response.status}`);
+    throw new Error(`Gemini API error: ${response.status}`);
   }
 
   const data = await response.json();
@@ -869,8 +848,7 @@ async function callClaudeChat(settings, messages, systemPrompt) {
   });
 
   if (!response.ok) {
-    const err = await response.json().catch(() => ({}));
-    throw new Error(err.error?.message || `Claude API error: ${response.status}`);
+    throw new Error(`Claude API error: ${response.status}`);
   }
 
   const data = await response.json();
@@ -901,8 +879,7 @@ async function callOpenAIChat(settings, messages, systemPrompt) {
   });
 
   if (!response.ok) {
-    const err = await response.json().catch(() => ({}));
-    throw new Error(err.error?.message || `OpenAI API error: ${response.status}`);
+    throw new Error(`OpenAI API error: ${response.status}`);
   }
 
   const data = await response.json();
@@ -941,8 +918,7 @@ async function callGeminiChat(settings, messages, systemPrompt) {
   );
 
   if (!response.ok) {
-    const err = await response.json().catch(() => ({}));
-    throw new Error(err.error?.message || `Gemini API error: ${response.status}`);
+    throw new Error(`Gemini API error: ${response.status}`);
   }
 
   const data = await response.json();
@@ -1040,11 +1016,8 @@ async function callCustomChat(settings, messages, systemPrompt) {
 // ---------------------------------------------------------------------------
 
 function loadSettings() {
-  try {
-    const saved = localStorage.getItem('llm-settings');
-    if (saved) return safeJsonParse(saved);
-  } catch { /* ignore */ }
-  return {};
+  try { return loadLLMSettings(); }
+  catch { return {}; }
 }
 
 // ---------------------------------------------------------------------------

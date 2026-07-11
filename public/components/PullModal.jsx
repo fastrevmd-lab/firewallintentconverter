@@ -7,8 +7,9 @@
  */
 import React, { useState, useCallback } from 'react';
 import {
+  bridgeErrorMessage,
   bridgeFetch,
-  bridgeResponseError,
+  bridgeResponseJson,
   loadBridgeSettings,
   normalizeBridgeUrl,
   saveBridgeSettings,
@@ -36,13 +37,15 @@ export default function PullModal({ onClose, onConfigPulled }) {
       saveBridgeSettings({ url, token: loadBridgeSettings().token });
       setBridgeUrl(url);
       const resp = await bridgeFetch(`${url}/devices`);
-      if (!resp.ok) throw await bridgeResponseError(resp);
-      const data = await resp.json();
+      const data = await bridgeResponseJson(resp);
       setDevices(data.devices || []);
       if (data.devices?.length > 0) setSelectedDevice(data.devices[0].name);
       setStatus('');
-    } catch (err) {
-      setError(`Failed to connect to bridge: ${err.message}`);
+    } catch (caught) {
+      setError(bridgeErrorMessage(
+        caught,
+        'Failed to connect to the bridge. Check the service and try again.',
+      ));
       setStatus('error');
     }
   }, [bridgeUrl]);
@@ -61,13 +64,16 @@ export default function PullModal({ onClose, onConfigPulled }) {
         {},
         { timeout: 60000 },
       );
-      if (!resp.ok) throw await bridgeResponseError(resp);
-      const data = await resp.json();
-      if (!data.ok) throw new Error(data.error || 'Pull failed');
+      const data = await bridgeResponseJson(resp);
+      if (!data.ok) {
+        setError('Configuration pull failed.');
+        setStatus('error');
+        return;
+      }
       setPulledConfig(data.config || '');
       setStatus('done');
-    } catch (err) {
-      setError(`Pull failed: ${err.message}`);
+    } catch (caught) {
+      setError(bridgeErrorMessage(caught, 'Configuration pull failed.'));
       setStatus('error');
     }
   }, [selectedDevice, bridgeUrl, pullFormat]);

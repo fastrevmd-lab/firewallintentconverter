@@ -8,6 +8,38 @@ export const OLD_BRIDGE_SETTINGS_STORAGE_KEY = 'mcp-settings';
 export const BRIDGE_TOKEN_SESSION_KEY = 'pyez-bridge-token';
 export const DEFAULT_BRIDGE_TIMEOUT = 30000;
 
+const BRIDGE_CODE_MESSAGES = new Map([
+  ['INVENTORY_UNSAFE', 'Device inventory is unsafe or invalid.'],
+  ['DEVICE_IDENTITY_FAILED', 'NETCONF device identity verification failed.'],
+  ['DEVICE_AUTHENTICATION_FAILED', 'NETCONF device authentication failed.'],
+  ['DEVICE_CREDENTIAL_UNAVAILABLE', 'The configured device credential is unavailable.'],
+  ['DEVICE_UNREACHABLE', 'The NETCONF device is unreachable.'],
+  ['DEVICE_OPERATION_FAILED', 'The NETCONF device operation failed.'],
+  ['UNEXPECTED_ERROR', 'An unexpected bridge error occurred.'],
+]);
+
+const BRIDGE_STATUS_MESSAGES = new Map([
+  [400, 'Bridge rejected the request.'],
+  [401, 'Bridge access token is missing or invalid.'],
+  [403, 'This browser origin is not allowed by the bridge.'],
+  [404, 'The requested bridge resource was not found.'],
+  [409, 'Bridge request conflicts with the current device state.'],
+  [413, 'Bridge request is too large.'],
+  [429, 'Bridge request limit reached. Wait and try again.'],
+  [500, 'Bridge encountered an internal error.'],
+  [502, 'The bridge could not complete the device request.'],
+  [503, 'The bridge service is temporarily unavailable.'],
+]);
+
+class BridgeClientError extends Error {
+  constructor(message, { code = null, status = null } = {}) {
+    super(message);
+    this.name = 'BridgeClientError';
+    this.code = code;
+    this.status = status;
+  }
+}
+
 
 /** Normalize a bridge base URL to a credential-free HTTP(S) origin. */
 export function normalizeBridgeUrl(raw) {
@@ -141,29 +173,75 @@ export async function bridgeFetch(url, options = {}, requestOptions = {}) {
 }
 
 
-/** Convert an unsuccessful bridge response into an actionable Error. */
+/** Convert an unsuccessful bridge response into a locally defined Error. */
 export async function bridgeResponseError(response) {
-  const messages = {
-    401: 'Bridge access token is missing or invalid.',
-    403: 'This browser origin is not allowed by the bridge.',
-    429: 'Bridge request limit reached. Wait and try again.',
-  };
-  if (messages[response.status]) {
-    const error = new Error(messages[response.status]);
-    error.status = response.status;
-    return error;
-  }
-
-  let message = '';
+  let code = null;
   try {
     const data = await response.clone().json();
-    message = typeof data?.error === 'string' ? data.error : '';
+    if (
+      data
+      && typeof data === 'object'
+      && typeof data.code === 'string'
+      && BRIDGE_CODE_MESSAGES.has(data.code)
+    ) {
+      code = data.code;
+    }
   } catch {
-    // Fall through to the status-based generic message.
+    // Malformed bodies fall through to a fixed status-based message.
   }
-  const error = new Error(
-    message || `Bridge request failed with HTTP ${response.status}.`,
+  const message = (
+    (code && BRIDGE_CODE_MESSAGES.get(code))
+    || BRIDGE_STATUS_MESSAGES.get(response.status)
+    || 'Bridge request failed.'
   );
-  error.status = response.status;
-  return error;
+  return new BridgeClientError(message, { code, status: response.status });
+}
+
+
+/** Parse one bridge response through the shared diagnostic trust boundary. */
+export async function bridgeResponseJson(response) {
+  if (!response.ok) throw await bridgeResponseError(response);
+  try {
+    return await response.json();
+  } catch {
+    throw new BridgeClientError('Bridge returned an invalid JSON response.', {
+      code: 'INVALID_JSON_RESPONSE',
+      status: response.status,
+    });
+  }
+}
+
+
+/** Return a mapped bridge message, never an arbitrary caught Error message. */
+export function bridgeErrorMessage(error, fallback = 'Bridge operation failed.') {
+  return error instanceof BridgeClientError ? error.message : fallback;
+}
+
+
+/** Test a mapped bridge response status without trusting arbitrary errors. */
+export function isBridgeResponseStatus(error, status) {
+  return error instanceof BridgeClientError && error.status === status;
+}
+
+
+/** Keep only actionable, closed-category line-load warnings. */
+export function safeBridgeLoadWarnings(warnings) {
+  if (!Array.isArray(warnings)) return [];
+  return warnings.flatMap((warning) => {
+    if (
+      !warning
+      || typeof warning !== 'object'
+      || !Number.isSafeInteger(warning.line)
+      || warning.line < 1
+      || typeof warning.code !== 'string'
+      || !BRIDGE_CODE_MESSAGES.has(warning.code)
+    ) {
+      return [];
+    }
+    return [{
+      line: warning.line,
+      code: warning.code,
+      category: BRIDGE_CODE_MESSAGES.get(warning.code),
+    }];
+  });
 }

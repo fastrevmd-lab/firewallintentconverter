@@ -9,13 +9,19 @@
  */
 
 // ---------------------------------------------------------------------------
-// Minimal DOM/localStorage stubs for the browser-side module
+// Minimal DOM/storage stubs for the browser-side module
 // ---------------------------------------------------------------------------
 const _store = {};
 global.localStorage = {
   getItem: (k) => _store[k] || null,
   setItem: (k, v) => { _store[k] = v; },
   removeItem: (k) => { delete _store[k]; },
+};
+const _sessionStore = {};
+global.sessionStorage = {
+  getItem: (k) => _sessionStore[k] || null,
+  setItem: (k, v) => { _sessionStore[k] = v; },
+  removeItem: (k) => { delete _sessionStore[k]; },
 };
 global.fetch = async () => ({ ok: false, status: 404, json: async () => ({}) });
 
@@ -343,12 +349,12 @@ assert(wrappedResult[0].name === 'wrapped', 'preserves name from wrapped respons
 // ---------------------------------------------------------------------------
 section('translatePolicies — mocked');
 
-// Setup localStorage with a provider so getLLMStatus passes
+// Setup storage with a provider so getLLMStatus passes
 localStorage.setItem('llm-settings', JSON.stringify({
   provider: 'custom',
   baseUrl: 'http://localhost:9999',
-  apiKey: 'test-key',
 }));
+sessionStorage.setItem('llm-api-key', 'test-key');
 
 // Mock fetch to return a valid LLM translation response
 const translatedPolicies = [
@@ -435,8 +441,8 @@ async function testTranslatePolicies() {
   localStorage.setItem('llm-settings', JSON.stringify({
     provider: 'custom',
     baseUrl: 'http://localhost:9999',
-    apiKey: 'test-key',
   }));
+  sessionStorage.setItem('llm-api-key', 'test-key');
 
   // 7d. Large ruleset triggers chunking (>30 rules)
   const bigPolicies = [];

@@ -14,6 +14,8 @@ Browser (React SPA) ── authenticated HTTP ──> PyEZ Bridge (loopback:8830
 - Request bodies are limited to 10 MiB.
 - Reads are limited to 120 requests/minute and mutations to 30 requests/minute per source address.
 - The browser keeps the access token in `sessionStorage`; closing the browser session removes it.
+- The device inventory contains connection metadata and credential references only; passwords and private-key material are rejected.
+- NETCONF SSH host keys are verified against the operator's OpenSSH known-hosts data by default.
 - Remote/shared deployment and wildcard CORS are not supported. Do not place this development server directly on a network.
 
 ## Prerequisites
@@ -32,30 +34,73 @@ venv/bin/pip install -r requirements.txt
 
 ## Configure devices
 
-Edit `devices.yaml`:
+Create the runtime inventory with owner-only permissions before editing it:
+
+```bash
+cp devices.example.yaml devices.yaml
+chmod 600 devices.yaml
+```
+
+The inventory supports SSH-agent authentication and references to password environment variables. It never stores passwords or private-key paths:
 
 ```yaml
 devices:
   - name: srx-lab-01
-    host: 192.168.1.1
-    port: 830
-    username: admin
-    password: replace-me
-
-  - name: srx-prod-fw
-    host: 10.0.0.1
+    host: 192.0.2.10
     port: 830
     username: netops
-    ssh_key: ~/.ssh/id_rsa
+    auth_method: agent
+
+  - name: srx-prod-01
+    host: 198.51.100.10
+    port: 830
+    username: automation
+    auth_method: password-env
+    password_env: FIC_SRX_PROD_PASSWORD
 ```
 
-The UI can also add and remove devices. The file currently contains credentials, so restrict it to its owner:
+For agent authentication, start an agent and load the key before starting the bridge:
 
 ```bash
-chmod 600 devices.yaml
+eval "$(ssh-agent -s)"
+ssh-add ~/.ssh/pyez_rsa
 ```
 
-Credential-at-rest and NETCONF host-key improvements are tracked separately in GitHub issue #9.
+For password-environment authentication, define the referenced variable in the bridge process environment:
+
+```bash
+export FIC_SRX_PROD_PASSWORD='set this in the bridge process environment'
+```
+
+An OpenSSH host entry can select an identity outside the project inventory:
+
+```sshconfig
+Host srx-lab-01
+  HostName 192.0.2.10
+  Port 830
+  User netops
+  IdentityFile ~/.ssh/pyez_rsa
+  IdentitiesOnly yes
+```
+
+### Enroll verified NETCONF host keys
+
+Collect a candidate host key and display its fingerprint:
+
+```bash
+ssh-keyscan -p 830 192.0.2.10 > /tmp/srx-lab-01.hostkey
+ssh-keygen -lf /tmp/srx-lab-01.hostkey
+```
+
+The key returned by `ssh-keyscan` is untrusted. Compare its fingerprint through an independent channel, such as the device console or an authoritative asset-management record. Only after the fingerprint matches may you append the collected entry to `~/.ssh/known_hosts`. OpenSSH stores a nonstandard-port entry using bracket notation, for example `[192.0.2.10]:830`.
+
+Unknown or changed keys fail with `DEVICE_IDENTITY_FAILED`. Investigate that failure; do not delete and re-enroll the known-host entry automatically.
+
+### Legacy inventory migration
+
+A runtime inventory containing `password`, `passwd`, `ssh_key`, `ssh_private_key_file`, or private-key material is rejected with `INVENTORY_UNSAFE`. Load private keys into `ssh-agent` or select them in `~/.ssh/config`. Replace stored passwords with `auth_method: password-env` and a `password_env` reference, then remove every secret field and restore the runtime file to mode `0600`.
+
+The bridge refuses an unsafe inventory without silently changing its permissions. It does not silently repair an already-unsafe file because that file may already have been exposed; review the exposure and rotate affected credentials as needed before completing the migration.
 
 ## Start with a generated token
 
@@ -94,6 +139,18 @@ venv/bin/python app.py
 ```
 
 Origins cannot contain credentials, paths, queries, fragments, wildcard `*`, or opaque `null` values. The standalone `file://` origin is intentionally unsupported; serve the UI over local HTTP instead.
+
+## Development-only override
+
+For an isolated development environment only, `--insecure-allow-unknown-hosts` disables NETCONF SSH host-key verification:
+
+```bash
+venv/bin/python app.py \
+  --allow-origin http://localhost:5173 \
+  --insecure-allow-unknown-hosts
+```
+
+Startup prints a prominent warning that a network attacker can impersonate managed devices. `GET /health` reports `host_key_verification: disabled-development`, and the connected UI keeps the same warning visible. The override never disables bridge-token authentication or the localhost bind and origin controls. It must not be used for production device access.
 
 ## API examples
 
@@ -141,4 +198,6 @@ Brace-format `text` loads are disabled because they cannot be structurally valid
 - **429 Request rate limit exceeded:** wait for the `Retry-After` interval before retrying.
 - **Startup rejects the bind address:** only numeric loopback addresses such as `127.0.0.1` and `::1` are supported.
 - **Health works but devices do not:** `/health` is public; `/devices` verifies the access token.
+- **DEVICE_IDENTITY_FAILED:** independently verify the device fingerprint and investigate unknown or changed keys; do not automatically delete the known-host entry.
+- **INVENTORY_UNSAFE:** migrate legacy secret fields and manually restore owner-only mode after reviewing possible exposure; the bridge intentionally does not repair the file for you.
 - **400 Configuration validation failed:** use converter-generated set or XML output. Text/brace-format loads and arbitrary Junos hierarchies are intentionally unsupported.

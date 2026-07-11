@@ -12,9 +12,12 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import { useConversionContext } from '../contexts/ConversionContext.jsx';
 import { useConfigContext } from '../contexts/ConfigContext.jsx';
 import {
+  bridgeErrorMessage,
   bridgeFetch,
-  bridgeResponseError,
+  bridgeResponseJson,
+  isBridgeResponseStatus,
   loadBridgeSettings,
+  safeBridgeLoadWarnings,
   saveBridgeSettings,
 } from '../utils/bridge-client.js';
 import {
@@ -37,13 +40,6 @@ function restoreForExport(text, sanitizationTable) {
     }
   }
   return result;
-}
-
-async function readBridgeJson(response) {
-  if ([401, 403, 429].includes(response.status)) {
-    throw await bridgeResponseError(response);
-  }
-  return response.json();
 }
 
 /** Format timestamp for log entries. */
@@ -125,13 +121,10 @@ export default function usePush() {
         {},
         { authenticated: false },
       );
-      if (!healthResponse.ok) {
-        throw await bridgeResponseError(healthResponse);
-      }
+      await bridgeResponseJson(healthResponse);
 
       const deviceResponse = await bridgeFetch(base + '/devices');
-      if (!deviceResponse.ok) throw await bridgeResponseError(deviceResponse);
-      const data = await deviceResponse.json();
+      const data = await bridgeResponseJson(deviceResponse);
       setDevices(Array.isArray(data) ? data : data.devices || []);
       setBridgeConnected(true);
       appendLog('success', 'Connected to authenticated PyEZ Bridge.');
@@ -141,16 +134,16 @@ export default function usePush() {
         base + '/devices?probe=true',
         {},
         { timeout: 60000 },
-      ).then(async (response) => {
-        if (response.ok) {
-          const probed = await response.json();
-          setDevices(Array.isArray(probed) ? probed : probed.devices || []);
-        }
+      ).then(bridgeResponseJson).then((probed) => {
+        setDevices(Array.isArray(probed) ? probed : probed.devices || []);
       }).catch(() => {});
       return true;
-    } catch (err) {
+    } catch (error) {
       setBridgeConnected(false);
-      appendLog('error', `Connection failed: ${err.message}`);
+      appendLog('error', bridgeErrorMessage(
+        error,
+        'Connection failed. Check the bridge service and try again.',
+      ));
       return false;
     }
   }, [bridgeUrl, appendLog]);
@@ -169,12 +162,10 @@ export default function usePush() {
   const refreshDevices = useCallback(async () => {
     try {
       const resp = await bridgeFetch(baseUrl() + '/devices');
-      const data = await readBridgeJson(resp);
-      if (resp.ok) {
-        setDevices(Array.isArray(data) ? data : data.devices || []);
-      }
-    } catch (err) {
-      appendLog('error', `Failed to refresh devices: ${err.message}`);
+      const data = await bridgeResponseJson(resp);
+      setDevices(Array.isArray(data) ? data : data.devices || []);
+    } catch (error) {
+      appendLog('error', bridgeErrorMessage(error, 'Failed to refresh devices.'));
     }
   }, [baseUrl, appendLog]);
 
@@ -185,16 +176,16 @@ export default function usePush() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(deviceInfo),
       });
-      const data = await readBridgeJson(resp);
+      const data = await bridgeResponseJson(resp);
       if (data.ok) {
-        appendLog('success', `Device '${deviceInfo.name}' added.`);
+        appendLog('success', 'Device added.');
         await refreshDevices();
         return true;
       }
-      appendLog('error', data.error || 'Failed to add device.');
+      appendLog('error', 'Failed to add device.');
       return false;
-    } catch (err) {
-      appendLog('error', `Failed to add device: ${err.message}`);
+    } catch (error) {
+      appendLog('error', bridgeErrorMessage(error, 'Failed to add device.'));
       return false;
     }
   }, [baseUrl, appendLog, refreshDevices]);
@@ -204,17 +195,17 @@ export default function usePush() {
       const resp = await bridgeFetch(baseUrl() + `/devices/${encodeURIComponent(deviceName)}`, {
         method: 'DELETE',
       });
-      const data = await readBridgeJson(resp);
+      const data = await bridgeResponseJson(resp);
       if (data.ok) {
-        appendLog('info', `Device '${deviceName}' removed.`);
+        appendLog('info', 'Device removed.');
         await refreshDevices();
         if (selectedDevice === deviceName) setSelectedDevice(null);
         return true;
       }
-      appendLog('error', data.error || 'Failed to remove device.');
+      appendLog('error', 'Failed to remove device.');
       return false;
-    } catch (err) {
-      appendLog('error', `Failed to remove device: ${err.message}`);
+    } catch (error) {
+      appendLog('error', bridgeErrorMessage(error, 'Failed to remove device.'));
       return false;
     }
   }, [baseUrl, appendLog, refreshDevices, selectedDevice]);
@@ -231,7 +222,7 @@ export default function usePush() {
       const resp = await bridgeFetch(baseUrl() + `/devices/${encodeURIComponent(name)}/unlock`, {
         method: 'POST',
       });
-      const data = await readBridgeJson(resp);
+      const data = await bridgeResponseJson(resp);
       return data.ok;
     } catch { return false; }
   }, [selectedDevice, baseUrl]);
@@ -240,7 +231,7 @@ export default function usePush() {
     const name = deviceName || selectedDevice;
     if (!name) return false;
     setIsWorking(true);
-    appendLog('info', `Loading configuration to ${name}...`);
+    appendLog('info', 'Loading configuration into the candidate configuration...');
     try {
       const payload = buildDeviceLoadPayload(
         srxOutput,
@@ -260,46 +251,36 @@ export default function usePush() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      const data = await readBridgeJson(resp);
+      const data = await bridgeResponseJson(resp);
       if (data.ok) {
-        appendLog('success', data.message || 'Configuration loaded into candidate.');
-        // Show skipped lines as warnings
-        if (data.warnings && data.warnings.length > 0) {
-          appendLog('warn', `${data.skipped} command(s) skipped due to errors:`);
-          for (const w of data.warnings.slice(0, 20)) {
-            appendLog('warn', `  Line ${w.line}: ${w.command}`);
-            if (w.message) appendLog('warn', `    → ${w.message}`);
+        appendLog('success', 'Configuration loaded into candidate.');
+        const warnings = safeBridgeLoadWarnings(data.warnings);
+        if (warnings.length > 0) {
+          appendLog('warn', `${warnings.length} configuration line(s) were skipped:`);
+          for (const warning of warnings.slice(0, 20)) {
+            appendLog(
+              'warn',
+              `Line ${warning.line} (${warning.code}): ${warning.category}`,
+            );
           }
-          if (data.warnings.length > 20) {
-            appendLog('warn', `  ... and ${data.warnings.length - 20} more`);
+          if (warnings.length > 20) {
+            appendLog('warn', `${warnings.length - 20} additional line warning(s).`);
           }
         }
         setIsWorking(false);
         return true;
       }
 
-      // Lock error (HTTP 409) — auto-unlock and retry once
-      if (resp.status === 409 && !_retried) {
-        appendLog('warn', 'Config lock held by another session — clearing lock and retrying...');
+      appendLog('error', 'Configuration load failed.');
+      setIsWorking(false);
+      return false;
+    } catch (error) {
+      if (isBridgeResponseStatus(error, 409) && !_retried) {
+        appendLog('warn', 'Configuration lock detected. Clearing it and retrying once.');
         await unlockConfig(name);
         return loadConfig(name, true);
       }
-
-      appendLog('error', `Load failed: ${data.error}`);
-      if (data.details) {
-        if (Array.isArray(data.details)) {
-          for (const err of data.details) {
-            const cmd = err.command ? `: ${err.command}` : '';
-            appendLog('error', `  ${err.message || err}${cmd}`);
-          }
-        } else {
-          appendLog('error', String(data.details).slice(0, 500));
-        }
-      }
-      setIsWorking(false);
-      return false;
-    } catch (err) {
-      appendLog('error', `Load failed: ${err.message}`);
+      appendLog('error', bridgeErrorMessage(error, 'Configuration load failed.'));
       setIsWorking(false);
       return false;
     }
@@ -312,7 +293,7 @@ export default function usePush() {
     appendLog('info', 'Fetching configuration diff...');
     try {
       const resp = await bridgeFetch(baseUrl() + `/devices/${encodeURIComponent(name)}/diff`);
-      const data = await readBridgeJson(resp);
+      const data = await bridgeResponseJson(resp);
       if (data.ok) {
         setConfigDiff(data.diff || '');
         if (!data.diff) {
@@ -325,11 +306,11 @@ export default function usePush() {
         setIsWorking(false);
         return data.diff || '';
       }
-      appendLog('error', data.error || 'Failed to get diff.');
+      appendLog('error', 'Failed to get configuration diff.');
       setIsWorking(false);
       return '';
-    } catch (err) {
-      appendLog('error', `Diff failed: ${err.message}`);
+    } catch (error) {
+      appendLog('error', bridgeErrorMessage(error, 'Failed to get configuration diff.'));
       setIsWorking(false);
       return '';
     }
@@ -344,24 +325,20 @@ export default function usePush() {
       const resp = await bridgeFetch(baseUrl() + `/devices/${encodeURIComponent(name)}/commit-check`, {
         method: 'POST',
       });
-      const data = await readBridgeJson(resp);
-      setCommitCheckResult(data);
+      const data = await bridgeResponseJson(resp);
       if (data.ok) {
+        setCommitCheckResult({ ok: true });
         appendLog('success', 'Commit check passed.');
       } else {
+        setCommitCheckResult({ ok: false });
         appendLog('error', 'Commit check failed.');
-        if (data.errors) {
-          for (const err of data.errors) {
-            appendLog('error', `  ${err.message}`);
-          }
-        }
       }
       setIsWorking(false);
       return data;
-    } catch (err) {
-      const result = { ok: false, errors: [{ message: err.message, severity: 'error' }] };
+    } catch (error) {
+      const result = { ok: false };
       setCommitCheckResult(result);
-      appendLog('error', `Commit check failed: ${err.message}`);
+      appendLog('error', bridgeErrorMessage(error, 'Commit check failed.'));
       setIsWorking(false);
       return result;
     }
@@ -384,12 +361,13 @@ export default function usePush() {
           confirm_minutes: confirmMin || undefined,
         }),
       });
-      const data = await readBridgeJson(resp);
-      setCommitResult(data);
+      const data = await bridgeResponseJson(resp);
 
       if (data.ok) {
-        appendLog('success', data.message);
-        if (data.confirm_active && confirmMin > 0) {
+        const confirmActive = data.confirm_active === true && confirmMin > 0;
+        setCommitResult({ ok: true, confirm_active: confirmActive });
+        appendLog('success', 'Configuration committed successfully.');
+        if (confirmActive) {
           // Start countdown timer
           const expiresAt = Date.now() + confirmMin * 60 * 1000;
           setConfirmTimer({ active: true, minutes: confirmMin, expiresAt });
@@ -406,14 +384,15 @@ export default function usePush() {
           }, 1000);
         }
       } else {
-        appendLog('error', data.error || 'Commit failed.');
+        setCommitResult({ ok: false });
+        appendLog('error', 'Commit failed.');
       }
       setIsWorking(false);
       return data;
-    } catch (err) {
-      const result = { ok: false, error: err.message };
+    } catch (error) {
+      const result = { ok: false };
       setCommitResult(result);
-      appendLog('error', `Commit failed: ${err.message}`);
+      appendLog('error', bridgeErrorMessage(error, 'Commit failed.'));
       setIsWorking(false);
       return result;
     }
@@ -428,7 +407,7 @@ export default function usePush() {
       const resp = await bridgeFetch(baseUrl() + `/devices/${encodeURIComponent(name)}/confirm`, {
         method: 'POST',
       });
-      const data = await readBridgeJson(resp);
+      const data = await bridgeResponseJson(resp);
       if (data.ok) {
         appendLog('success', 'Commit confirmed. Auto-rollback cancelled.');
         if (confirmIntervalRef.current) {
@@ -439,11 +418,11 @@ export default function usePush() {
         setIsWorking(false);
         return true;
       }
-      appendLog('error', data.error || 'Confirm failed.');
+      appendLog('error', 'Commit confirmation failed.');
       setIsWorking(false);
       return false;
-    } catch (err) {
-      appendLog('error', `Confirm failed: ${err.message}`);
+    } catch (error) {
+      appendLog('error', bridgeErrorMessage(error, 'Commit confirmation failed.'));
       setIsWorking(false);
       return false;
     }
@@ -460,7 +439,7 @@ export default function usePush() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: 0 }),
       });
-      const data = await readBridgeJson(resp);
+      const data = await bridgeResponseJson(resp);
       if (data.ok) {
         appendLog('success', 'Configuration rolled back successfully.');
         if (confirmIntervalRef.current) {
@@ -471,11 +450,11 @@ export default function usePush() {
         setIsWorking(false);
         return true;
       }
-      appendLog('error', data.error || 'Rollback failed.');
+      appendLog('error', 'Rollback failed.');
       setIsWorking(false);
       return false;
-    } catch (err) {
-      appendLog('error', `Rollback failed: ${err.message}`);
+    } catch (error) {
+      appendLog('error', bridgeErrorMessage(error, 'Rollback failed.'));
       setIsWorking(false);
       return false;
     }

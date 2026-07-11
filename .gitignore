@@ -27,3 +27,4 @@ secrets.json
 
 # Local-only sample/customer configs — never commit
 docs/superpowers/plans/*.xml
+tools/pyez-bridge/devices.yaml

@@ -487,7 +487,7 @@ firewall-intent-converter/
 
 ### LLM Settings
 
-All LLM configuration is stored in `localStorage` under the key `llm-settings`. No API keys are ever sent to the server. Supported providers:
+LLM nonsecret preferences are stored in `localStorage['llm-settings']`. The API key is stored only in `sessionStorage['llm-api-key']` for the current tab session and is removed when that tab session ends. No API keys are ever sent to the project server. Supported providers:
 
 | Provider | Key Required | Default URL |
 |----------|-------------|-------------|
@@ -513,7 +513,7 @@ Editable plain-text prompt files control how the LLM behaves during translation 
 
 ### PyEZ Bridge Settings
 
-PyEZ Bridge configuration is stored in `localStorage` under the key `pyez-bridge-settings`. Use the Settings modal (PyEZ Bridge tab) to configure the bridge URL, test the connection, and view connected SRX devices. The bridge server (`tools/pyez-bridge/`) runs as a standalone Python Flask process that uses Juniper's PyEZ library for NETCONF push operations.
+Use the Settings modal (PyEZ Bridge tab) to configure the bridge URL, test the connection, and view connected SRX devices. The runtime inventory contains only connection metadata and credential references; LLM API keys and bridge tokens entered in the UI are tab-session values. The bridge server (`tools/pyez-bridge/`) runs as a standalone Python Flask process that uses Juniper's PyEZ library for NETCONF push operations, and verifies NETCONF SSH host keys by default. See the [PyEZ Bridge setup guide](tools/pyez-bridge/README.md) for verified host enrollment, credential setup, and legacy inventory migration.
 
 ## Tech Stack
 

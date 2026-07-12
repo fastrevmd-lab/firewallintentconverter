@@ -221,6 +221,17 @@ function normalizeReference(record) {
   };
 }
 
+function normalizeReservation(record) {
+  if (!record || typeof record !== 'object' || Array.isArray(record)) {
+    fail('missing_catalog_coverage', { reason: 'invalid reservation metadata' });
+  }
+  return {
+    context: safeScalar(record.context, 'reservation context'),
+    namespace: safeScalar(record.namespace, 'reservation namespace'),
+    outputName: safeJunosIdentifier(record.outputName, 'reserved output name'),
+  };
+}
+
 function symbolSortKey(symbol) {
   return semanticKey(
     symbol.context,
@@ -346,9 +357,16 @@ function missingLookup(kind, path) {
 /**
  * Build an immutable deterministic allocation plan from catalog records.
  */
-export function createJunosIdentifierPlan({ definitions, references } = {}, options = {}) {
-  if (!Array.isArray(definitions) || !Array.isArray(references)) {
-    fail('missing_catalog_coverage', { reason: 'definitions and references must be arrays' });
+export function createJunosIdentifierPlan(
+  { definitions, references, reservations = [] } = {},
+  options = {},
+) {
+  if (!Array.isArray(definitions)
+      || !Array.isArray(references)
+      || !Array.isArray(reservations)) {
+    fail('missing_catalog_coverage', {
+      reason: 'definitions, references, and reservations must be arrays',
+    });
   }
   const hash64 = options.hash64 || fnv1a64;
   if (typeof hash64 !== 'function') {
@@ -357,6 +375,7 @@ export function createJunosIdentifierPlan({ definitions, references } = {}, opti
 
   const normalizedDefinitions = definitions.map(normalizeDefinition);
   const normalizedReferences = references.map(normalizeReference);
+  const normalizedReservations = reservations.map(normalizeReservation);
   const definitionPaths = new Set();
   const generatedKeys = new Set();
   const semanticDefinitions = new Map();
@@ -435,11 +454,15 @@ export function createJunosIdentifierPlan({ definitions, references } = {}, opti
   const unresolvedSymbols = new Map();
   const reservedNames = new Map();
 
-  function reserveReferenceName(item, outputName) {
-    const key = semanticKey(item.context, item.namespace);
+  function reserveName(context, namespace, outputName) {
+    const key = semanticKey(context, namespace);
     const names = reservedNames.get(key) || new Set();
     names.add(outputName);
     reservedNames.set(key, names);
+  }
+
+  for (const item of normalizedReservations) {
+    reserveName(item.context, item.namespace, item.outputName);
   }
 
   for (const item of normalizedReferences) {
@@ -452,12 +475,12 @@ export function createJunosIdentifierPlan({ definitions, references } = {}, opti
     referencePaths.add(item.referencePath);
 
     if (item.literalOutputName !== null) {
-      reserveReferenceName(item, item.literalOutputName);
+      reserveName(item.context, item.namespace, item.literalOutputName);
       referenceBindings.set(item.referencePath, item.literalOutputName);
       continue;
     }
     if (item.literals.includes(item.sourceName)) {
-      reserveReferenceName(item, item.sourceName);
+      reserveName(item.context, item.namespace, item.sourceName);
       referenceBindings.set(item.referencePath, item.sourceName);
       continue;
     }

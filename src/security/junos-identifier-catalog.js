@@ -77,19 +77,29 @@ function nestedContext(parent, scope, name) {
 }
 
 function sourceZones(item) {
-  return item.src_zones || item.source_zones || ['any'];
+  const zones = item.src_zones ?? item.source_zones;
+  return Array.isArray(zones) && zones.length > 0 ? zones : ['any'];
 }
 
 function destinationZones(item) {
-  return item.dst_zones || item.destination_zones || ['any'];
+  const zones = item.dst_zones ?? item.destination_zones;
+  return Array.isArray(zones) && zones.length > 0 ? zones : ['any'];
 }
 
 function sourceZoneField(item) {
-  return item.src_zones ? 'src_zones' : 'source_zones';
+  return item.src_zones !== undefined ? 'src_zones' : 'source_zones';
 }
 
 function destinationZoneField(item) {
-  return item.dst_zones ? 'dst_zones' : 'destination_zones';
+  return item.dst_zones !== undefined ? 'dst_zones' : 'destination_zones';
+}
+
+function effectiveZoneReferencePath(prefix, ownerPath, item, direction, index) {
+  const field = direction === 'source' ? sourceZoneField(item) : destinationZoneField(item);
+  const values = item[field];
+  return Array.isArray(values) && values.length > 0
+    ? joinedPath(prefix, `${ownerPath}.${field}[${index}]`)
+    : joinedPath(prefix, `${ownerPath}#effective-${direction}-zone`);
 }
 
 function preferredScreenName(screen) {
@@ -102,6 +112,12 @@ function preferredVpnName(vpn) {
 
 function preferredDhcpPoolName(item) {
   return item.name || item.interface || 'dhcp-pool';
+}
+
+function isEmittedDhcpPoolRange(value) {
+  if (typeof value !== 'string') return false;
+  const parts = value.split('-');
+  return parts.length === 2 && parts.every(part => part.trim().length > 0);
 }
 
 function flowCollectorKey(collector) {
@@ -163,6 +179,8 @@ function generatedPolicyName(policy, index) {
 function createSymbolCollector() {
   const definitions = [];
   const references = [];
+  const reservations = [];
+  const reservationKeys = new Set();
 
   function addDefinition({
     catalogKey, context, namespace, kind, sourceName, definitionPath,
@@ -218,7 +236,30 @@ function createSymbolCollector() {
     });
   }
 
-  return { definitions, references, addDefinition, addReference, addGenerated };
+  function addReservation({ context, namespace, outputName }) {
+    const key = `${context}\0${namespace}\0${outputName}`;
+    if (reservationKeys.has(key)) return;
+    reservationKeys.add(key);
+    reservations.push({ context, namespace, outputName });
+  }
+
+  return {
+    definitions, references, reservations,
+    addDefinition, addReference, addGenerated, addReservation,
+  };
+}
+
+function addLiteralReservations(collector, device) {
+  for (const [context, namespace, outputNames] of [
+    [device, 'zone', ANY_LITERAL],
+    [addressBookContext(device), 'address-book-entry', ANY_LITERAL],
+    [applicationsContext(device), 'application-entry', APPLICATION_LITERALS],
+    [device, 'routing-instance', BUILT_IN_ROUTING_INSTANCES],
+  ]) {
+    for (const outputName of outputNames) {
+      collector.addReservation({ context, namespace, outputName });
+    }
+  }
 }
 
 function addZoneReference(collector, device, sourceName, referencePath) {
@@ -273,16 +314,19 @@ function addApplicationReference(
   });
 }
 
-function preferredCustomApplicationName(sourceName) {
+function suffixPreservingApplicationName(sourceName, suffix = '') {
   let preferred = sanitizeJunosName(sourceName).replace(/\./g, '-');
   if (/^\d/.test(preferred)) preferred = `app-${preferred}`;
-  return preferred;
+  const baseLength = Math.max(1, 63 - suffix.length);
+  return `${preferred.slice(0, baseLength)}${suffix}`.slice(0, 63);
+}
+
+function preferredCustomApplicationName(sourceName) {
+  return suffixPreservingApplicationName(sourceName);
 }
 
 function preferredUnmappedApplicationName(sourceName) {
-  let preferred = `${sanitizeJunosName(sourceName).replace(/\./g, '-')}-UNMAPPED`;
-  if (/^\d/.test(preferred)) preferred = `app-${preferred}`;
-  return preferred;
+  return suffixPreservingApplicationName(sourceName, '-UNMAPPED');
 }
 
 function addGeneratedApplicationUse(state, sourceName, referencePath) {
@@ -327,7 +371,7 @@ function addGeneratedApplicationUse(state, sourceName, referencePath) {
           namespace: 'application-entry',
           kind: 'application',
           sourceName: `${sourceName}:port:${port}`,
-          preferredOutputName: `${preferredName}-p${port}`,
+          preferredOutputName: suffixPreservingApplicationName(sourceName, `-p${port}`),
           definitionPath: referencePath,
           role: `custom-application-port:${port}`,
           stableParentKey: `custom-application:${sourceName}`,
@@ -387,6 +431,16 @@ function addResolvedApplicationUse(state, sourceName, referencePath, options = {
     addApplicationReference(state.collector, state.device, sourceName, referencePath, alias);
     return;
   }
+  if (!options.service
+      && ['srx', 'greenfield', 'srx_healthcheck'].includes(state.sourceVendor)) {
+    addPassthroughApplicationUse(
+      state,
+      sourceName,
+      referencePath,
+      'passthrough-application',
+    );
+    return;
+  }
   const mapped = mapAppToJunos(sourceName, state.sourceVendor);
   if (mapped) {
     addApplicationReference(state.collector, state.device, sourceName, referencePath, {
@@ -401,15 +455,6 @@ function addResolvedApplicationUse(state, sourceName, referencePath, options = {
       sourceName,
       referencePath,
       'unresolved-service-application',
-    );
-    return;
-  }
-  if (['srx', 'greenfield', 'srx_healthcheck'].includes(state.sourceVendor)) {
-    addPassthroughApplicationUse(
-      state,
-      sourceName,
-      referencePath,
-      'passthrough-application',
     );
     return;
   }
@@ -523,9 +568,10 @@ function collectApplications(config, state) {
   const appContext = applicationsContext(device);
   function addCommaPortItem(item, rootPath, kind, index, port) {
     const ownerPath = joinedPath(prefix, `${rootPath}[${index}]`);
-    const setName = `${item.name}-set`;
+    const setIdentity = `${item.name}:set`;
+    const setName = suffixPreservingApplicationName(item.name, '-set');
     applicationAliases.set(item.name, {
-      bindingSourceName: setName,
+      bindingSourceName: setIdentity,
       compatibleKinds: ['application-set'],
     });
     collector.addGenerated({
@@ -533,7 +579,8 @@ function collectApplications(config, state) {
       context: appContext,
       namespace: 'application-entry',
       kind: 'application-set',
-      sourceName: setName,
+      sourceName: setIdentity,
+      preferredOutputName: setName,
       definitionPath: ownerPath,
       role: `${kind}-multi-port-set`,
       stableParentKey: `${kind}:${item.name}`,
@@ -545,7 +592,10 @@ function collectApplications(config, state) {
         context: appContext,
         namespace: 'application-entry',
         kind: 'application',
-        sourceName: `${item.name}-${part.replace('-', 'to')}`,
+        sourceName: `${item.name}:port:${part}`,
+        preferredOutputName: suffixPreservingApplicationName(
+          item.name, `-${part.replace('-', 'to')}`,
+        ),
         definitionPath: ownerPath,
         role: `${kind}-port:${part}`,
         stableParentKey: `${kind}:${item.name}`,
@@ -712,7 +762,7 @@ function collectSecurityProfiles(config, state) {
       } else {
         continue;
       }
-      const featureKey = `${namespace}\0${preferredName}`;
+      const featureKey = `${namespace}\0${value}`;
       if (!featureProfiles.has(featureKey)) {
         featureProfiles.add(featureKey);
         collector.addGenerated({
@@ -720,7 +770,8 @@ function collectSecurityProfiles(config, state) {
           context: profileContext,
           namespace,
           kind,
-          sourceName: preferredName,
+          sourceName: value,
+          preferredOutputName: preferredName,
           definitionPath: joinedPath(prefix, `security_policies[${policyIndex}]`),
           role: `security-profile-${type}`,
           stableParentKey: `${type}:${value}`,
@@ -728,7 +779,7 @@ function collectSecurityProfiles(config, state) {
         for (let ruleIndex = 0; ruleIndex < applicationFirewallRules.length; ruleIndex += 1) {
           collector.addGenerated({
             catalogKey: JUNOS_IDENTIFIER_CATALOG.SECURITY_PROFILE,
-            context: nestedContext(profileContext, 'application-firewall-rule-set', preferredName),
+            context: nestedContext(profileContext, 'application-firewall-rule-set', value),
             namespace: 'application-firewall-rule',
             kind: 'application-firewall-rule',
             sourceName: `appfw-r${ruleIndex + 1}`,
@@ -744,7 +795,7 @@ function collectSecurityProfiles(config, state) {
         namespace,
         compatibleKinds: [kind],
         sourceName: value,
-        bindingSourceName: preferredName,
+        bindingSourceName: value,
         referencePath: joinedPath(prefix, `security_policies[${policyIndex}].security_profiles.${type}`),
         literals: [],
       });
@@ -923,11 +974,15 @@ function collectPoliciesAndSchedules(config, state) {
     const definedContexts = new Set();
     for (let sourceIndex = 0; sourceIndex < sourceZones(policy).length; sourceIndex += 1) {
       const fromZone = sourceZones(policy)[sourceIndex];
-      addZoneReference(collector, device, fromZone, joinedPath(prefix, `security_policies[${index}].${sourceZoneField(policy)}[${sourceIndex}]`));
+      addZoneReference(collector, device, fromZone, effectiveZoneReferencePath(
+        prefix, `security_policies[${index}]`, policy, 'source', sourceIndex,
+      ));
       for (let destinationIndex = 0; destinationIndex < destinationZones(policy).length; destinationIndex += 1) {
         const toZone = destinationZones(policy)[destinationIndex];
         if (sourceIndex === 0) {
-          addZoneReference(collector, device, toZone, joinedPath(prefix, `security_policies[${index}].${destinationZoneField(policy)}[${destinationIndex}]`));
+          addZoneReference(collector, device, toZone, effectiveZoneReferencePath(
+            prefix, `security_policies[${index}]`, policy, 'destination', destinationIndex,
+          ));
         }
         const context = zonePairContext(device, fromZone, toZone);
         if (definedContexts.has(context)) continue;
@@ -1050,10 +1105,14 @@ function collectNat(config, state) {
     }
 
     for (let zoneIndex = 0; zoneIndex < sourceZones(rule).length; zoneIndex += 1) {
-      addZoneReference(collector, device, sourceZones(rule)[zoneIndex], joinedPath(prefix, `nat_rules[${index}].${sourceZoneField(rule)}[${zoneIndex}]`));
+      addZoneReference(collector, device, sourceZones(rule)[zoneIndex], effectiveZoneReferencePath(
+        prefix, `nat_rules[${index}]`, rule, 'source', zoneIndex,
+      ));
     }
     for (let zoneIndex = 0; zoneIndex < destinationZones(rule).length; zoneIndex += 1) {
-      addZoneReference(collector, device, destinationZones(rule)[zoneIndex], joinedPath(prefix, `nat_rules[${index}].${destinationZoneField(rule)}[${zoneIndex}]`));
+      addZoneReference(collector, device, destinationZones(rule)[zoneIndex], effectiveZoneReferencePath(
+        prefix, `nat_rules[${index}]`, rule, 'destination', zoneIndex,
+      ));
     }
 
     for (const field of ['src_addresses', 'dst_addresses']) {
@@ -1485,6 +1544,7 @@ function collectDhcpQosFlow(config, state) {
     const poolContext = nestedContext(device, 'dhcp-pool', poolName);
     const poolRanges = (item.pools || [])
       .map((value, rangeIndex) => ({ value, rangeIndex }))
+      .filter(({ value }) => isEmittedDhcpPoolRange(value))
       .sort((left, right) => String(left.value).localeCompare(String(right.value)));
     for (let canonicalIndex = 0; canonicalIndex < poolRanges.length; canonicalIndex += 1) {
       const { value, rangeIndex } = poolRanges[canonicalIndex];
@@ -1653,6 +1713,7 @@ function collectAaaAndSnmp(config, state) {
 }
 
 function collectConfig(config, state) {
+  addLiteralReservations(state.collector, state.device);
   collectBaseObjects(config, state);
   collectApplications(config, state);
   collectSecurityProfiles(config, state);
@@ -1695,6 +1756,7 @@ export function collectJunosIdentifierSymbols(config = {}, options = {}) {
   return Object.freeze({
     definitions: Object.freeze(collector.definitions),
     references: Object.freeze(collector.references),
+    reservations: Object.freeze(collector.reservations),
   });
 }
 
@@ -1779,5 +1841,6 @@ export function collectMergedJunosIdentifierSymbols(
   return Object.freeze({
     definitions: Object.freeze(collector.definitions),
     references: Object.freeze(collector.references),
+    reservations: Object.freeze(collector.reservations),
   });
 }

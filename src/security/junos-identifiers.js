@@ -349,7 +349,7 @@ export function createJunosIdentifierPlan({ definitions, references } = {}, opti
     else definitionPaths.add(item.definitionPath);
 
     const duplicateKey = semanticKey(
-      item.context, item.namespace, item.kind, item.sourceName,
+      item.context, item.namespace, item.kind, item.stableKey,
     );
     const duplicate = semanticDefinitions.get(duplicateKey);
     if (duplicate) {
@@ -358,7 +358,7 @@ export function createJunosIdentifierPlan({ definitions, references } = {}, opti
         namespace: item.namespace,
         sourceName: item.sourceName,
         definitionPaths: sortedUnique([duplicate.auditablePath, item.auditablePath]),
-        reason: 'multiple definitions have the same exact source identity',
+        reason: 'multiple definitions have the same stable identity',
       });
     }
     semanticDefinitions.set(duplicateKey, item);

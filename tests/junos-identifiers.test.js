@@ -162,6 +162,40 @@ describe('Junos identifier allocation', () => {
     });
   });
 
+  it('rejects duplicate generated stable identities before allocation', () => {
+    let hashCalls = 0;
+    const generated = {
+      kind: 'source-nat-pool',
+      generated: true,
+      role: 'source-nat-pool',
+      stableParentKey: 'source-rule:Web Rule',
+    };
+
+    const error = capturePlanningError(() => createJunosIdentifierPlan({
+      definitions: [
+        definition('Web Pool', 'nat.rules[0]', generated),
+        definition('Web@Pool', 'nat.rules[1]', generated),
+      ],
+      references: [],
+    }, {
+      hash64: () => {
+        hashCalls += 1;
+        return 0n;
+      },
+    }));
+
+    expect(error).toMatchObject({
+      code: 'duplicate_definition',
+      namespace: 'address-book-entry',
+      context: 'root/address-book:global',
+      definitionPaths: [
+        'nat.rules[0]#generated:source-nat-pool',
+        'nat.rules[1]#generated:source-nat-pool',
+      ],
+    });
+    expect(hashCalls).toBe(0);
+  });
+
   it('rejects a reference that can bind to both an address and address set', () => {
     const error = capturePlanningError(() => createJunosIdentifierPlan({
       definitions: [

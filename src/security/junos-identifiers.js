@@ -1,4 +1,8 @@
 import { sanitizeJunosName } from '../parsers/parser-utils.js';
+import {
+  collectJunosIdentifierSymbols,
+  collectMergedJunosIdentifierSymbols,
+} from './junos-identifier-catalog.js';
 
 export const JUNOS_IDENTIFIER_MAPPING_VERSION = 1;
 
@@ -569,6 +573,30 @@ export function createJunosIdentifierPlan({ definitions, references } = {}, opti
     },
   };
   return Object.freeze(plan);
+}
+
+export function planJunosIdentifiers(config, options = {}) {
+  return createJunosIdentifierPlan(
+    collectJunosIdentifierSymbols(config, options),
+    options,
+  );
+}
+
+export function planMergedJunosIdentifiers(
+  configSlots,
+  crossLsLinks = [],
+  globalConfig = {},
+  options = {},
+) {
+  return createJunosIdentifierPlan(
+    collectMergedJunosIdentifierSymbols(
+      configSlots,
+      crossLsLinks,
+      globalConfig,
+      options,
+    ),
+    options,
+  );
 }
 
 /** Validate, defensively copy, and deeply freeze persisted mapping metadata. */

@@ -4,8 +4,115 @@ import {
   JUNOS_IDENTIFIER_MAPPING_VERSION,
   JunosIdentifierPlanningError,
   createJunosIdentifierPlan,
+  planJunosIdentifiers,
+  planMergedJunosIdentifiers,
   validateIdentifierMappings,
 } from '../src/security/junos-identifiers.js';
+import {
+  JUNOS_IDENTIFIER_CATALOG,
+  collectJunosIdentifierSymbols,
+  collectMergedJunosIdentifierSymbols,
+} from '../src/security/junos-identifier-catalog.js';
+
+function fullConfig() {
+  return {
+    zones: [{ name: 'trust zone' }, { name: 'untrust zone' }],
+    address_objects: [{ name: 'web host', value: '192.0.2.10' }],
+    address_groups: [{ name: 'web group', members: ['web host'] }],
+    service_objects: [{ name: 'custom web', protocol: 'tcp', port_range: '8080,8443' }],
+    service_groups: [{ name: 'web services', members: ['custom web'] }],
+    applications: [{ name: 'custom app', protocol: 'tcp', port: '9000,9001' }],
+    application_groups: [{ name: 'app bundle', members: ['custom app'] }],
+    schedules: [{ name: 'business hours', days: ['mon'], start: '09:00', end: '17:00' }],
+    security_policies: [{
+      name: 'allow web',
+      src_zones: ['trust zone'],
+      dst_zones: ['untrust zone'],
+      src_addresses: ['web group'],
+      dst_addresses: ['web host'],
+      applications: ['junos-https'],
+      services: ['web services'],
+      schedule: 'business hours',
+      action: 'allow',
+      security_profiles: {
+        virus: 'virus profile',
+        spyware: 'spyware profile',
+      },
+    }],
+    nat_rules: [
+      {
+        name: 'source web', type: 'source',
+        src_zones: ['trust zone'], dst_zones: ['untrust zone'],
+        src_addresses: ['web host'], dst_addresses: ['any'],
+        translated_src: { type: 'dynamic-ip-pool', addresses: ['web host'] },
+      },
+      {
+        name: 'destination web', type: 'destination',
+        src_zones: ['untrust zone'], dst_zones: ['trust zone'],
+        dst_addresses: ['web host'], translated_dst: { address: '192.0.2.10' },
+      },
+      {
+        name: 'static web', type: 'static',
+        src_zones: ['untrust zone'], dst_zones: ['trust zone'],
+        dst_addresses: ['web host'], translated_src: { address: '192.0.2.10' },
+      },
+    ],
+    static_routes: [{ destination: '0.0.0.0/0', next_hop: '192.0.2.1', vrf: 'blue vrf' }],
+    bgp_config: [{
+      instance: 'blue vrf',
+      peer_groups: [{
+        name: 'edge peers',
+        neighbors: [{ address: '192.0.2.2', import_policy: 'IMPORT EDGE', export_policy: 'EXPORT EDGE' }],
+      }],
+      networks: [{ prefix: '192.0.2.0/24', policy: 'EXPORT EDGE' }],
+      redistribute: [{ protocol: 'static' }],
+    }],
+    ospf_config: [{ instance: 'blue vrf', redistribute: [{ protocol: 'static' }] }],
+    ospf3_config: [{ instance: 'blue vrf', redistribute: [{ protocol: 'direct' }] }],
+    evpn_config: [{ instance: 'evpn vrf', vlans: [{ name: 'tenant vlan', vlan_id: 100, vni: 10100 }] }],
+    vxlan_config: [{ instance: 'evpn vrf', name: 'overlay', vnis: [{ vni: 10200, vlan_id: 200 }] }],
+    screen_config: [{ name: 'edge screen', zone: 'untrust zone', tcp: { land_attack: true } }],
+    vpn_tunnels: [{
+      name: 'branch vpn',
+      ike_proposal: { name: 'ike proposal' },
+      ike_gateway: { name: 'ike gateway', address: '198.51.100.10' },
+      ipsec_proposal: { name: 'ipsec proposal' },
+    }],
+    external_lists: [{ name: 'bad hosts', isBlockList: true, listType: 'ip' }],
+    decryption_rules: [
+      { name: 'decrypt outbound', action: 'decrypt', decryption_type: 'ssl-forward-proxy', decryption_profile: 'corp tls' },
+      { name: 'decrypt inbound', action: 'decrypt', decryption_type: 'ssl-inbound-inspection', decryption_profile: 'server tls' },
+    ],
+    bridge_domains: [{ name: 'bridge tenant', vlan_id: 300 }],
+    l2_interfaces: [{ name: 'ge-0/0/1.0', bridge_domain: 'bridge tenant' }],
+    vwire_pairs: [{ name: 'transparent pair', interface1: 'ge-0/0/2', interface2: 'ge-0/0/3' }],
+    pbf_rules: [{
+      name: 'prefer isp', action: 'forward', next_hop_value: '203.0.113.1',
+      src_addresses: ['web host'], dst_addresses: ['any'],
+    }],
+    dhcp_config: [{
+      type: 'server', name: 'branch pool', network: '10.0.0.0/24',
+      pools: ['10.0.0.10-10.0.0.20'], ranges: [{ name: 'printers', low: '10.0.0.30', high: '10.0.0.40' }],
+    }],
+    qos_config: [
+      { type: 'scheduler', name: 'voice scheduler' },
+      { type: 'shaping-profile', name: 'branch qos', classes: [{ name: 'voice class' }] },
+      { type: 'interface-cos', interface: 'ge-0/0/0', scheduler_map: 'branch qos' },
+      { type: 'classifier', name: 'dscp edge' },
+    ],
+    flow_monitoring_config: {
+      instance_name: 'branch flow',
+      collectors: [{ address: '192.0.2.50', protocol: 'ipfix' }],
+      templates: [{ name: 'branch template' }],
+    },
+    aaa_config: [{ type: 'profile', name: 'admin access', authentication_order: ['radius'] }],
+    snmp_config: [
+      { type: 'community', name: 'monitor community' },
+      { type: 'trap-group', name: 'noc traps', targets: ['192.0.2.60'] },
+      { type: 'v3-user', name: 'monitor user' },
+    ],
+  };
+}
 
 const definition = (sourceName, definitionPath, overrides = {}) => ({
   catalogKey: 'address-book',
@@ -430,5 +537,375 @@ describe('Junos identifier mapping validation', () => {
     )));
 
     expect(error.code).toBe('invalid_identifier_mapping');
+  });
+});
+
+describe('Junos identifier catalog', () => {
+  it('catalogs every converter namespace with exact auditable paths and contexts', () => {
+    const symbols = collectJunosIdentifierSymbols(fullConfig(), {
+      targetContext: { type: 'logical-system', name: 'branch a' },
+    });
+    const paths = new Set([
+      ...symbols.definitions.map(item => item.definitionPath),
+      ...symbols.references.map(item => item.referencePath),
+    ]);
+
+    expect([...paths]).toEqual(expect.arrayContaining([
+      'targetContext.name',
+      'zones[0].name',
+      'address_objects[0].name',
+      'address_groups[0].members[0]',
+      'service_objects[0].name',
+      'service_groups[0].members[0]',
+      'applications[0].name',
+      'application_groups[0].members[0]',
+      'schedules[0].name',
+      'security_policies[0].name',
+      'security_policies[0].dst_addresses[0]',
+      'nat_rules[0].name',
+      'static_routes[0].vrf',
+      'bgp_config[0].peer_groups[0].name',
+      'screen_config[0].name',
+      'vpn_tunnels[0].name',
+      'external_lists[0].name',
+      'decryption_rules[0].decryption_profile',
+      'bridge_domains[0].name',
+      'l2_interfaces[0].bridge_domain',
+      'pbf_rules[0].name',
+      'dhcp_config[0].name',
+      'qos_config[0].name',
+      'flow_monitoring_config.instance_name',
+      'aaa_config[0].name',
+      'snmp_config[0].name',
+    ]));
+
+    const address = symbols.definitions.find(item => item.definitionPath === 'address_objects[0].name');
+    const addressSet = symbols.definitions.find(item => item.definitionPath === 'address_groups[0].name');
+    expect(address).toMatchObject({ namespace: 'address-book-entry', kind: 'address' });
+    expect(addressSet).toMatchObject({ namespace: 'address-book-entry', kind: 'address-set' });
+    expect(addressSet.context).toBe(address.context);
+
+    const policy = symbols.definitions.find(item => item.definitionPath === 'security_policies[0].name');
+    expect(policy).toMatchObject({
+      namespace: 'security-policy',
+      context: expect.stringContaining('zone-pair:trust zone->untrust zone'),
+    });
+
+    const bgpGroup = symbols.definitions.find(item => item.definitionPath === 'bgp_config[0].peer_groups[0].name');
+    expect(bgpGroup).toMatchObject({
+      namespace: 'bgp-group',
+      context: expect.stringContaining('routing-instance:blue vrf'),
+    });
+
+    expect(symbols.definitions).not.toContainEqual(expect.objectContaining({ sourceName: 'junos-https' }));
+    expect(symbols.references).toContainEqual(expect.objectContaining({
+      referencePath: 'security_policies[0].applications[0]',
+      sourceName: 'junos-https',
+      literals: expect.arrayContaining(['junos-https']),
+    }));
+  });
+
+  it('catalogs current generated preferred names with owner paths and stable roles', () => {
+    const symbols = collectJunosIdentifierSymbols(fullConfig(), {
+      targetContext: { type: 'logical-system', name: 'branch a' },
+    });
+
+    expect(symbols.definitions).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        sourceName: 'pool-source web',
+        definitionPath: 'nat_rules[0]',
+        generated: true,
+        role: 'source-nat-pool',
+        stableParentKey: expect.stringContaining('source web'),
+      }),
+      expect.objectContaining({
+        sourceName: 'dnat-pool-destination web',
+        definitionPath: 'nat_rules[1]',
+        role: 'destination-nat-pool',
+      }),
+      expect.objectContaining({
+        sourceName: 'ike-pol-branch-vpn',
+        definitionPath: 'vpn_tunnels[0]',
+        role: 'ike-policy',
+      }),
+      expect.objectContaining({
+        sourceName: 'ipsec-pol-branch-vpn',
+        definitionPath: 'vpn_tunnels[0]',
+        role: 'ipsec-policy',
+      }),
+      expect.objectContaining({
+        sourceName: 'PBF-prefer isp',
+        definitionPath: 'pbf_rules[0]',
+        role: 'pbf-routing-instance',
+      }),
+      expect.objectContaining({
+        sourceName: 'ssl-fwd-corp tls',
+        definitionPath: 'decryption_rules[0]',
+        role: 'ssl-forward-profile',
+      }),
+      expect.objectContaining({
+        sourceName: 'ssl-inbound-server tls',
+        definitionPath: 'decryption_rules[1]',
+        role: 'ssl-inbound-profile',
+      }),
+      expect.objectContaining({
+        sourceName: 'ike proposal',
+        definitionPath: 'vpn_tunnels[0].ike_proposal.name',
+        generated: false,
+      }),
+      expect.objectContaining({
+        sourceName: 'ike gateway',
+        definitionPath: 'vpn_tunnels[0].ike_gateway.name',
+        generated: false,
+      }),
+      expect.objectContaining({
+        sourceName: 'ipsec proposal',
+        definitionPath: 'vpn_tunnels[0].ipsec_proposal.name',
+        generated: false,
+      }),
+    ]));
+
+    const plan = planJunosIdentifiers(fullConfig(), {
+      targetContext: { type: 'logical-system', name: 'branch a' },
+    });
+    expect(plan.nameForReference('service_groups[0].members[0]'))
+      .toBe(plan.nameForGenerated('service_objects[0]', 'service-multi-port-set'));
+    expect(plan.nameForReference('application_groups[0].members[0]'))
+      .toBe(plan.nameForGenerated('applications[0]', 'application-multi-port-set'));
+  });
+
+  it('deduplicates shared NAT rule sets and catalogs PBF filter children', () => {
+    const config = fullConfig();
+    config.nat_rules.push({
+      name: 'source api', type: 'source',
+      src_zones: ['trust zone'], dst_zones: ['untrust zone'],
+      translated_src: { type: 'interface' },
+    });
+    config.pbf_rules.push({
+      name: 'prefer api', action: 'forward', next_hop_value: '203.0.113.1',
+    });
+
+    const symbols = collectJunosIdentifierSymbols(config);
+    const sourceRuleSets = symbols.definitions.filter(item => (
+      item.role === 'source-nat-rule-set'
+      && item.sourceName === 'trust zone-to-untrust zone'
+    ));
+    expect(sourceRuleSets).toHaveLength(1);
+    expect(symbols.definitions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ sourceName: 'PBF-FILTER', role: 'pbf-filter' }),
+      expect.objectContaining({ sourceName: 'default', role: 'pbf-default-term' }),
+      expect.objectContaining({ sourceName: 'dscp edge', namespace: 'cos-classifier' }),
+    ]));
+    expect(symbols.references).toContainEqual(expect.objectContaining({
+      referencePath: 'pbf_rules[0].next_hop_value#routing-instance',
+      sourceName: 'PBF-prefer api',
+    }));
+    expect(() => planJunosIdentifiers(config)).not.toThrow();
+  });
+
+  it('scopes every static NAT rule to the one STATIC-NAT rule set', () => {
+    const config = {
+      zones: [{ name: 'outside a' }, { name: 'outside b' }, { name: 'inside' }],
+      nat_rules: [
+        { name: 'static a', type: 'static', src_zones: ['outside a'], dst_zones: ['inside'] },
+        { name: 'static b', type: 'static', src_zones: ['outside b'], dst_zones: ['inside'] },
+      ],
+    };
+    const symbols = collectJunosIdentifierSymbols(config);
+    const ruleSets = symbols.definitions.filter(item => item.role === 'static-nat-rule-set');
+    const rules = symbols.definitions.filter(item => item.kind === 'static-nat-rule');
+
+    expect(ruleSets).toHaveLength(1);
+    expect(new Set(rules.map(item => item.context)).size).toBe(1);
+    expect(() => planJunosIdentifiers(config)).not.toThrow();
+  });
+
+  it('scopes every any-zone policy to the shared global policy namespace', () => {
+    const config = {
+      security_policies: [
+        { name: 'same global', src_zones: ['any'], dst_zones: ['dmz'] },
+        { name: 'same global', src_zones: ['trust'], dst_zones: ['any'] },
+      ],
+    };
+    const symbols = collectJunosIdentifierSymbols(config);
+    const policies = symbols.definitions.filter(item => item.kind === 'security-policy');
+
+    expect(new Set(policies.map(item => item.context)).size).toBe(1);
+    expect(capturePlanningError(() => planJunosIdentifiers(config)).code)
+      .toBe('duplicate_definition');
+
+    expect(() => planJunosIdentifiers({
+      security_policies: [{
+        name: 'one global', src_zones: ['any'], dst_zones: ['dmz', 'outside'],
+      }],
+    })).not.toThrow();
+  });
+
+  it('deduplicates shared explicit VPN and SSL profile definitions', () => {
+    const config = {
+      vpn_tunnels: [
+        {
+          name: 'vpn one',
+          ike_proposal: { name: 'shared ike' },
+          ike_gateway: { name: 'shared gateway' },
+          ipsec_proposal: { name: 'shared ipsec' },
+        },
+        {
+          name: 'vpn two',
+          ike_proposal: { name: 'shared ike' },
+          ike_gateway: { name: 'shared gateway' },
+          ipsec_proposal: { name: 'shared ipsec' },
+        },
+      ],
+      decryption_rules: [
+        { action: 'decrypt', decryption_type: 'ssl-forward-proxy', decryption_profile: 'shared tls' },
+        { action: 'decrypt', decryption_type: 'ssl-forward-proxy', decryption_profile: 'shared tls' },
+      ],
+    };
+    const symbols = collectJunosIdentifierSymbols(config);
+
+    expect(symbols.definitions.filter(item => item.sourceName === 'shared ike')).toHaveLength(1);
+    expect(symbols.definitions.filter(item => item.sourceName === 'ssl-fwd-shared tls')).toHaveLength(1);
+    expect(() => planJunosIdentifiers(config)).not.toThrow();
+  });
+
+  it('assigns shared UTM and IDP generated names by semantic combination', () => {
+    const policies = [
+      { name: 'one', security_profiles: { virus: 'z av', spyware: 'strict spyware', 'application-control': 'edge apps' } },
+      { name: 'two', security_profiles: { virus: 'a av', vulnerability: 'alert vuln' } },
+      { name: 'three', security_profiles: { virus: 'z av', spyware: 'strict spyware', 'application-control': 'edge apps' } },
+    ];
+    const config = {
+      security_policies: policies,
+      security_profile_definitions: {
+        'application-control:edge apps': { categories: { risky: 'block' } },
+        'spyware:strict spyware': { severityActions: { critical: 'block' } },
+      },
+    };
+    const forward = collectJunosIdentifierSymbols(config);
+    const reversed = collectJunosIdentifierSymbols({
+      ...config,
+      security_policies: [policies[1], policies[0], policies[2]],
+    });
+    const generatedPolicies = symbols => new Map(symbols.definitions
+      .filter(item => ['utm-policy', 'idp-policy'].includes(item.role))
+      .map(item => [item.stableParentKey, item.sourceName]));
+
+    expect(generatedPolicies(reversed)).toEqual(generatedPolicies(forward));
+    expect(forward.references).toEqual(expect.arrayContaining([
+      expect.objectContaining({ referencePath: 'security_policies[2]#utm-policy' }),
+      expect.objectContaining({ referencePath: 'security_policies[2]#idp-policy' }),
+      expect.objectContaining({
+        referencePath: 'security_policies[0].security_profiles.virus',
+        sourceName: 'custom-av-z av',
+      }),
+      expect.objectContaining({
+        referencePath: 'security_policies[0].security_profiles.application-control',
+        sourceName: 'appfw-edge apps',
+      }),
+    ]));
+    expect(forward.definitions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ namespace: 'application-firewall-rule', sourceName: 'appfw-r1' }),
+      expect.objectContaining({ namespace: 'idp-rule', sourceName: 'spyware-critical-r1' }),
+    ]));
+  });
+
+  it('preserves fallback zone field paths for policies and NAT', () => {
+    const symbols = collectJunosIdentifierSymbols({
+      security_policies: [{ name: 'fallback policy', source_zones: ['inside'], destination_zones: ['outside'] }],
+      nat_rules: [{ name: 'fallback nat', type: 'source', source_zones: ['inside'], destination_zones: ['outside'] }],
+    });
+    const paths = symbols.references.map(item => item.referencePath);
+
+    expect(paths).toEqual(expect.arrayContaining([
+      'security_policies[0].source_zones[0]',
+      'security_policies[0].destination_zones[0]',
+      'nat_rules[0].source_zones[0]',
+      'nat_rules[0].destination_zones[0]',
+    ]));
+  });
+
+  it('catalogs emitter-compatible generic policy and VPN generated names', () => {
+    const symbols = collectJunosIdentifierSymbols({
+      security_policies: [{
+        name: 'Rule-1', action: 'allow', src_zones: ['Trust Zone'],
+        dst_zones: ['DMZ'], applications: ['junos-https'],
+      }],
+      vpn_tunnels: [{ name: '9 branch' }],
+    });
+
+    expect(symbols.definitions).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        sourceName: 'permit-trust-zone-to-dmz-https-1',
+        definitionPath: 'security_policies[0]',
+        role: 'security-policy-1',
+      }),
+      expect.objectContaining({
+        sourceName: 'ike-pol-n-9-branch',
+        definitionPath: 'vpn_tunnels[0]',
+        role: 'ike-policy',
+      }),
+    ]));
+  });
+
+  it('keeps PBF shared-next-hop identity stable when rules are reordered', () => {
+    const rules = [
+      { name: 'z route', action: 'forward', next_hop_value: '192.0.2.1' },
+      { name: 'a route', action: 'forward', next_hop_value: '192.0.2.1' },
+    ];
+    const generated = symbols => symbols.definitions.find(item => item.role === 'pbf-routing-instance');
+    const forward = generated(collectJunosIdentifierSymbols({ pbf_rules: rules }));
+    const reversed = generated(collectJunosIdentifierSymbols({ pbf_rules: [...rules].reverse() }));
+
+    expect(forward.sourceName).toBe('PBF-a route');
+    expect(reversed.sourceName).toBe(forward.sourceName);
+    expect(reversed.stableParentKey).toBe(forward.stableParentKey);
+  });
+
+  it('collects merged logical-system slots and cross-link references', () => {
+    const slots = [
+      { lsName: 'branch a', intermediateConfig: fullConfig(), interfaceMappings: {} },
+      { lsName: 'branch b', intermediateConfig: { zones: [{ name: 'inside b' }] }, interfaceMappings: {} },
+    ];
+    const links = [{ ls1: 'branch a', ls2: 'branch b', sharedZone: 'transit zone' }];
+    const symbols = collectMergedJunosIdentifierSymbols(slots, links);
+
+    expect(symbols.definitions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ definitionPath: 'configSlots[0].lsName', sourceName: 'branch a' }),
+      expect.objectContaining({ definitionPath: 'configSlots[1].lsName', sourceName: 'branch b' }),
+      expect.objectContaining({ definitionPath: 'configSlots[0].intermediateConfig.zones[0].name' }),
+      expect.objectContaining({ definitionPath: 'crossLsLinks[0].sharedZone', role: 'cross-link-zone-ls1' }),
+      expect.objectContaining({ definitionPath: 'crossLsLinks[0].sharedZone', role: 'cross-link-zone-ls2' }),
+    ]));
+    expect(symbols.references).toEqual(expect.arrayContaining([
+      expect.objectContaining({ referencePath: 'crossLsLinks[0].ls1', sourceName: 'branch a' }),
+      expect.objectContaining({ referencePath: 'crossLsLinks[0].ls2', sourceName: 'branch b' }),
+    ]));
+  });
+
+  it('exposes frozen catalog keys and deterministic public planning wrappers', () => {
+    expect(Object.isFrozen(JUNOS_IDENTIFIER_CATALOG)).toBe(true);
+    expect(JUNOS_IDENTIFIER_CATALOG).toMatchObject({
+      TARGET_CONTEXT: 'target-context',
+      ADDRESS_BOOK: 'address-book',
+      POLICY: 'security-policy',
+      FLOW: 'flow-monitoring',
+    });
+
+    const config = fullConfig();
+    const options = { targetContext: { type: 'logical-system', name: 'branch a' } };
+    const forward = planJunosIdentifiers(config, options);
+    const reordered = planJunosIdentifiers({
+      ...config,
+      zones: [...config.zones].reverse(),
+      address_objects: [...config.address_objects].reverse(),
+    }, options);
+    expect(reordered.mapping.entries.map(({ definitionPath, ...entry }) => entry))
+      .toEqual(forward.mapping.entries.map(({ definitionPath, ...entry }) => entry));
+
+    const merged = planMergedJunosIdentifiers([
+      { lsName: 'branch a', intermediateConfig: { zones: [{ name: 'inside' }] } },
+    ]);
+    expect(merged.nameForDefinition('configSlots[0].lsName')).toBe('branch-a');
   });
 });

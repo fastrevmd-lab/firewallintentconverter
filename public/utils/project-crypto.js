@@ -9,6 +9,8 @@ const decoder = new TextDecoder('utf-8', { fatal: true });
 const ITERATIONS = 600_000;
 const SALT_BYTES = 16;
 const NONCE_BYTES = 12;
+const SALT_BASE64_CHARS = 24;
+const NONCE_BASE64_CHARS = 16;
 const TAG_BYTES = 16;
 const MAX_PASSPHRASE_BYTES = 1024;
 const MAX_PROJECT_NAME_BYTES = 1024;
@@ -82,8 +84,7 @@ function exactOwnDataObject(value, expectedKeys) {
       result[key] = descriptor.value;
     }
     return result;
-  } catch (error) {
-    if (error instanceof ProjectCryptoError) throw error;
+  } catch {
     invalidEnvelope();
   }
 }
@@ -156,6 +157,10 @@ function parseEnvelopeShape(envelope) {
       || typeof security.kdf !== 'string'
       || !Number.isSafeInteger(security.iterations)
       || !Number.isSafeInteger(security.aadVersion)
+      || typeof security.salt !== 'string'
+      || security.salt.length !== SALT_BASE64_CHARS
+      || typeof security.nonce !== 'string'
+      || security.nonce.length !== NONCE_BASE64_CHARS
       || typeof outer.ciphertext !== 'string'
       || outer.ciphertext.length > MAX_PROJECT_FILE_BYTES) {
     invalidEnvelope();
@@ -313,8 +318,7 @@ export async function encryptReversiblePayload(
       security,
       ciphertext: canonicalBase64(new Uint8Array(ciphertext)),
     };
-  } catch (error) {
-    if (error instanceof ProjectCryptoError) throw error;
+  } catch {
     throw new ProjectCryptoError('invalid_envelope');
   }
 }

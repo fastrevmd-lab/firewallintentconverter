@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   ProjectCryptoError,
   decryptReversibleEnvelope,
@@ -91,6 +91,25 @@ function expectCryptoError(operation, code, message) {
   expect(thrown).toMatchObject({ code, message });
 }
 
+function expectFreshFixedError(error, hostile, code, message) {
+  expect(error).toBeInstanceOf(ProjectCryptoError);
+  expect(error).not.toBe(hostile);
+  expect(error).toMatchObject({ name: 'ProjectCryptoError', code, message });
+  expect(Reflect.ownKeys(error).filter(key => ![
+    'stack', 'message', 'name', 'code',
+  ].includes(key))).toEqual([]);
+  expect('cause' in error).toBe(false);
+  expect('custom' in error).toBe(false);
+}
+
+function hostileCryptoError(code) {
+  const error = new ProjectCryptoError(code);
+  error.custom = 'REVIEW-SENSITIVE-CUSTOM-DATA';
+  error.cause = new Error('REVIEW-SENSITIVE-CAUSE');
+  error[Symbol('review-sensitive')] = true;
+  return error;
+}
+
 describe('reversible project crypto', () => {
   it('round-trips a strict payload without exposing plaintext', async () => {
     expect(isProjectCryptoAvailable()).toBe(true);
@@ -176,8 +195,8 @@ describe('reversible project crypto', () => {
     expect(calls.key).toMatchObject({ algorithm: { name: 'AES-GCM', length: 256 }, extractable: false });
     expect(calls.encryptAlgorithm).toMatchObject({ name: 'AES-GCM', tagLength: 128 });
     expect(calls.encryptAlgorithm.iv).toHaveLength(12);
-    expect(JSON.parse(new TextDecoder().decode(calls.encryptAlgorithm.additionalData)))
-      .toEqual(aadObject(envelope.security));
+    expect(new TextDecoder().decode(calls.encryptAlgorithm.additionalData))
+      .toBe(JSON.stringify(aadObject(envelope.security)));
   });
 
   it('returns a frozen, canonical inspection copy', async () => {
@@ -214,6 +233,96 @@ describe('reversible project crypto', () => {
     mutate(envelope);
     expectCryptoError(
       () => inspectEncryptedEnvelope(envelope),
+      'invalid_envelope',
+      'Encrypted project file is invalid.',
+    );
+  });
+
+  it.each(['salt', 'nonce'])('rejects object %s before invoking toJSON', async field => {
+    const envelope = await encryptReversiblePayload(payload, passphrase);
+    const original = envelope.security[field];
+    let invoked = 0;
+    envelope.security[field] = {
+      toJSON() {
+        invoked += 1;
+        return original;
+      },
+    };
+    expectCryptoError(
+      () => inspectEncryptedEnvelope(envelope),
+      'invalid_envelope',
+      'Encrypted project file is invalid.',
+    );
+    expect(invoked).toBe(0);
+  });
+
+  it.each([
+    ['salt', 25],
+    ['nonce', 17],
+  ])('rejects oversized %s before envelope serialization', async (field, length) => {
+    const envelope = await encryptReversiblePayload(payload, passphrase);
+    envelope.security[field] = 'A'.repeat(length);
+    const stringifySpy = vi.spyOn(JSON, 'stringify');
+    expectCryptoError(
+      () => inspectEncryptedEnvelope(envelope),
+      'invalid_envelope',
+      'Encrypted project file is invalid.',
+    );
+    const stringifyCalls = stringifySpy.mock.calls.length;
+    stringifySpy.mockRestore();
+    expect(stringifyCalls).toBe(0);
+  });
+
+  it.each([
+    ['inspection', 'invalid_envelope', proxy => inspectEncryptedEnvelope(proxy)],
+    ['encryption', 'invalid_envelope', proxy => encryptReversiblePayload(proxy, passphrase)],
+    ['decryption', 'decryption_failed', proxy => decryptReversibleEnvelope(proxy, passphrase)],
+  ])('replaces a hostile ProjectCryptoError from an input proxy during %s', async (
+    _label,
+    code,
+    operation,
+  ) => {
+    const hostile = hostileCryptoError('invalid_envelope');
+    const proxy = new Proxy({}, {
+      getPrototypeOf() {
+        throw hostile;
+      },
+    });
+    let thrown;
+    try {
+      await operation(proxy);
+    } catch (error) {
+      thrown = error;
+    }
+    expectFreshFixedError(
+      thrown,
+      hostile,
+      code,
+      code === 'decryption_failed'
+        ? 'Encrypted project could not be opened.'
+        : 'Encrypted project file is invalid.',
+    );
+  });
+
+  it('replaces a hostile ProjectCryptoError from an injected crypto operation', async () => {
+    const hostile = hostileCryptoError('invalid_envelope');
+    const cryptoImpl = {
+      getRandomValues: array => globalThis.crypto.getRandomValues(array),
+      subtle: {
+        importKey() {
+          throw hostile;
+        },
+      },
+    };
+    let thrown;
+    try {
+      await encryptReversiblePayload(payload, passphrase, cryptoImpl);
+    } catch (error) {
+      thrown = error;
+    }
+    expectFreshFixedError(
+      thrown,
+      hostile,
       'invalid_envelope',
       'Encrypted project file is invalid.',
     );

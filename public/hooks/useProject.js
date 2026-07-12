@@ -39,6 +39,11 @@ const PROJECT_ERROR_MESSAGES = Object.freeze({
   decryption_failed: 'Encrypted project could not be opened.',
 });
 
+const PROJECT_IMPORT_ERROR_MESSAGES = Object.freeze({
+  invalid_confirmation: 'Project import acknowledgement is required.',
+  unsupported_crypto: 'Encrypted project import is unavailable in this browser.',
+});
+
 const RETRYABLE_IMPORT_CODES = new Set([
   'invalid_confirmation',
   'invalid_passphrase',
@@ -141,13 +146,35 @@ export function downloadValidatedProject(result, environment = globalThis) {
   }
 }
 
-export function projectSecurityMessage(error) {
+export function projectSecurityMessage(error, operation = 'export') {
   const code = error && typeof error === 'object'
     ? ownDataValue(error, 'code')
     : undefined;
+  if (operation === 'import'
+      && typeof code === 'string'
+      && Object.hasOwn(PROJECT_IMPORT_ERROR_MESSAGES, code)) {
+    return PROJECT_IMPORT_ERROR_MESSAGES[code];
+  }
   return typeof code === 'string' && Object.hasOwn(PROJECT_ERROR_MESSAGES, code)
     ? PROJECT_ERROR_MESSAGES[code]
     : 'Project security operation failed.';
+}
+
+function prepareValidatedImportCandidate(project, security, warnings) {
+  try {
+    const snapshot = structuredClone({ project, security, warnings });
+    const confirmation = structuredClone(snapshot);
+    return {
+      candidate: {
+        snapshot,
+        confirmationProject: confirmation.project,
+        confirmationSecurity: confirmation.security,
+      },
+      confirmation,
+    };
+  } catch {
+    throw new ProjectSecurityError('invalid_project');
+  }
 }
 
 function safeImportDescriptor(inspected) {
@@ -174,6 +201,7 @@ export default function useProject() {
   const pendingImportRef = useRef(null);
   const validatedImportRef = useRef(null);
   const readGenerationRef = useRef(0);
+  const confirmAttemptRef = useRef(0);
 
   // -----------------------------------------------------------------------
   // Secure export — serialize through the project security boundary first.
@@ -212,12 +240,14 @@ export default function useProject() {
 
   const invalidatePendingImport = useCallback(() => {
     readGenerationRef.current += 1;
+    confirmAttemptRef.current += 1;
     clearPendingImport();
     validatedImportRef.current = null;
   }, [clearPendingImport]);
 
   useEffect(() => () => {
     readGenerationRef.current += 1;
+    confirmAttemptRef.current += 1;
     pendingImportRef.current = null;
     validatedImportRef.current = null;
   }, []);
@@ -238,7 +268,7 @@ export default function useProject() {
       uiDispatch({
         type: 'SET_FIELD',
         field: 'error',
-        value: projectSecurityMessage({ code: 'oversized_project' }),
+        value: projectSecurityMessage({ code: 'oversized_project' }, 'import'),
       });
       return;
     }
@@ -249,7 +279,7 @@ export default function useProject() {
       uiDispatch({
         type: 'SET_FIELD',
         field: 'error',
-        value: projectSecurityMessage(error),
+        value: projectSecurityMessage(error, 'import'),
       });
     };
 
@@ -263,18 +293,16 @@ export default function useProject() {
           if (inspected.kind === PROJECT_SECURITY_MODES.SANITIZED
               && inspected.requiresConfirmation !== true) {
             clearPendingImport();
-            validatedImportRef.current = {
-              project: inspected.envelope,
-              security: inspected.security,
-            };
+            const staged = prepareValidatedImportCandidate(
+              inspected.envelope,
+              inspected.security,
+              inspected.warnings,
+            );
+            validatedImportRef.current = staged.candidate;
             uiDispatch({
               type: 'SHOW_MODAL',
               name: 'loadConfirm',
-              value: {
-                project: inspected.envelope,
-                security: inspected.security,
-                warnings: inspected.warnings,
-              },
+              value: staged.confirmation,
             });
           } else {
             pendingImportRef.current = {
@@ -302,24 +330,32 @@ export default function useProject() {
   }, [clearPendingImport, invalidatePendingImport, uiDispatch]);
 
   const confirmPendingImport = useCallback(async ({ passphrase, acknowledgement } = {}) => {
+    const attempt = confirmAttemptRef.current + 1;
+    confirmAttemptRef.current = attempt;
     const pending = pendingImportRef.current;
     if (!pending) {
+      uiDispatch({ type: 'SET_LOADING', isLoading: false });
       uiDispatch({
         type: 'SET_FIELD',
         field: 'error',
-        value: projectSecurityMessage({ code: 'invalid_project' }),
+        value: projectSecurityMessage({ code: 'invalid_project' }, 'import'),
       });
       return;
     }
     if (pending.requiresConfirmation && acknowledgement !== true) {
+      uiDispatch({ type: 'SET_LOADING', isLoading: false });
       uiDispatch({
         type: 'SET_FIELD',
         field: 'error',
-        value: projectSecurityMessage({ code: 'invalid_confirmation' }),
+        value: projectSecurityMessage({ code: 'invalid_confirmation' }, 'import'),
       });
       return;
     }
     const generation = readGenerationRef.current;
+    const isCurrentAttempt = () => (
+      generation === readGenerationRef.current
+      && attempt === confirmAttemptRef.current
+    );
 
     uiDispatch({ type: 'SET_LOADING', isLoading: true, message: 'Opening project...' });
     uiDispatch({ type: 'CLEAR_ERROR' });
@@ -328,25 +364,23 @@ export default function useProject() {
         ? { passphrase }
         : {};
       const opened = await openProjectImport(pending.serialized, options);
-      if (generation !== readGenerationRef.current) return;
+      if (!isCurrentAttempt()) return;
+      const staged = prepareValidatedImportCandidate(
+        opened.project,
+        opened.security,
+        opened.warnings,
+      );
       uiDispatch({ type: 'SET_LOADING', isLoading: false });
       invalidatePendingImport();
-      validatedImportRef.current = {
-        project: opened.project,
-        security: opened.security,
-      };
+      validatedImportRef.current = staged.candidate;
       uiDispatch({ type: 'HIDE_MODAL', name: 'projectSecurityImport' });
       uiDispatch({
         type: 'SHOW_MODAL',
         name: 'loadConfirm',
-        value: {
-          project: opened.project,
-          security: opened.security,
-          warnings: opened.warnings,
-        },
+        value: staged.confirmation,
       });
     } catch (error) {
-      if (generation !== readGenerationRef.current) return;
+      if (!isCurrentAttempt()) return;
       const errorCode = error && typeof error === 'object'
         ? ownDataValue(error, 'code')
         : undefined;
@@ -358,10 +392,10 @@ export default function useProject() {
       uiDispatch({
         type: 'SET_FIELD',
         field: 'error',
-        value: projectSecurityMessage(error),
+        value: projectSecurityMessage(error, 'import'),
       });
     } finally {
-      if (generation === readGenerationRef.current) {
+      if (isCurrentAttempt()) {
         uiDispatch({ type: 'SET_LOADING', isLoading: false });
       }
     }
@@ -380,18 +414,18 @@ export default function useProject() {
   const applyLoadedProject = useCallback((project, security) => {
     const validated = validatedImportRef.current;
     if (!validated
-        || validated.project !== project
-        || security !== undefined && validated.security !== security) {
+        || validated.confirmationProject !== project
+        || security !== undefined && validated.confirmationSecurity !== security) {
       invalidatePendingImport();
       uiDispatch({
         type: 'SET_FIELD',
         field: 'error',
-        value: projectSecurityMessage({ code: 'invalid_project' }),
+        value: projectSecurityMessage({ code: 'invalid_project' }, 'import'),
       });
       return;
     }
     invalidatePendingImport();
-    const s = project.state;
+    const s = validated.snapshot.project.state;
 
     // Dispatch LOAD_PROJECT to each context with its relevant state subset
     configDispatch({

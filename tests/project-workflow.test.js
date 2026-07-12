@@ -247,6 +247,12 @@ describe('secure project workflow helpers', () => {
   it('maps known local codes without reflecting unknown error messages', () => {
     expect(projectSecurityMessage({ code: 'oversized_project' }))
       .toBe('Project data exceeds the supported size limit.');
+    expect(projectSecurityMessage({ code: 'invalid_confirmation' }, 'import'))
+      .toBe('Project import acknowledgement is required.');
+    expect(projectSecurityMessage({ code: 'unsupported_crypto' }, 'import'))
+      .toBe('Encrypted project import is unavailable in this browser.');
+    expect(projectSecurityMessage({ code: 'invalid_confirmation' }, 'export'))
+      .toBe('Project export confirmation is invalid.');
 
     const message = projectSecurityMessage({
       code: 'future_error',
@@ -397,6 +403,9 @@ describe('transactional project hook orchestration', () => {
     expect(hookHarness.configDispatch).not.toHaveBeenCalled();
     expect(findUiAction('SHOW_MODAL', action => action.name === 'loadConfirm'))
       .toBeUndefined();
+    expect(findUiAction('SET_FIELD', action => action.field === 'error')).toMatchObject({
+      value: 'Project import acknowledgement is required.',
+    });
     expect(JSON.stringify(hookHarness.uiDispatch.mock.calls))
       .not.toContain('UNIQUE-CALLBACK-PASSPHRASE');
 
@@ -453,6 +462,62 @@ describe('transactional project hook orchestration', () => {
     expect(loadConfirm.value.security.mode).toBe(PROJECT_SECURITY_MODES.SANITIZED);
     expect(loadConfirm.value.project.state.sanitizationTable).toBeNull();
     expect(hookHarness.configDispatch).not.toHaveBeenCalled();
+  });
+
+  it('applies an inaccessible secret-bearing snapshot after the confirmation copy is mutated', async () => {
+    const secretBearingState = {
+      ...baseConfigState,
+      configText: 'set system host-name SANITIZED_HOST_0',
+      isSanitized: true,
+      sanitizationTable: [{
+        type: 'hostname',
+        placeholder: 'SANITIZED_HOST_0',
+        original: 'top-original.example',
+      }],
+      mergeMode: true,
+      configSlots: [{
+        configText: 'set system host-name SANITIZED_HOST_1',
+        intermediateConfig: { metadata: {} },
+        isSanitized: true,
+        sanitizationTable: [{
+          type: 'hostname',
+          placeholder: 'SANITIZED_HOST_1',
+          original: 'nested-original.example',
+        }],
+      }],
+    };
+    const result = await serializeProjectExport(secretBearingState, 'secret-bearing-merge', {
+      mode: PROJECT_SECURITY_MODES.UNSANITIZED,
+      confirmation: 'EXPORT UNSANITIZED',
+    });
+    const project = useProject();
+    project.handleLoadProjectFile(loadEvent(result.serialized));
+    await project.confirmPendingImport({ acknowledgement: true });
+    const loadConfirm = findUiAction('SHOW_MODAL', action => action.name === 'loadConfirm');
+
+    loadConfirm.value.project.state.configText = 'set system login password MUTATED-TOP-SECRET';
+    loadConfirm.value.project.state.configSlots[0].configText =
+      'set system login password MUTATED-NESTED-SECRET';
+    loadConfirm.value.project.state.configSlots[0].sanitizationTable = [{
+      type: 'password',
+      placeholder: 'SANITIZED_KEY_0',
+      original: 'MUTATED-RESTORATION-SECRET',
+    }];
+    project.applyLoadedProject(loadConfirm.value.project, loadConfirm.value.security);
+
+    const configLoad = hookHarness.configDispatch.mock.calls
+      .map(([action]) => action)
+      .find(action => action.type === 'LOAD_PROJECT');
+    const mergeLoad = hookHarness.mergeDispatch.mock.calls
+      .map(([action]) => action)
+      .find(action => action.type === 'LOAD_PROJECT');
+    expect(configLoad.state.configText).toBe('set system host-name SANITIZED_HOST_0');
+    expect(configLoad.state.sanitizationTable[0].original).toBe('top-original.example');
+    expect(mergeLoad.state.configSlots[0].configText)
+      .toBe('set system host-name SANITIZED_HOST_1');
+    expect(mergeLoad.state.configSlots[0].sanitizationTable[0].original)
+      .toBe('nested-original.example');
+    expect(JSON.stringify([configLoad, mergeLoad])).not.toContain('MUTATED-');
   });
 
   it('clears a pending import when cancelled, reset, replaced, or unmounted', async () => {
@@ -515,6 +580,90 @@ describe('transactional project hook orchestration', () => {
     expect(hookHarness.mergeDispatch).not.toHaveBeenCalled();
   });
 
+  it('allows only the latest overlapping confirmation attempt to update UI', async () => {
+    const passphrase = 'correct horse battery staple';
+    const reversibleState = {
+      ...baseConfigState,
+      configText: 'set system host-name SANITIZED_HOST_0',
+      isSanitized: true,
+      sanitizationTable: [{
+        type: 'hostname',
+        placeholder: 'SANITIZED_HOST_0',
+        original: 'original.example',
+      }],
+    };
+    const result = await serializeProjectExport(reversibleState, 'overlap', {
+      mode: PROJECT_SECURITY_MODES.REVERSIBLE,
+      passphrase,
+      confirmationPassphrase: passphrase,
+      acknowledgement: true,
+    });
+    const project = useProject();
+    project.handleLoadProjectFile(loadEvent(result.serialized));
+    hookHarness.uiDispatch.mockClear();
+
+    const olderFailure = project.confirmPendingImport({
+      passphrase: 'too short',
+      acknowledgement: true,
+    });
+    const newerSuccess = project.confirmPendingImport({
+      passphrase,
+      acknowledgement: true,
+    });
+    await Promise.all([olderFailure, newerSuccess]);
+
+    const actions = hookHarness.uiDispatch.mock.calls.map(([action]) => action);
+    expect(actions.some(action => action.type === 'SET_FIELD' && action.field === 'error'))
+      .toBe(false);
+    expect(actions.filter(action => action.type === 'SET_LOADING' && !action.isLoading))
+      .toHaveLength(1);
+    expect(actions.filter(action => action.type === 'SHOW_MODAL' && action.name === 'loadConfirm'))
+      .toHaveLength(1);
+    expect(actions.at(-1)).toEqual({
+      type: 'SHOW_MODAL',
+      name: 'loadConfirm',
+      value: expect.any(Object),
+    });
+  });
+
+  it('ends loading when a latest acknowledgement failure supersedes an open attempt', async () => {
+    const passphrase = 'correct horse battery staple';
+    const reversibleState = {
+      ...baseConfigState,
+      configText: 'set system host-name SANITIZED_HOST_0',
+      isSanitized: true,
+      sanitizationTable: [{
+        type: 'hostname',
+        placeholder: 'SANITIZED_HOST_0',
+        original: 'original.example',
+      }],
+    };
+    const result = await serializeProjectExport(reversibleState, 'overlap-ack', {
+      mode: PROJECT_SECURITY_MODES.REVERSIBLE,
+      passphrase,
+      confirmationPassphrase: passphrase,
+      acknowledgement: true,
+    });
+    const project = useProject();
+    project.handleLoadProjectFile(loadEvent(result.serialized));
+    hookHarness.uiDispatch.mockClear();
+
+    const olderSuccess = project.confirmPendingImport({ passphrase, acknowledgement: true });
+    const newerRejection = project.confirmPendingImport({
+      passphrase,
+      acknowledgement: false,
+    });
+    await Promise.all([olderSuccess, newerRejection]);
+
+    const actions = hookHarness.uiDispatch.mock.calls.map(([action]) => action);
+    expect(actions.filter(action => action.type === 'SET_LOADING' && !action.isLoading))
+      .toHaveLength(1);
+    expect(actions.some(action => action.type === 'SHOW_MODAL' && action.name === 'loadConfirm'))
+      .toBe(false);
+    expect(actions.find(action => action.type === 'SET_FIELD' && action.field === 'error'))
+      .toMatchObject({ value: 'Project import acknowledgement is required.' });
+  });
+
   it('clears encrypted pending bytes when WebCrypto is unavailable', async () => {
     const passphrase = 'correct horse battery staple';
     const reversibleState = {
@@ -541,7 +690,7 @@ describe('transactional project hook orchestration', () => {
     await project.confirmPendingImport({ passphrase, acknowledgement: true });
 
     expect(findUiAction('SET_FIELD', action => action.field === 'error')).toMatchObject({
-      value: 'Encrypted project export is unavailable in this browser.',
+      value: 'Encrypted project import is unavailable in this browser.',
     });
     expect(findUiAction('HIDE_MODAL', action => action.name === 'projectSecurityImport'))
       .toBeDefined();

@@ -1,4 +1,11 @@
-import { JUNOS_PREDEFINED_APPS, sanitizeJunosName } from '../parsers/parser-utils.js';
+import {
+  JUNOS_PREDEFINED_APPS,
+  isPredefEquivalent,
+  mapAppToJunos,
+  mapProfileToSrx,
+  sanitizeJunosName,
+} from '../parsers/parser-utils.js';
+import { getJunosEmission } from '../utils/app-mappings.js';
 
 export const JUNOS_IDENTIFIER_CATALOG = Object.freeze({
   TARGET_CONTEXT: 'target-context',
@@ -85,6 +92,55 @@ function destinationZoneField(item) {
   return item.dst_zones ? 'dst_zones' : 'destination_zones';
 }
 
+function preferredScreenName(screen) {
+  return screen.name || 'default-screen';
+}
+
+function preferredVpnName(vpn) {
+  return vpn.name || 'vpn-1';
+}
+
+function preferredDhcpPoolName(item) {
+  return item.name || item.interface || 'dhcp-pool';
+}
+
+function flowCollectorKey(collector) {
+  return JSON.stringify([
+    collector.address || '',
+    collector.port || 2055,
+    collector.protocol || 'ipfix',
+    collector.source_address || '',
+  ]);
+}
+
+function natZonePairs(rule, type) {
+  if (type === 'static') return [{ fromZone: 'STATIC-NAT', toZone: '*' }];
+  return sourceZones(rule).flatMap(fromZone => (
+    destinationZones(rule).map(toZone => ({ fromZone, toZone }))
+  ));
+}
+
+function preferredNatRuleSetName(type, fromZone, toZone) {
+  return type === 'static' ? 'STATIC-NAT' : `${fromZone}-to-${toZone}`;
+}
+
+function preferredVpnNames(vpn) {
+  const vpnName = preferredVpnName(vpn);
+  return {
+    vpnName,
+    ikeProposal: vpn.ike_proposal?.name || `ike-prop-${vpnName}`,
+    ikeGateway: vpn.ike_gateway?.name || `gw-${vpnName}`,
+    ipsecProposal: vpn.ipsec_proposal?.name || `ipsec-prop-${vpnName}`,
+    ikePolicy: `ike-pol-${vpnName}`,
+    ipsecPolicy: `ipsec-pol-${vpnName}`,
+  };
+}
+
+function canonicalFlowTemplateNames(collectors) {
+  const keys = [...new Set((collectors || []).map(flowCollectorKey))].sort();
+  return new Map(keys.map((key, index) => [key, `flow-tpl-${index + 1}`]));
+}
+
 function generatedPolicyName(policy, index) {
   const name = policy.name || '';
   const generic = !name
@@ -127,7 +183,7 @@ function createSymbolCollector() {
 
   function addReference({
     catalogKey, context, namespace, compatibleKinds, sourceName, referencePath,
-    literals = [],
+    literals = [], bindingSourceName, literalOutputName,
   }) {
     if (sourceName === undefined || sourceName === null) return;
     references.push({
@@ -136,6 +192,8 @@ function createSymbolCollector() {
       namespace,
       compatibleKinds,
       sourceName,
+      ...(bindingSourceName === undefined ? {} : { bindingSourceName }),
+      ...(literalOutputName === undefined ? {} : { literalOutputName }),
       referencePath,
       literals,
     });
@@ -143,7 +201,7 @@ function createSymbolCollector() {
 
   function addGenerated({
     catalogKey, context, namespace, kind, sourceName, definitionPath, role,
-    stableParentKey,
+    stableParentKey, preferredOutputName,
   }) {
     if (sourceName === undefined || sourceName === null) return;
     definitions.push({
@@ -156,6 +214,7 @@ function createSymbolCollector() {
       generated: true,
       role,
       stableParentKey,
+      ...(preferredOutputName === undefined ? {} : { preferredOutputName }),
     });
   }
 
@@ -174,33 +233,204 @@ function addZoneReference(collector, device, sourceName, referencePath) {
   });
 }
 
-function addAddressReference(collector, device, sourceName, referencePath) {
+function addAddressReference(
+  collector,
+  device,
+  sourceName,
+  referencePath,
+  compatibleKinds = ['address', 'address-set'],
+) {
   collector.addReference({
     catalogKey: JUNOS_IDENTIFIER_CATALOG.ADDRESS_BOOK,
     context: addressBookContext(device),
     namespace: 'address-book-entry',
-    compatibleKinds: ['address', 'address-set'],
+    compatibleKinds,
     sourceName,
     referencePath,
     literals: ANY_LITERAL,
   });
 }
 
-function addApplicationReference(collector, device, sourceName, referencePath) {
+function addApplicationReference(
+  collector,
+  device,
+  sourceName,
+  referencePath,
+  options = {},
+) {
   collector.addReference({
     catalogKey: JUNOS_IDENTIFIER_CATALOG.APPLICATION,
     context: applicationsContext(device),
     namespace: 'application-entry',
-    compatibleKinds: ['application', 'application-set'],
+    compatibleKinds: options.compatibleKinds || ['application', 'application-set'],
     sourceName,
     referencePath,
     literals: APPLICATION_LITERALS,
+    ...(options.bindingSourceName === undefined
+      ? {} : { bindingSourceName: options.bindingSourceName }),
+    ...(options.literalOutputName === undefined
+      ? {} : { literalOutputName: options.literalOutputName }),
   });
+}
+
+function preferredCustomApplicationName(sourceName) {
+  let preferred = sanitizeJunosName(sourceName).replace(/\./g, '-');
+  if (/^\d/.test(preferred)) preferred = `app-${preferred}`;
+  return preferred;
+}
+
+function preferredUnmappedApplicationName(sourceName) {
+  let preferred = `${sanitizeJunosName(sourceName).replace(/\./g, '-')}-UNMAPPED`;
+  if (/^\d/.test(preferred)) preferred = `app-${preferred}`;
+  return preferred;
+}
+
+function addGeneratedApplicationUse(state, sourceName, referencePath) {
+  const {
+    collector, device, generatedApplications, sourceVendor,
+  } = state;
+  const appContext = applicationsContext(device);
+  const mapped = mapAppToJunos(sourceName, sourceVendor);
+  if (mapped) {
+    addApplicationReference(collector, device, sourceName, referencePath, {
+      literalOutputName: mapped,
+    });
+    return;
+  }
+
+  const emission = getJunosEmission(sourceName, sourceVendor);
+  const preferredName = emission?.kind === 'custom'
+    ? preferredCustomApplicationName(sourceName)
+    : preferredUnmappedApplicationName(sourceName);
+  const definitionRole = emission?.kind === 'custom'
+    ? emission.ports.length > 1 ? 'custom-application-set' : 'custom-application'
+    : 'unmapped-application';
+  const definitionKey = `${appContext}\0${definitionRole}\0${sourceName}`;
+  if (!generatedApplications.has(definitionKey)) {
+    generatedApplications.add(definitionKey);
+    if (emission?.kind === 'custom' && emission.ports.length > 1) {
+      collector.addGenerated({
+        catalogKey: JUNOS_IDENTIFIER_CATALOG.APPLICATION,
+        context: appContext,
+        namespace: 'application-entry',
+        kind: 'application-set',
+        sourceName,
+        preferredOutputName: preferredName,
+        definitionPath: referencePath,
+        role: definitionRole,
+        stableParentKey: `custom-application:${sourceName}`,
+      });
+      for (const port of [...emission.ports].map(String).sort()) {
+        collector.addGenerated({
+          catalogKey: JUNOS_IDENTIFIER_CATALOG.APPLICATION,
+          context: appContext,
+          namespace: 'application-entry',
+          kind: 'application',
+          sourceName: `${sourceName}:port:${port}`,
+          preferredOutputName: `${preferredName}-p${port}`,
+          definitionPath: referencePath,
+          role: `custom-application-port:${port}`,
+          stableParentKey: `custom-application:${sourceName}`,
+        });
+      }
+    } else {
+      collector.addGenerated({
+        catalogKey: JUNOS_IDENTIFIER_CATALOG.APPLICATION,
+        context: appContext,
+        namespace: 'application-entry',
+        kind: 'application',
+        sourceName,
+        preferredOutputName: preferredName,
+        definitionPath: referencePath,
+        role: definitionRole,
+        stableParentKey: `${emission?.kind === 'custom' ? 'custom' : 'unmapped'}-application:${sourceName}`,
+      });
+    }
+  }
+  addApplicationReference(collector, device, sourceName, referencePath, {
+    bindingSourceName: sourceName,
+    compatibleKinds: emission?.kind === 'custom' && emission.ports.length > 1
+      ? ['application-set'] : ['application'],
+  });
+}
+
+function addPassthroughApplicationUse(state, sourceName, referencePath, role) {
+  const appContext = applicationsContext(state.device);
+  const definitionKey = `${appContext}\0${role}\0${sourceName}`;
+  if (!state.generatedApplications.has(definitionKey)) {
+    state.generatedApplications.add(definitionKey);
+    state.collector.addGenerated({
+      catalogKey: JUNOS_IDENTIFIER_CATALOG.APPLICATION,
+      context: appContext,
+      namespace: 'application-entry',
+      kind: 'application',
+      sourceName,
+      definitionPath: referencePath,
+      role,
+      stableParentKey: `${role}:${sourceName}`,
+    });
+  }
+  addApplicationReference(state.collector, state.device, sourceName, referencePath, {
+    bindingSourceName: sourceName,
+    compatibleKinds: ['application'],
+  });
+}
+
+function addResolvedApplicationUse(state, sourceName, referencePath, options = {}) {
+  if (sourceName === 'service-set') return;
+  if (sourceName === 'any') {
+    addApplicationReference(state.collector, state.device, sourceName, referencePath);
+    return;
+  }
+  const alias = state.applicationAliases.get(sourceName);
+  if (alias) {
+    addApplicationReference(state.collector, state.device, sourceName, referencePath, alias);
+    return;
+  }
+  const mapped = mapAppToJunos(sourceName, state.sourceVendor);
+  if (mapped) {
+    addApplicationReference(state.collector, state.device, sourceName, referencePath, {
+      literalOutputName: mapped,
+      compatibleKinds: ['application'],
+    });
+    return;
+  }
+  if (options.service) {
+    addPassthroughApplicationUse(
+      state,
+      sourceName,
+      referencePath,
+      'unresolved-service-application',
+    );
+    return;
+  }
+  if (['srx', 'greenfield', 'srx_healthcheck'].includes(state.sourceVendor)) {
+    addPassthroughApplicationUse(
+      state,
+      sourceName,
+      referencePath,
+      'passthrough-application',
+    );
+    return;
+  }
+  addGeneratedApplicationUse(state, sourceName, referencePath);
 }
 
 function addRoutingInstanceSymbol(state, sourceName, path) {
   if (!sourceName) return;
   const { collector, device, routingInstances } = state;
+  if (BUILT_IN_ROUTING_INSTANCES.includes(sourceName)) {
+    collector.addReference({
+      catalogKey: JUNOS_IDENTIFIER_CATALOG.ROUTING_INSTANCE,
+      context: device,
+      namespace: 'routing-instance',
+      compatibleKinds: ['routing-instance'],
+      sourceName,
+      referencePath: path,
+      literals: BUILT_IN_ROUTING_INSTANCES,
+    });
+    return;
+  }
   const key = `${device}\0${sourceName}`;
   if (!routingInstances.has(key)) {
     routingInstances.set(key, path);
@@ -239,6 +469,7 @@ function addRoutingPolicyReference(collector, context, sourceName, path) {
 
 function collectBaseObjects(config, state) {
   const { collector, device, prefix } = state;
+  const addressGroupNames = new Set((config.address_groups || []).map(group => group.name));
   for (let index = 0; index < (config.zones || []).length; index += 1) {
     const zone = config.zones[index];
     collector.addDefinition({
@@ -279,93 +510,154 @@ function collectBaseObjects(config, state) {
         device,
         group.members[memberIndex],
         joinedPath(prefix, `address_groups[${index}].members[${memberIndex}]`),
+        addressGroupNames.has(group.members[memberIndex]) ? ['address-set'] : ['address'],
       );
     }
   }
 }
 
 function collectApplications(config, state) {
-  const { collector, device, prefix, applicationAliases } = state;
+  const {
+    collector, device, prefix, applicationAliases, applicationGroups,
+  } = state;
   const appContext = applicationsContext(device);
+  function addCommaPortItem(item, rootPath, kind, index, port) {
+    const ownerPath = joinedPath(prefix, `${rootPath}[${index}]`);
+    const setName = `${item.name}-set`;
+    applicationAliases.set(item.name, {
+      bindingSourceName: setName,
+      compatibleKinds: ['application-set'],
+    });
+    collector.addGenerated({
+      catalogKey: JUNOS_IDENTIFIER_CATALOG.APPLICATION,
+      context: appContext,
+      namespace: 'application-entry',
+      kind: 'application-set',
+      sourceName: setName,
+      definitionPath: ownerPath,
+      role: `${kind}-multi-port-set`,
+      stableParentKey: `${kind}:${item.name}`,
+    });
+    const parts = [...new Set(port.split(',').map(part => part.trim()))].sort();
+    for (const part of parts) {
+      collector.addGenerated({
+        catalogKey: JUNOS_IDENTIFIER_CATALOG.APPLICATION,
+        context: appContext,
+        namespace: 'application-entry',
+        kind: 'application',
+        sourceName: `${item.name}-${part.replace('-', 'to')}`,
+        definitionPath: ownerPath,
+        role: `${kind}-port:${part}`,
+        stableParentKey: `${kind}:${item.name}`,
+      });
+    }
+    addApplicationReference(
+      collector,
+      device,
+      item.name,
+      joinedPath(prefix, `${rootPath}[${index}].name`),
+      applicationAliases.get(item.name),
+    );
+  }
 
-  function collectApplicationItems(items, rootPath, kind) {
-    for (let index = 0; index < (items || []).length; index += 1) {
-      const item = items[index];
-      const port = item.port_range || item.port || '';
-      const ownerPath = joinedPath(prefix, `${rootPath}[${index}]`);
-      if (port.includes(',')) {
-        applicationAliases.set(item.name, `${item.name}-set`);
-        collector.addGenerated({
-          catalogKey: JUNOS_IDENTIFIER_CATALOG.APPLICATION,
-          context: appContext,
-          namespace: 'application-entry',
-          kind: 'application-set',
-          sourceName: `${item.name}-set`,
-          definitionPath: ownerPath,
-          role: `${kind}-multi-port-set`,
-          stableParentKey: `${kind}:${item.name}`,
-        });
-        const parts = port.split(',').map(part => part.trim());
-        for (let partIndex = 0; partIndex < parts.length; partIndex += 1) {
-          collector.addGenerated({
-            catalogKey: JUNOS_IDENTIFIER_CATALOG.APPLICATION,
-            context: appContext,
-            namespace: 'application-entry',
-            kind: 'application',
-            sourceName: `${item.name}-${parts[partIndex].replace('-', 'to')}`,
-            definitionPath: ownerPath,
-            role: `${kind}-port-${partIndex + 1}`,
-            stableParentKey: `${kind}:${item.name}`,
-          });
-        }
-        collector.addReference({
-          catalogKey: JUNOS_IDENTIFIER_CATALOG.APPLICATION,
-          context: appContext,
-          namespace: 'application-entry',
+  for (let index = 0; index < (config.service_objects || []).length; index += 1) {
+    const item = config.service_objects[index];
+    const protocol = item.protocol || 'tcp';
+    const port = item.port_range || '';
+    const predefined = isPredefEquivalent(item.name, protocol, port);
+    if (predefined) {
+      applicationAliases.set(item.name, {
+        literalOutputName: predefined,
+        compatibleKinds: ['application'],
+      });
+      continue;
+    }
+    if (port.includes(',')) {
+      addCommaPortItem(item, 'service_objects', 'service', index, port);
+      continue;
+    }
+    const emitsWithoutPort = ['icmp', 'icmp6'].includes(protocol)
+      || (protocol === 'ip' && item.protocol_number);
+    if (!port && !emitsWithoutPort) continue;
+    collector.addDefinition({
+      catalogKey: JUNOS_IDENTIFIER_CATALOG.APPLICATION,
+      context: appContext,
+      namespace: 'application-entry',
+      kind: 'application',
+      sourceName: item.name,
+      definitionPath: joinedPath(prefix, `service_objects[${index}].name`),
+    });
+    applicationAliases.set(item.name, {
+      bindingSourceName: item.name,
+      compatibleKinds: ['application'],
+    });
+  }
+
+  for (let index = 0; index < (config.applications || []).length; index += 1) {
+    const item = config.applications[index];
+    const port = item.port || '';
+    if (port.includes(',')) {
+      addCommaPortItem(item, 'applications', 'application', index, port);
+      continue;
+    }
+    if (!item.protocol || !port) continue;
+    collector.addDefinition({
+      catalogKey: JUNOS_IDENTIFIER_CATALOG.APPLICATION,
+      context: appContext,
+      namespace: 'application-entry',
+      kind: 'application',
+      sourceName: item.name,
+      definitionPath: joinedPath(prefix, `applications[${index}].name`),
+    });
+    applicationAliases.set(item.name, {
+      bindingSourceName: item.name,
+      compatibleKinds: ['application'],
+    });
+  }
+
+  const serviceGroups = config.service_groups || [];
+  const serviceGroupNames = new Set(serviceGroups.map(group => group.name));
+  for (let index = 0; index < serviceGroups.length; index += 1) {
+    const group = serviceGroups[index];
+    collector.addDefinition({
+      catalogKey: JUNOS_IDENTIFIER_CATALOG.APPLICATION,
+      context: appContext,
+      namespace: 'application-entry',
+      kind: 'application-set',
+      sourceName: group.name,
+      definitionPath: joinedPath(prefix, `service_groups[${index}].name`),
+    });
+    applicationAliases.set(group.name, {
+      bindingSourceName: group.name,
+      compatibleKinds: ['application-set'],
+    });
+    for (let memberIndex = 0; memberIndex < (group.members || []).length; memberIndex += 1) {
+      const member = group.members[memberIndex];
+      const path = joinedPath(prefix, `service_groups[${index}].members[${memberIndex}]`);
+      if (serviceGroupNames.has(member)) {
+        addApplicationReference(collector, device, member, path, {
           compatibleKinds: ['application-set'],
-          sourceName: `${item.name}-set`,
-          referencePath: joinedPath(prefix, `${rootPath}[${index}].name`),
-          literals: [],
         });
+      } else if (applicationAliases.has(member)) {
+        addApplicationReference(collector, device, member, path, applicationAliases.get(member));
       } else {
-        collector.addDefinition({
-          catalogKey: JUNOS_IDENTIFIER_CATALOG.APPLICATION,
-          context: appContext,
-          namespace: 'application-entry',
-          kind: 'application',
-          sourceName: item.name,
-          definitionPath: joinedPath(prefix, `${rootPath}[${index}].name`),
-        });
+        const mapped = mapAppToJunos(member, state.sourceVendor);
+        addApplicationReference(collector, device, member, path, mapped
+          ? { literalOutputName: mapped, compatibleKinds: ['application'] }
+          : { compatibleKinds: ['application'] });
       }
     }
   }
 
-  collectApplicationItems(config.service_objects || [], 'service_objects', 'service');
-  collectApplicationItems(config.applications || [], 'applications', 'application');
-
-  const groupCollections = [
-    ['service_groups', config.service_groups || []],
-    ['application_groups', config.application_groups || []],
-  ];
-  for (const [rootPath, groups] of groupCollections) {
-    for (let index = 0; index < groups.length; index += 1) {
-      const group = groups[index];
-      collector.addDefinition({
-        catalogKey: JUNOS_IDENTIFIER_CATALOG.APPLICATION,
-        context: appContext,
-        namespace: 'application-entry',
-        kind: 'application-set',
-        sourceName: group.name,
-        definitionPath: joinedPath(prefix, `${rootPath}[${index}].name`),
-      });
-      for (let memberIndex = 0; memberIndex < (group.members || []).length; memberIndex += 1) {
-        addApplicationReference(
-          collector,
-          device,
-          applicationAliases.get(group.members[memberIndex]) || group.members[memberIndex],
-          joinedPath(prefix, `${rootPath}[${index}].members[${memberIndex}]`),
-        );
-      }
+  for (let index = 0; index < (config.application_groups || []).length; index += 1) {
+    const group = config.application_groups[index];
+    applicationGroups.set(group.name, { ...group, index });
+    for (let memberIndex = 0; memberIndex < (group.members || []).length; memberIndex += 1) {
+      addResolvedApplicationUse(
+        state,
+        group.members[memberIndex],
+        joinedPath(prefix, `application_groups[${index}].members[${memberIndex}]`),
+      );
     }
   }
 }
@@ -394,30 +686,28 @@ function collectSecurityProfiles(config, state) {
       if (securityProfiles[type]) idp[type] = securityProfiles[type];
     }
     for (const [type, value] of Object.entries(utm)) {
+      const mapped = mapProfileToSrx(type, value);
       let namespace;
       let kind;
-      let preferredName;
+      const preferredName = mapped.srxProfile;
       let applicationFirewallRules = [];
-      if (type === 'virus' || type === 'wildfire-analysis') {
+      if (mapped.srxFeature === 'utm' && mapped.srxType === 'anti-virus') {
         namespace = 'utm-anti-virus-profile';
         kind = 'anti-virus-profile';
-        preferredName = `custom-av-${value}`;
-      } else if (type === 'url-filtering') {
+      } else if (mapped.srxFeature === 'utm' && mapped.srxType === 'web-filtering') {
         namespace = 'utm-web-filtering-profile';
         kind = 'web-filtering-profile';
-        preferredName = `custom-wf-${value}`;
-      } else if (type === 'email-filter') {
+      } else if (mapped.srxFeature === 'utm' && mapped.srxType === 'anti-spam') {
         namespace = 'utm-anti-spam-profile';
         kind = 'anti-spam-profile';
-        preferredName = `junos-as-${value}`;
-      } else if (type === 'application-control') {
+      } else if (mapped.srxFeature === 'appfw') {
         const definition = config.security_profile_definitions?.[`${type}:${value}`];
         const blocked = Object.entries(definition?.categories || {})
-          .filter(([, action]) => ['block', 'block-all', 'reset'].includes(action));
+          .filter(([, action]) => ['block', 'block-all', 'reset'].includes(action))
+          .sort(([left], [right]) => left.localeCompare(right));
         if (blocked.length === 0) continue;
         namespace = 'application-firewall-rule-set';
         kind = 'application-firewall-rule-set';
-        preferredName = `appfw-${value}`;
         applicationFirewallRules = blocked;
       } else {
         continue;
@@ -453,7 +743,8 @@ function collectSecurityProfiles(config, state) {
         context: profileContext,
         namespace,
         compatibleKinds: [kind],
-        sourceName: preferredName,
+        sourceName: value,
+        bindingSourceName: preferredName,
         referencePath: joinedPath(prefix, `security_policies[${policyIndex}].security_profiles.${type}`),
         literals: [],
       });
@@ -611,7 +902,9 @@ function collectSecurityProfiles(config, state) {
 }
 
 function collectPoliciesAndSchedules(config, state) {
-  const { collector, device, prefix, applicationAliases } = state;
+  const {
+    collector, device, prefix, applicationGroups,
+  } = state;
   for (let index = 0; index < (config.schedules || []).length; index += 1) {
     collector.addDefinition({
       catalogKey: JUNOS_IDENTIFIER_CATALOG.SCHEDULER,
@@ -672,11 +965,31 @@ function collectPoliciesAndSchedules(config, state) {
     for (let addressIndex = 0; addressIndex < (policy.dst_addresses || []).length; addressIndex += 1) {
       addAddressReference(collector, device, policy.dst_addresses[addressIndex], joinedPath(prefix, `security_policies[${index}].dst_addresses[${addressIndex}]`));
     }
-    for (const field of ['applications', 'services']) {
-      for (let appIndex = 0; appIndex < (policy[field] || []).length; appIndex += 1) {
-        const sourceName = applicationAliases.get(policy[field][appIndex]) || policy[field][appIndex];
-        addApplicationReference(collector, device, sourceName, joinedPath(prefix, `security_policies[${index}].${field}[${appIndex}]`));
+    for (let appIndex = 0; appIndex < (policy.applications || []).length; appIndex += 1) {
+      const sourceName = policy.applications[appIndex];
+      const path = joinedPath(prefix, `security_policies[${index}].applications[${appIndex}]`);
+      const group = applicationGroups.get(sourceName);
+      if (group && (group.members || []).length > 0) {
+        for (let memberIndex = 0; memberIndex < group.members.length; memberIndex += 1) {
+          addResolvedApplicationUse(
+            state,
+            group.members[memberIndex],
+            `${path}#member:${memberIndex}`,
+          );
+        }
+      } else {
+        addResolvedApplicationUse(state, sourceName, path);
       }
+    }
+    for (let serviceIndex = 0; serviceIndex < (policy.services || []).length; serviceIndex += 1) {
+      const sourceName = policy.services[serviceIndex];
+      if (['application-default', 'any', 'service-set'].includes(sourceName)) continue;
+      addResolvedApplicationUse(
+        state,
+        sourceName,
+        joinedPath(prefix, `security_policies[${index}].services[${serviceIndex}]`),
+        { service: true },
+      );
     }
     if (policy.schedule) {
       collector.addReference({
@@ -701,37 +1014,39 @@ function collectNat(config, state) {
       : [rule.type || 'source'];
     let occurrence = 0;
     for (const type of types) {
-      const fromZone = sourceZones(rule)[0] || 'any';
-      const toZone = destinationZones(rule)[0] || 'any';
-      const ruleSetName = type === 'static' ? 'STATIC-NAT' : `${fromZone}-to-${toZone}`;
-      const contextFrom = type === 'static' ? 'STATIC-NAT' : fromZone;
-      const contextTo = type === 'static' ? '*' : toZone;
-      const ruleSetPath = joinedPath(prefix, `nat_rules[${index}]`);
-      const ruleSetKey = `${device}\0${type}\0${contextFrom}\0${contextTo}`;
-      if (!natRuleSets.has(ruleSetKey)) {
-        natRuleSets.add(ruleSetKey);
-        collector.addGenerated({
-          catalogKey: JUNOS_IDENTIFIER_CATALOG.NAT_RULE_SET,
-          context: `${device}/nat:${type}`,
-          namespace: 'nat-rule-set',
-          kind: `${type}-nat-rule-set`,
-          sourceName: ruleSetName,
-          definitionPath: ruleSetPath,
-          role: `${type}-nat-rule-set`,
-          stableParentKey: `${type}-zone-pair:${contextFrom}->${contextTo}`,
+      const zonePairs = natZonePairs(rule, type);
+      for (const { fromZone, toZone } of zonePairs) {
+        const ruleSetName = preferredNatRuleSetName(type, fromZone, toZone);
+        const ruleSetPath = joinedPath(prefix, `nat_rules[${index}]`);
+        const ruleSetKey = `${device}\0${type}\0${fromZone}\0${toZone}`;
+        if (!natRuleSets.has(ruleSetKey)) {
+          natRuleSets.add(ruleSetKey);
+          const role = type === 'static'
+            ? 'static-nat-rule-set'
+            : `${type}-nat-rule-set:${fromZone}->${toZone}`;
+          collector.addGenerated({
+            catalogKey: JUNOS_IDENTIFIER_CATALOG.NAT_RULE_SET,
+            context: `${device}/nat:${type}`,
+            namespace: 'nat-rule-set',
+            kind: `${type}-nat-rule-set`,
+            sourceName: ruleSetName,
+            definitionPath: ruleSetPath,
+            role,
+            stableParentKey: `${type}-zone-pair:${fromZone}->${toZone}`,
+          });
+        }
+        occurrence += 1;
+        collector.addDefinition({
+          catalogKey: JUNOS_IDENTIFIER_CATALOG.NAT_RULE,
+          context: natRuleSetContext(device, type, fromZone, toZone),
+          namespace: 'nat-rule',
+          kind: `${type}-nat-rule`,
+          sourceName: rule.name,
+          definitionPath: occurrence === 1
+            ? joinedPath(prefix, `nat_rules[${index}].name`)
+            : joinedPath(prefix, `nat_rules[${index}].name#${type}:${fromZone}->${toZone}`),
         });
       }
-      occurrence += 1;
-      collector.addDefinition({
-        catalogKey: JUNOS_IDENTIFIER_CATALOG.NAT_RULE,
-        context: natRuleSetContext(device, type, contextFrom, contextTo),
-        namespace: 'nat-rule',
-        kind: `${type}-nat-rule`,
-        sourceName: rule.name,
-        definitionPath: occurrence === 1
-          ? joinedPath(prefix, `nat_rules[${index}].name`)
-          : joinedPath(prefix, `nat_rules[${index}].name#${type}`),
-      });
     }
 
     for (let zoneIndex = 0; zoneIndex < sourceZones(rule).length; zoneIndex += 1) {
@@ -895,30 +1210,43 @@ function collectRouting(config, state) {
 }
 
 function collectScreenAndVpn(config, state) {
-  const { collector, device, prefix, sharedDefinitions } = state;
+  const { collector, device, prefix } = state;
   for (let index = 0; index < (config.screen_config || []).length; index += 1) {
     const screen = config.screen_config[index];
-    collector.addDefinition({
+    const common = {
       catalogKey: JUNOS_IDENTIFIER_CATALOG.SCREEN,
       context: device,
       namespace: 'screen-profile',
       kind: 'screen-profile',
-      sourceName: screen.name || 'default-screen',
-      definitionPath: joinedPath(prefix, `screen_config[${index}].name`),
-    });
+      sourceName: preferredScreenName(screen),
+    };
+    if (screen.name) {
+      collector.addDefinition({
+        ...common,
+        definitionPath: joinedPath(prefix, `screen_config[${index}].name`),
+      });
+    } else {
+      collector.addGenerated({
+        ...common,
+        definitionPath: joinedPath(prefix, `screen_config[${index}]`),
+        role: 'default-screen-profile',
+        stableParentKey: `screen:${screen.zone || 'unbound'}`,
+      });
+    }
     if (screen.zone) addZoneReference(collector, device, screen.zone, joinedPath(prefix, `screen_config[${index}].zone`));
   }
 
   for (let index = 0; index < (config.vpn_tunnels || []).length; index += 1) {
     const vpn = config.vpn_tunnels[index];
-    const sourceVpnName = vpn.name || 'vpn-1';
-    const vpnName = sanitizeJunosName(sourceVpnName);
+    const {
+      vpnName: sourceVpnName,
+      ikeProposal,
+      ikeGateway,
+      ipsecProposal,
+      ikePolicy,
+      ipsecPolicy,
+    } = preferredVpnNames(vpn);
     const ownerPath = joinedPath(prefix, `vpn_tunnels[${index}]`);
-    const ikeProposal = vpn.ike_proposal?.name || `ike-prop-${vpnName}`;
-    const ikeGateway = vpn.ike_gateway?.name || `gw-${vpnName}`;
-    const ipsecProposal = vpn.ipsec_proposal?.name || `ipsec-prop-${vpnName}`;
-    const ikePolicy = `ike-pol-${vpnName}`;
-    const ipsecPolicy = `ipsec-pol-${vpnName}`;
     for (const item of [
       [JUNOS_IDENTIFIER_CATALOG.IKE, 'ike-policy', 'ike-policy', ikePolicy, 'ike-policy'],
       [JUNOS_IDENTIFIER_CATALOG.IPSEC, 'ipsec-policy', 'ipsec-policy', ipsecPolicy, 'ipsec-policy'],
@@ -940,18 +1268,14 @@ function collectScreenAndVpn(config, state) {
       [JUNOS_IDENTIFIER_CATALOG.IPSEC, 'ipsec-proposal', 'ipsec-proposal', ipsecProposal, 'ipsec-proposal', vpn.ipsec_proposal?.name, 'ipsec_proposal.name'],
     ]) {
       if (item[5]) {
-        const sharedKey = `${device}\0${item[1]}\0${item[3]}`;
-        if (!sharedDefinitions.has(sharedKey)) {
-          sharedDefinitions.add(sharedKey);
-          collector.addDefinition({
-            catalogKey: item[0],
-            context: device,
-            namespace: item[1],
-            kind: item[2],
-            sourceName: item[3],
-            definitionPath: joinedPath(prefix, `vpn_tunnels[${index}].${item[6]}`),
-          });
-        }
+        collector.addDefinition({
+          catalogKey: item[0],
+          context: device,
+          namespace: item[1],
+          kind: item[2],
+          sourceName: item[3],
+          definitionPath: joinedPath(prefix, `vpn_tunnels[${index}].${item[6]}`),
+        });
       } else {
         collector.addGenerated({
           catalogKey: item[0],
@@ -965,14 +1289,26 @@ function collectScreenAndVpn(config, state) {
         });
       }
     }
-    collector.addDefinition({
+    const vpnDefinition = {
       catalogKey: JUNOS_IDENTIFIER_CATALOG.IPSEC,
       context: device,
       namespace: 'ipsec-vpn',
       kind: 'ipsec-vpn',
       sourceName: sourceVpnName,
-      definitionPath: joinedPath(prefix, `vpn_tunnels[${index}].name`),
-    });
+    };
+    if (vpn.name) {
+      collector.addDefinition({
+        ...vpnDefinition,
+        definitionPath: joinedPath(prefix, `vpn_tunnels[${index}].name`),
+      });
+    } else {
+      collector.addGenerated({
+        ...vpnDefinition,
+        definitionPath: ownerPath,
+        role: 'ipsec-vpn',
+        stableParentKey: 'vpn:fallback:vpn-1',
+      });
+    }
     for (const [catalogKey, namespace, kind, sourceName, referencePath] of [
       [JUNOS_IDENTIFIER_CATALOG.IKE, 'ike-proposal', 'ike-proposal', ikeProposal, 'ike_proposal.name'],
       [JUNOS_IDENTIFIER_CATALOG.IKE, 'ike-policy', 'ike-policy', ikePolicy, 'name#ike-policy'],
@@ -1124,38 +1460,67 @@ function collectDhcpQosFlow(config, state) {
   for (let index = 0; index < (config.dhcp_config || []).length; index += 1) {
     const item = config.dhcp_config[index];
     if (!['server', 'pool'].includes(item.type)) continue;
-    const poolName = item.name || item.interface || 'dhcp-pool';
+    const poolName = preferredDhcpPoolName(item);
     const ownerPath = joinedPath(prefix, `dhcp_config[${index}]`);
-    collector.addDefinition({
+    const poolDefinition = {
       catalogKey: JUNOS_IDENTIFIER_CATALOG.DHCP,
       context: device,
       namespace: 'dhcp-pool',
       kind: 'dhcp-pool',
       sourceName: poolName,
-      definitionPath: joinedPath(prefix, `dhcp_config[${index}].name`),
-    });
+    };
+    if (item.name) {
+      collector.addDefinition({
+        ...poolDefinition,
+        definitionPath: joinedPath(prefix, `dhcp_config[${index}].name`),
+      });
+    } else {
+      collector.addGenerated({
+        ...poolDefinition,
+        definitionPath: ownerPath,
+        role: 'dhcp-pool',
+        stableParentKey: `dhcp-pool:${item.interface || item.network || item.subnet || 'default'}`,
+      });
+    }
     const poolContext = nestedContext(device, 'dhcp-pool', poolName);
-    for (let rangeIndex = 0; rangeIndex < (item.pools || []).length; rangeIndex += 1) {
+    const poolRanges = (item.pools || [])
+      .map((value, rangeIndex) => ({ value, rangeIndex }))
+      .sort((left, right) => String(left.value).localeCompare(String(right.value)));
+    for (let canonicalIndex = 0; canonicalIndex < poolRanges.length; canonicalIndex += 1) {
+      const { value, rangeIndex } = poolRanges[canonicalIndex];
       collector.addGenerated({
         catalogKey: JUNOS_IDENTIFIER_CATALOG.DHCP,
         context: poolContext,
         namespace: 'dhcp-range',
         kind: 'dhcp-range',
-        sourceName: `range${rangeIndex + 1}`,
-        definitionPath: ownerPath,
-        role: `dhcp-pool-range-${rangeIndex + 1}`,
-        stableParentKey: `dhcp-pool:${poolName}`,
+        sourceName: `range${canonicalIndex + 1}`,
+        definitionPath: joinedPath(prefix, `dhcp_config[${index}].pools[${rangeIndex}]`),
+        role: 'dhcp-pool-range',
+        stableParentKey: `dhcp-pool:${poolName}:range:${value}`,
       });
     }
     for (let rangeIndex = 0; rangeIndex < (item.ranges || []).length; rangeIndex += 1) {
-      collector.addDefinition({
+      const range = item.ranges[rangeIndex];
+      const definition = {
         catalogKey: JUNOS_IDENTIFIER_CATALOG.DHCP,
         context: poolContext,
         namespace: 'dhcp-range',
         kind: 'dhcp-range',
-        sourceName: item.ranges[rangeIndex].name || 'range1',
-        definitionPath: joinedPath(prefix, `dhcp_config[${index}].ranges[${rangeIndex}].name`),
-      });
+        sourceName: range.name || 'range1',
+      };
+      if (range.name) {
+        collector.addDefinition({
+          ...definition,
+          definitionPath: joinedPath(prefix, `dhcp_config[${index}].ranges[${rangeIndex}].name`),
+        });
+      } else {
+        collector.addGenerated({
+          ...definition,
+          definitionPath: joinedPath(prefix, `dhcp_config[${index}].ranges[${rangeIndex}]`),
+          role: 'dhcp-named-range',
+          stableParentKey: `dhcp-pool:${poolName}:named-range:${range.low || ''}-${range.high || ''}`,
+        });
+      }
     }
   }
 
@@ -1173,9 +1538,16 @@ function collectDhcpQosFlow(config, state) {
     } else {
       collector.addDefinition({ catalogKey: JUNOS_IDENTIFIER_CATALOG.QOS, context: device, namespace: 'cos-scheduler-map', kind: 'cos-scheduler-map', sourceName: qos.name, definitionPath: path });
       for (let classIndex = 0; classIndex < (qos.classes || []).length; classIndex += 1) {
-        const className = qos.classes[classIndex].name || 'default';
-        collector.addDefinition({ catalogKey: JUNOS_IDENTIFIER_CATALOG.QOS, context: device, namespace: 'cos-scheduler', kind: 'cos-scheduler', sourceName: className, definitionPath: joinedPath(prefix, `qos_config[${index}].classes[${classIndex}].name`) });
-        collector.addDefinition({ catalogKey: JUNOS_IDENTIFIER_CATALOG.QOS, context: device, namespace: 'forwarding-class', kind: 'forwarding-class', sourceName: className, definitionPath: joinedPath(prefix, `qos_config[${index}].classes[${classIndex}].name#forwarding-class`) });
+        const qosClass = qos.classes[classIndex];
+        const className = qosClass.name || 'default';
+        const classPath = joinedPath(prefix, `qos_config[${index}].classes[${classIndex}]`);
+        if (qosClass.name) {
+          collector.addDefinition({ catalogKey: JUNOS_IDENTIFIER_CATALOG.QOS, context: device, namespace: 'cos-scheduler', kind: 'cos-scheduler', sourceName: className, definitionPath: `${classPath}.name` });
+          collector.addDefinition({ catalogKey: JUNOS_IDENTIFIER_CATALOG.QOS, context: device, namespace: 'forwarding-class', kind: 'forwarding-class', sourceName: className, definitionPath: `${classPath}.name#forwarding-class` });
+        } else {
+          collector.addGenerated({ catalogKey: JUNOS_IDENTIFIER_CATALOG.QOS, context: device, namespace: 'cos-scheduler', kind: 'cos-scheduler', sourceName: className, definitionPath: classPath, role: 'qos-default-scheduler', stableParentKey: `qos-map:${qos.name}:class:default` });
+          collector.addGenerated({ catalogKey: JUNOS_IDENTIFIER_CATALOG.QOS, context: device, namespace: 'forwarding-class', kind: 'forwarding-class', sourceName: className, definitionPath: classPath, role: 'qos-default-forwarding-class', stableParentKey: `qos-map:${qos.name}:class:default` });
+        }
       }
     }
   }
@@ -1183,14 +1555,26 @@ function collectDhcpQosFlow(config, state) {
   const flow = config.flow_monitoring_config;
   if (flow && (flow.collectors || []).length > 0) {
     const instanceName = flow.instance_name || 'FLOW-SAMPLE';
-    collector.addDefinition({
+    const instanceDefinition = {
       catalogKey: JUNOS_IDENTIFIER_CATALOG.FLOW,
       context: device,
       namespace: 'sampling-instance',
       kind: 'sampling-instance',
       sourceName: instanceName,
-      definitionPath: joinedPath(prefix, 'flow_monitoring_config.instance_name'),
-    });
+    };
+    if (flow.instance_name) {
+      collector.addDefinition({
+        ...instanceDefinition,
+        definitionPath: joinedPath(prefix, 'flow_monitoring_config.instance_name'),
+      });
+    } else {
+      collector.addGenerated({
+        ...instanceDefinition,
+        definitionPath: joinedPath(prefix, 'flow_monitoring_config'),
+        role: 'sampling-instance',
+        stableParentKey: 'flow-monitoring:default-instance',
+      });
+    }
     for (let index = 0; index < (flow.templates || []).length; index += 1) {
       collector.addDefinition({
         catalogKey: JUNOS_IDENTIFIER_CATALOG.FLOW,
@@ -1201,18 +1585,24 @@ function collectDhcpQosFlow(config, state) {
         definitionPath: joinedPath(prefix, `flow_monitoring_config.templates[${index}].name`),
       });
     }
+    const fallbackTemplates = canonicalFlowTemplateNames(flow.collectors || []);
+    const emittedFallbacks = new Set();
     for (let index = 0; index < (flow.collectors || []).length; index += 1) {
-      const template = (flow.templates || [])[index] || { name: `flow-tpl-${index + 1}` };
-      if (!(flow.templates || [])[index]) {
+      const collectorItem = flow.collectors[index];
+      const collectorKey = flowCollectorKey(collectorItem);
+      const explicitTemplate = (flow.templates || [])[index];
+      const templateName = explicitTemplate?.name || fallbackTemplates.get(collectorKey);
+      if (!explicitTemplate && !emittedFallbacks.has(collectorKey)) {
+        emittedFallbacks.add(collectorKey);
         collector.addGenerated({
           catalogKey: JUNOS_IDENTIFIER_CATALOG.FLOW,
           context: device,
           namespace: 'flow-template',
           kind: 'flow-template',
-          sourceName: template.name,
+          sourceName: templateName,
           definitionPath: joinedPath(prefix, `flow_monitoring_config.collectors[${index}]`),
           role: 'collector-flow-template',
-          stableParentKey: `collector:${flow.collectors[index].address}`,
+          stableParentKey: `collector:${collectorKey}`,
         });
       }
       collector.addReference({
@@ -1220,8 +1610,8 @@ function collectDhcpQosFlow(config, state) {
         context: device,
         namespace: 'flow-template',
         compatibleKinds: ['flow-template'],
-        sourceName: template.name,
-        referencePath: joinedPath(prefix, `flow_monitoring_config.collectors[${index}].template`),
+        sourceName: templateName,
+        referencePath: joinedPath(prefix, `flow_monitoring_config.collectors[${index}]#template`),
         literals: [],
       });
     }
@@ -1297,6 +1687,9 @@ export function collectJunosIdentifierSymbols(config = {}, options = {}) {
     natRuleSets: new Set(),
     pbfInstances: new Map(),
     applicationAliases: new Map(),
+    applicationGroups: new Map(),
+    generatedApplications: new Set(),
+    sourceVendor: config.metadata?.source_vendor || '',
     sharedDefinitions: new Set(),
   });
   return Object.freeze({
@@ -1335,6 +1728,9 @@ export function collectMergedJunosIdentifierSymbols(
       natRuleSets,
       pbfInstances,
       applicationAliases: new Map(),
+      applicationGroups: new Map(),
+      generatedApplications: new Set(),
+      sourceVendor: slot.intermediateConfig?.metadata?.source_vendor || '',
       sharedDefinitions,
     });
   }
@@ -1373,6 +1769,9 @@ export function collectMergedJunosIdentifierSymbols(
       natRuleSets,
       pbfInstances,
       applicationAliases: new Map(),
+      applicationGroups: new Map(),
+      generatedApplications: new Set(),
+      sourceVendor: globalConfig.metadata?.source_vendor || '',
       sharedDefinitions,
     });
   }

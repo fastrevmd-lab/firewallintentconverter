@@ -9,6 +9,14 @@ import {
   validateIdentifierMappings,
 } from '../src/security/junos-identifiers.js';
 import {
+  sanitizeJunosName as sanitizeForTest,
+  setMapVendorApp,
+} from '../src/parsers/parser-utils.js';
+import {
+  loadAppMappings,
+  mapVendorApp,
+} from '../src/utils/app-mappings.js';
+import {
   JUNOS_IDENTIFIER_CATALOG,
   collectJunosIdentifierSymbols,
   collectMergedJunosIdentifierSymbols,
@@ -388,6 +396,43 @@ describe('Junos identifier allocation', () => {
     expect(plan.mapping.entries).toEqual([]);
   });
 
+  it('validates and reserves explicit literal output names', () => {
+    const invalid = capturePlanningError(() => createJunosIdentifierPlan({
+      definitions: [],
+      references: [reference('mapped app', 'refs.invalid', {
+        literalOutputName: 'bad name;set system root-authentication',
+      })],
+    }));
+
+    expect(invalid).toMatchObject({
+      code: 'missing_catalog_coverage',
+      reason: 'invalid literal output name metadata',
+    });
+
+    const invalidLiteral = capturePlanningError(() => createJunosIdentifierPlan({
+      definitions: [],
+      references: [reference('bad name;set system services ssh', 'refs.literal', {
+        literals: ['bad name;set system services ssh'],
+      })],
+    }));
+
+    expect(invalidLiteral).toMatchObject({
+      code: 'missing_catalog_coverage',
+      reason: 'invalid literal metadata',
+    });
+
+    const plan = createJunosIdentifierPlan({
+      definitions: [definition('junos-https', 'defs.literal-collision')],
+      references: [reference('HTTPS', 'refs.https', {
+        literalOutputName: 'junos-https',
+      })],
+    });
+
+    expect(plan.nameForReference('refs.https')).toBe('junos-https');
+    expect(plan.nameForDefinition('defs.literal-collision')).not.toBe('junos-https');
+    expect(plan.mapping.entries[0].resolution).toBe('collision-renamed');
+  });
+
   it('catalogs generated names by owner and role with auditable paths', () => {
     const plan = createJunosIdentifierPlan({
       definitions: [definition('Web Pool', 'nat.rules[0]', {
@@ -505,6 +550,10 @@ describe('Junos identifier mapping validation', () => {
       referencePaths: ['refs[0]', 'refs[0]'],
     }))],
     ['unchanged output mismatch', mapping(validEntry({ outputName: 'Other' }))],
+    ['normalized base on explicit entry', mapping(validEntry({
+      outputName: 'arbitrary-name',
+      normalizedBase: 'arbitrary-name',
+    }))],
     ['collision output unchanged', mapping(validEntry({
       outputName: 'Web-Server',
       resolution: 'collision-renamed',
@@ -624,12 +673,12 @@ describe('Junos identifier catalog', () => {
         role: 'destination-nat-pool',
       }),
       expect.objectContaining({
-        sourceName: 'ike-pol-branch-vpn',
+        sourceName: 'ike-pol-branch vpn',
         definitionPath: 'vpn_tunnels[0]',
         role: 'ike-policy',
       }),
       expect.objectContaining({
-        sourceName: 'ipsec-pol-branch-vpn',
+        sourceName: 'ipsec-pol-branch vpn',
         definitionPath: 'vpn_tunnels[0]',
         role: 'ipsec-policy',
       }),
@@ -687,7 +736,7 @@ describe('Junos identifier catalog', () => {
 
     const symbols = collectJunosIdentifierSymbols(config);
     const sourceRuleSets = symbols.definitions.filter(item => (
-      item.role === 'source-nat-rule-set'
+      item.role?.startsWith('source-nat-rule-set')
       && item.sourceName === 'trust zone-to-untrust zone'
     ));
     expect(sourceRuleSets).toHaveLength(1);
@@ -720,6 +769,42 @@ describe('Junos identifier catalog', () => {
     expect(() => planJunosIdentifiers(config)).not.toThrow();
   });
 
+  it('catalogs every source and destination NAT Cartesian zone pair', () => {
+    const config = {
+      zones: ['s1', 's2', 'd1', 'd2'].map(name => ({ name })),
+      nat_rules: [{
+        name: 'both rule',
+        type: 'source-and-destination',
+        src_zones: ['s1', 's2'],
+        dst_zones: ['d1', 'd2'],
+        translated_src: { type: 'dynamic-ip-pool', addresses: ['192.0.2.1'] },
+        translated_dst: { address: '198.51.100.1' },
+      }, {
+        name: 'static rule',
+        type: 'static',
+        src_zones: ['s1', 's2'],
+        dst_zones: ['d1', 'd2'],
+      }],
+    };
+    const symbols = collectJunosIdentifierSymbols(config);
+    const generatedRuleSets = type => symbols.definitions.filter(item => (
+      item.role?.startsWith(`${type}-nat-rule-set`)
+    ));
+    const rules = type => symbols.definitions.filter(item => item.kind === `${type}-nat-rule`);
+
+    expect(generatedRuleSets('source').map(item => item.sourceName).sort()).toEqual([
+      's1-to-d1', 's1-to-d2', 's2-to-d1', 's2-to-d2',
+    ]);
+    expect(generatedRuleSets('destination').map(item => item.sourceName).sort()).toEqual([
+      's1-to-d1', 's1-to-d2', 's2-to-d1', 's2-to-d2',
+    ]);
+    expect(rules('source')).toHaveLength(4);
+    expect(rules('destination')).toHaveLength(4);
+    expect(generatedRuleSets('static')).toHaveLength(1);
+    expect(rules('static')).toHaveLength(1);
+    expect(() => planJunosIdentifiers(config)).not.toThrow();
+  });
+
   it('scopes every any-zone policy to the shared global policy namespace', () => {
     const config = {
       security_policies: [
@@ -741,7 +826,7 @@ describe('Junos identifier catalog', () => {
     })).not.toThrow();
   });
 
-  it('deduplicates shared explicit VPN and SSL profile definitions', () => {
+  it('rejects repeated explicit VPN definitions but deduplicates SSL profiles', () => {
     const config = {
       vpn_tunnels: [
         {
@@ -764,9 +849,164 @@ describe('Junos identifier catalog', () => {
     };
     const symbols = collectJunosIdentifierSymbols(config);
 
-    expect(symbols.definitions.filter(item => item.sourceName === 'shared ike')).toHaveLength(1);
+    expect(symbols.definitions.filter(item => item.sourceName === 'shared ike')).toHaveLength(2);
     expect(symbols.definitions.filter(item => item.sourceName === 'ssl-fwd-shared tls')).toHaveLength(1);
-    expect(() => planJunosIdentifiers(config)).not.toThrow();
+    expect(capturePlanningError(() => planJunosIdentifiers(config)).code)
+      .toBe('duplicate_definition');
+  });
+
+  it('keeps VPN generated source identity distinct before allocation', () => {
+    const plan = planJunosIdentifiers({
+      vpn_tunnels: [{ name: 'A B' }, { name: 'A-B' }],
+    });
+    const policies = plan.mapping.entries.filter(item => item.namespace === 'ike-policy');
+
+    expect(policies.map(item => item.sourceName).sort()).toEqual([
+      'ike-pol-A B', 'ike-pol-A-B',
+    ]);
+    expect(new Set(policies.map(item => item.outputName)).size).toBe(2);
+    expect(policies.every(item => item.resolution === 'generated-collision-renamed')).toBe(true);
+  });
+
+  it('models predefined service and vendor application aliases without definitions', () => {
+    const config = {
+      metadata: { source_vendor: 'fortigate' },
+      service_objects: [{ name: 'Secure Web', protocol: 'tcp', port_range: '443' }],
+      service_groups: [{ name: 'scalar services', members: ['Secure Web'] }],
+      security_policies: [{
+        name: 'mapped apps',
+        applications: ['HTTPS'],
+        services: ['Secure Web'],
+      }],
+    };
+    const symbols = collectJunosIdentifierSymbols(config);
+    const plan = planJunosIdentifiers(config);
+
+    expect(symbols.definitions).not.toContainEqual(expect.objectContaining({
+      sourceName: 'Secure Web',
+    }));
+    expect(symbols.references).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        sourceName: 'HTTPS',
+        literalOutputName: 'junos-https',
+      }),
+      expect.objectContaining({
+        sourceName: 'Secure Web',
+        literalOutputName: 'junos-https',
+      }),
+    ]));
+    expect(plan.nameForReference('security_policies[0].applications[0]'))
+      .toBe('junos-https');
+    expect(plan.nameForReference('security_policies[0].services[0]'))
+      .toBe('junos-https');
+  });
+
+  it('expands application groups and binds generated custom and unmapped names', async () => {
+    await loadAppMappings();
+    setMapVendorApp(mapVendorApp);
+    const config = {
+      metadata: { source_vendor: 'panos' },
+      application_groups: [{
+        name: 'cloud bundle',
+        members: ['HTTPS', 'unknown customer app'],
+      }],
+      security_policies: [{
+        name: 'cloud policy',
+        applications: ['cloud bundle', 'adobe-cloud'],
+      }],
+    };
+    const symbols = collectJunosIdentifierSymbols(config);
+    const plan = planJunosIdentifiers(config);
+
+    expect(symbols.definitions).not.toContainEqual(expect.objectContaining({
+      sourceName: 'cloud bundle',
+    }));
+    expect(symbols.definitions).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        sourceName: 'unknown customer app',
+        preferredOutputName: 'unknown-customer-app-UNMAPPED',
+        role: 'unmapped-application',
+      }),
+      expect.objectContaining({
+        sourceName: 'adobe-cloud',
+        role: 'custom-application',
+      }),
+    ]));
+    expect(plan.nameForReference('application_groups[0].members[0]'))
+      .toBe('junos-https');
+    expect(plan.nameForReference('application_groups[0].members[1]'))
+      .toBe('unknown-customer-app-UNMAPPED');
+    expect(plan.nameForReference('security_policies[0].applications[1]'))
+      .toBe('adobe-cloud');
+  });
+
+  it('retains raw identities for colliding generated unmapped applications', () => {
+    const config = {
+      metadata: { source_vendor: 'fortigate' },
+      security_policies: [{
+        name: 'unmapped collisions',
+        applications: ['foo bar', 'foo@bar'],
+      }],
+    };
+    const symbols = collectJunosIdentifierSymbols(config);
+    const plan = planJunosIdentifiers(config);
+    const generated = symbols.definitions.filter(item => item.role === 'unmapped-application');
+
+    expect(generated.map(item => item.sourceName).sort()).toEqual(['foo bar', 'foo@bar']);
+    expect(generated.map(item => item.preferredOutputName))
+      .toEqual(['foo-bar-UNMAPPED', 'foo-bar-UNMAPPED']);
+    expect(plan.nameForReference('security_policies[0].applications[0]'))
+      .not.toBe(plan.nameForReference('security_policies[0].applications[1]'));
+    expect(plan.mapping.entries
+      .filter(item => item.sourceName === 'foo bar' || item.sourceName === 'foo@bar')
+      .every(item => item.resolution === 'generated-collision-renamed')).toBe(true);
+  });
+
+  it('narrows nested address and service group reference kinds', () => {
+    const symbols = collectJunosIdentifierSymbols({
+      address_objects: [{ name: 'host' }],
+      address_groups: [
+        { name: 'address child', members: ['host'] },
+        { name: 'address parent', members: ['address child'] },
+      ],
+      service_objects: [{ name: 'custom service', protocol: 'tcp', port_range: '8080' }],
+      service_groups: [
+        { name: 'service child', members: ['custom service'] },
+        { name: 'service parent', members: ['service child'] },
+      ],
+    });
+    const referenceAt = path => symbols.references.find(item => item.referencePath === path);
+
+    expect(referenceAt('address_groups[0].members[0]').compatibleKinds).toEqual(['address']);
+    expect(referenceAt('address_groups[1].members[0]').compatibleKinds).toEqual(['address-set']);
+    expect(referenceAt('service_groups[0].members[0]').compatibleKinds).toEqual(['application']);
+    expect(referenceAt('service_groups[1].members[0]').compatibleKinds).toEqual(['application-set']);
+  });
+
+  it('uses Set passthrough names for SRX applications and unresolved services', () => {
+    const config = {
+      metadata: { source_vendor: 'srx' },
+      service_objects: [{ name: 'missing port', protocol: 'tcp', port_range: '' }],
+      security_policies: [{
+        name: 'passthrough',
+        applications: ['existing custom'],
+        services: ['missing service'],
+      }],
+    };
+    const symbols = collectJunosIdentifierSymbols(config);
+    const plan = planJunosIdentifiers(config);
+
+    expect(symbols.definitions).not.toContainEqual(expect.objectContaining({
+      definitionPath: 'service_objects[0].name',
+    }));
+    expect(symbols.definitions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ sourceName: 'existing custom', role: 'passthrough-application' }),
+      expect.objectContaining({ sourceName: 'missing service', role: 'unresolved-service-application' }),
+    ]));
+    expect(plan.nameForReference('security_policies[0].applications[0]'))
+      .toBe('existing-custom');
+    expect(plan.nameForReference('security_policies[0].services[0]'))
+      .toBe('missing-service');
   });
 
   it('assigns shared UTM and IDP generated names by semantic combination', () => {
@@ -797,11 +1037,13 @@ describe('Junos identifier catalog', () => {
       expect.objectContaining({ referencePath: 'security_policies[2]#idp-policy' }),
       expect.objectContaining({
         referencePath: 'security_policies[0].security_profiles.virus',
-        sourceName: 'custom-av-z av',
+        sourceName: 'z av',
+        bindingSourceName: 'custom-av-z-av',
       }),
       expect.objectContaining({
         referencePath: 'security_policies[0].security_profiles.application-control',
-        sourceName: 'appfw-edge apps',
+        sourceName: 'edge apps',
+        bindingSourceName: 'appfw-edge-apps',
       }),
     ]));
     expect(forward.definitions).toEqual(expect.arrayContaining([
@@ -841,7 +1083,7 @@ describe('Junos identifier catalog', () => {
         role: 'security-policy-1',
       }),
       expect.objectContaining({
-        sourceName: 'ike-pol-n-9-branch',
+        sourceName: 'ike-pol-9 branch',
         definitionPath: 'vpn_tunnels[0]',
         role: 'ike-policy',
       }),
@@ -860,6 +1102,105 @@ describe('Junos identifier catalog', () => {
     expect(forward.sourceName).toBe('PBF-a route');
     expect(reversed.sourceName).toBe(forward.sourceName);
     expect(reversed.stableParentKey).toBe(forward.stableParentKey);
+  });
+
+  it('uses emitter profile truncation and canonical SecIntel rule ordering', () => {
+    const longProfile = `${'profile'.repeat(6)} tail`;
+    const externalLists = [
+      { name: 'z feed', isBlockList: true },
+      { name: 'a feed', isBlockList: true },
+    ];
+    const collect = lists => collectJunosIdentifierSymbols({
+      security_policies: [{ name: 'profile policy', security_profiles: { virus: longProfile } }],
+      external_lists: lists,
+    });
+    const forward = collect(externalLists);
+    const reversed = collect([...externalLists].reverse());
+    const antiVirus = forward.definitions.find(item => item.kind === 'anti-virus-profile');
+    const secIntel = symbols => new Map(symbols.definitions
+      .filter(item => item.role === 'security-intelligence-rule')
+      .map(item => [item.stableParentKey, item.sourceName]));
+
+    expect(antiVirus.sourceName).toBe(`custom-av-${sanitizeForTest(longProfile).slice(0, 24)}`);
+    expect(forward.references).toContainEqual(expect.objectContaining({
+      referencePath: 'security_policies[0].security_profiles.virus',
+      bindingSourceName: antiVirus.sourceName,
+    }));
+    expect(secIntel(reversed)).toEqual(secIntel(forward));
+    expect(secIntel(forward).get('external-list:a feed')).toBe('secIntel-rule-1');
+  });
+
+  it('catalogs absent identifier fields as generated owner-scoped fallbacks', () => {
+    const symbols = collectJunosIdentifierSymbols({
+      screen_config: [{ zone: 'outside' }],
+      vpn_tunnels: [{}],
+      dhcp_config: [{
+        type: 'server', network: '10.0.0.0/24',
+        ranges: [{ low: '10.0.0.10', high: '10.0.0.20' }],
+      }],
+      flow_monitoring_config: { collectors: [{ address: '192.0.2.1' }] },
+      qos_config: [{ type: 'shaping-profile', name: 'map', classes: [{}] }],
+    });
+
+    expect(symbols.definitions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ sourceName: 'default-screen', definitionPath: 'screen_config[0]', generated: true, role: 'default-screen-profile' }),
+      expect.objectContaining({ sourceName: 'vpn-1', definitionPath: 'vpn_tunnels[0]', generated: true, role: 'ipsec-vpn' }),
+      expect.objectContaining({ sourceName: 'dhcp-pool', definitionPath: 'dhcp_config[0]', generated: true, role: 'dhcp-pool' }),
+      expect.objectContaining({ sourceName: 'range1', definitionPath: 'dhcp_config[0].ranges[0]', generated: true, role: 'dhcp-named-range' }),
+      expect.objectContaining({ sourceName: 'FLOW-SAMPLE', definitionPath: 'flow_monitoring_config', generated: true, role: 'sampling-instance' }),
+      expect.objectContaining({ sourceName: 'default', definitionPath: 'qos_config[0].classes[0]', generated: true, role: 'qos-default-scheduler' }),
+      expect.objectContaining({ sourceName: 'default', definitionPath: 'qos_config[0].classes[0]', generated: true, role: 'qos-default-forwarding-class' }),
+    ]));
+  });
+
+  it('keeps generated comma-port, DHCP, and flow identities stable under reordering', () => {
+    const config = {
+      service_objects: [{ name: 'ports', protocol: 'tcp', port_range: '9001,9000' }],
+      dhcp_config: [{
+        type: 'server', name: 'pool', network: '10.0.0.0/24',
+        pools: ['10.0.0.30-10.0.0.40', '10.0.0.10-10.0.0.20'],
+      }],
+      flow_monitoring_config: {
+        collectors: [{ address: '192.0.2.2' }, { address: '192.0.2.1' }],
+      },
+    };
+    const reordered = {
+      ...config,
+      service_objects: [{ ...config.service_objects[0], port_range: '9000,9001' }],
+      dhcp_config: [{ ...config.dhcp_config[0], pools: [...config.dhcp_config[0].pools].reverse() }],
+      flow_monitoring_config: {
+        collectors: [...config.flow_monitoring_config.collectors].reverse(),
+      },
+    };
+    const identities = symbols => new Map(symbols.definitions
+      .filter(item => item.generated && [
+        'service-port:9000', 'service-port:9001', 'dhcp-pool-range',
+        'collector-flow-template',
+      ].includes(item.role))
+      .map(item => [`${item.stableParentKey}\0${item.role}`, item.sourceName]));
+
+    expect(identities(collectJunosIdentifierSymbols(reordered)))
+      .toEqual(identities(collectJunosIdentifierSymbols(config)));
+  });
+
+  it('always treats default and master routing instances as built-in literals', () => {
+    const config = {
+      static_routes: [{ destination: '192.0.2.0/24', vrf: 'default' }],
+      bgp_config: [{ instance: 'master' }],
+    };
+    const symbols = collectJunosIdentifierSymbols(config);
+    const plan = planJunosIdentifiers(config);
+
+    expect(symbols.definitions).not.toContainEqual(expect.objectContaining({
+      namespace: 'routing-instance',
+      sourceName: 'default',
+    }));
+    expect(symbols.definitions).not.toContainEqual(expect.objectContaining({
+      namespace: 'routing-instance',
+      sourceName: 'master',
+    }));
+    expect(plan.nameForReference('static_routes[0].vrf')).toBe('default');
+    expect(plan.nameForReference('bgp_config[0].instance')).toBe('master');
   });
 
   it('collects merged logical-system slots and cross-link references', () => {

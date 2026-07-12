@@ -17,6 +17,7 @@ const ENTRY_FIELDS = [
   'context', 'namespace', 'kind', 'sourceName', 'outputName',
   'definitionPath', 'referencePaths', 'resolution',
 ];
+const OPTIONAL_ENTRY_FIELDS = ['normalizedBase'];
 const MAPPING_FIELDS = ['entries', 'version'];
 const RESOLUTIONS = new Set([
   'unchanged', 'collision-renamed', 'generated',
@@ -92,6 +93,14 @@ function safeScalar(value, field, { allowEmpty = false } = {}) {
   return text;
 }
 
+function safeJunosIdentifier(value, field) {
+  const text = safeScalar(value, field);
+  if (!JUNOS_IDENTIFIER.test(text)) {
+    fail('missing_catalog_coverage', { reason: `invalid ${field} metadata` });
+  }
+  return text;
+}
+
 function mappingScalar(value, field, { allowEmpty = false } = {}) {
   if (typeof value !== 'string'
       || UNSAFE_CONTROL.test(value)
@@ -159,6 +168,9 @@ function normalizeDefinition(record) {
     stableParentKey: generated
       ? safeScalar(record.stableParentKey, 'stable parent key')
       : null,
+    preferredOutputName: record.preferredOutputName === undefined
+      ? null
+      : safeJunosIdentifier(record.preferredOutputName, 'preferred output name'),
   };
   normalized.stableKey = generated
     ? semanticKey(normalized.stableParentKey, normalized.role)
@@ -187,7 +199,7 @@ function normalizeReference(record) {
   }
 
   const literals = record.literals
-    .map(literal => safeScalar(literal, 'literal', { allowEmpty: true }));
+    .map(literal => safeJunosIdentifier(literal, 'literal'));
   if (new Set(literals).size !== literals.length) {
     fail('missing_catalog_coverage', { reason: 'duplicate literal metadata' });
   }
@@ -198,6 +210,12 @@ function normalizeReference(record) {
     namespace: safeScalar(record.namespace, 'namespace'),
     compatibleKinds: [...compatibleKinds].sort(compareStrings),
     sourceName: safeScalar(record.sourceName, 'source name', { allowEmpty: true }),
+    bindingSourceName: record.bindingSourceName === undefined
+      ? null
+      : safeScalar(record.bindingSourceName, 'binding source name', { allowEmpty: true }),
+    literalOutputName: record.literalOutputName === undefined
+      ? null
+      : safeJunosIdentifier(record.literalOutputName, 'literal output name'),
     referencePath: safeScalar(record.referencePath, 'reference path'),
     literals,
   };
@@ -237,7 +255,7 @@ function allocationFailure(group, reason = 'identifier uniqueness could not be p
   });
 }
 
-function allocateNamespace(group, hash64) {
+function allocateNamespace(group, hash64, reservedNames = new Set()) {
   const ordered = [...group].sort((left, right) => (
     compareStrings(symbolSortKey(left), symbolSortKey(right))
   ));
@@ -254,11 +272,15 @@ function allocateNamespace(group, hash64) {
   const fixed = new Map();
   const candidates = [];
   for (const members of definitionsByBase.values()) {
-    if (members.length === 1) fixed.set(members[0].base, members[0]);
+    if (members.length === 1 && !reservedNames.has(members[0].base)) {
+      fixed.set(members[0].base, members[0]);
+    }
     else candidates.push(...members);
   }
   for (const members of unresolvedByBase.values()) {
-    if (members.length === 1 && !fixed.has(members[0].base)) {
+    if (members.length === 1
+        && !fixed.has(members[0].base)
+        && !reservedNames.has(members[0].base)) {
       fixed.set(members[0].base, members[0]);
     } else {
       candidates.push(...members);
@@ -280,7 +302,7 @@ function allocateNamespace(group, hash64) {
 
     const conflicted = new Set();
     for (const [outputName, members] of byCandidate) {
-      if (fixed.has(outputName) || members.length > 1) {
+      if (fixed.has(outputName) || reservedNames.has(outputName) || members.length > 1) {
         for (const symbol of members) conflicted.add(symbol);
       }
     }
@@ -401,7 +423,7 @@ export function createJunosIdentifierPlan({ definitions, references } = {}, opti
       kind: item.kind,
       sourceName: item.sourceName,
       stableKey: item.stableKey,
-      base: sanitizeJunosName(item.sourceName),
+      base: item.preferredOutputName || sanitizeJunosName(item.sourceName),
       referencePaths: [],
       outputName: null,
     });
@@ -411,6 +433,14 @@ export function createJunosIdentifierPlan({ definitions, references } = {}, opti
   const referenceBindings = new Map();
   const referencePaths = new Set();
   const unresolvedSymbols = new Map();
+  const reservedNames = new Map();
+
+  function reserveReferenceName(item, outputName) {
+    const key = semanticKey(item.context, item.namespace);
+    const names = reservedNames.get(key) || new Set();
+    names.add(outputName);
+    reservedNames.set(key, names);
+  }
 
   for (const item of normalizedReferences) {
     if (referencePaths.has(item.referencePath)) {
@@ -421,12 +451,19 @@ export function createJunosIdentifierPlan({ definitions, references } = {}, opti
     }
     referencePaths.add(item.referencePath);
 
+    if (item.literalOutputName !== null) {
+      reserveReferenceName(item, item.literalOutputName);
+      referenceBindings.set(item.referencePath, item.literalOutputName);
+      continue;
+    }
     if (item.literals.includes(item.sourceName)) {
+      reserveReferenceName(item, item.sourceName);
       referenceBindings.set(item.referencePath, item.sourceName);
       continue;
     }
 
-    const sourceKey = semanticKey(item.context, item.namespace, item.sourceName);
+    const bindingSourceName = item.bindingSourceName ?? item.sourceName;
+    const sourceKey = semanticKey(item.context, item.namespace, bindingSourceName);
     const matches = (definitionIndex.get(sourceKey) || [])
       .filter(match => item.compatibleKinds.includes(match.kind));
     if (matches.length > 1) {
@@ -448,7 +485,7 @@ export function createJunosIdentifierPlan({ definitions, references } = {}, opti
 
     const compatibleKey = item.compatibleKinds.join('\0');
     const unresolvedKey = semanticKey(
-      item.context, item.namespace, compatibleKey, item.sourceName,
+      item.context, item.namespace, compatibleKey, bindingSourceName,
     );
     let symbol = unresolvedSymbols.get(unresolvedKey);
     if (!symbol) {
@@ -457,9 +494,9 @@ export function createJunosIdentifierPlan({ definitions, references } = {}, opti
         context: item.context,
         namespace: item.namespace,
         kind: item.compatibleKinds.join('|'),
-        sourceName: item.sourceName,
-        stableKey: semanticKey('unresolved', compatibleKey, item.sourceName),
-        base: sanitizeJunosName(item.sourceName),
+        sourceName: bindingSourceName,
+        stableKey: semanticKey('unresolved', compatibleKey, bindingSourceName),
+        base: sanitizeJunosName(bindingSourceName),
         referencePaths: [],
         outputName: null,
       };
@@ -477,7 +514,9 @@ export function createJunosIdentifierPlan({ definitions, references } = {}, opti
     group.push(symbol);
     namespaces.set(key, group);
   }
-  for (const group of namespaces.values()) allocateNamespace(group, hash64);
+  for (const [key, group] of namespaces) {
+    allocateNamespace(group, hash64, reservedNames.get(key));
+  }
 
   const definitionLookup = new Map();
   const generatedLookup = new Map();
@@ -503,6 +542,9 @@ export function createJunosIdentifierPlan({ definitions, references } = {}, opti
     kind: symbol.kind,
     sourceName: symbol.sourceName,
     outputName: symbol.outputName,
+    ...(symbol.definition?.preferredOutputName === null
+      || symbol.definition?.preferredOutputName === undefined
+      ? {} : { normalizedBase: symbol.base }),
     definitionPath: symbol.type === 'unresolved'
       ? null
       : symbol.definition.auditablePath,
@@ -621,9 +663,9 @@ export function validateIdentifierMappings(mapping) {
       invalidMapping('entry must be an object');
     }
     const fields = Object.keys(entry).sort(compareStrings);
-    const allowedFields = [...ENTRY_FIELDS].sort(compareStrings);
-    if (fields.length !== allowedFields.length
-        || fields.some((field, index) => field !== allowedFields[index])) {
+    const allowedFields = new Set([...ENTRY_FIELDS, ...OPTIONAL_ENTRY_FIELDS]);
+    if (ENTRY_FIELDS.some(field => !fields.includes(field))
+        || fields.some(field => !allowedFields.has(field))) {
       invalidMapping('entry fields are invalid');
     }
 
@@ -655,7 +697,16 @@ export function validateIdentifierMappings(mapping) {
       }
     }
 
-    const base = sanitizeJunosName(sourceName);
+    const normalizedBase = entry.normalizedBase === undefined
+      ? null
+      : mappingScalar(entry.normalizedBase, 'normalized base');
+    if (normalizedBase !== null && !JUNOS_IDENTIFIER.test(normalizedBase)) {
+      invalidMapping('normalized base is invalid');
+    }
+    if (normalizedBase !== null && !entry.resolution.startsWith('generated')) {
+      invalidMapping('normalized base requires a generated resolution');
+    }
+    const base = normalizedBase || sanitizeJunosName(sourceName);
     const renamed = outputName !== base;
     const shouldBeRenamed = new Set([
       'collision-renamed',
@@ -680,6 +731,7 @@ export function validateIdentifierMappings(mapping) {
       kind,
       sourceName,
       outputName,
+      ...(normalizedBase === null ? {} : { normalizedBase }),
       definitionPath,
       referencePaths,
       resolution: entry.resolution,

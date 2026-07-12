@@ -22,6 +22,8 @@ import {
   xmlText,
 } from '../security/junos-serialization.js';
 import { validateJunosInput } from '../security/junos-input-validation.js';
+import { planJunosIdentifiers } from '../security/junos-identifiers.js';
+import { canonicalizeJunosSecurityFeatures } from '../security/junos-identifier-catalog.js';
 import { validateXmlOutput } from '../security/junos-output-validation.js';
 
 /**
@@ -54,19 +56,42 @@ export function buildSrxXml(config, interfaceMappings = {}, targetContext = null
   }
   if (targetContext) validateJunosInput(targetContext, 'targetContext');
 
-  const warnings = [];
+  const identifiers = options.identifierPlan || planJunosIdentifiers(config, { targetContext });
+  const identifierPath = localPath => `${options.pathPrefix || ''}${localPath}`;
+  const targetContextPath = options.targetContextPath || 'targetContext.name';
+  const identifierNames = {
+    path: identifierPath,
+    mapping: identifiers.mapping,
+    definition: localPath => identifiers.nameForDefinition(identifierPath(localPath)),
+    reference: localPath => identifiers.nameForReference(identifierPath(localPath)),
+    generated: (localPath, role) => identifiers.nameForGenerated(identifierPath(localPath), role),
+    generatedEntries: localPath => identifiers.mapping.entries.filter(entry => (
+      entry.definitionPath?.startsWith(`${identifierPath(localPath)}#generated:`)
+    )),
+  };
+  const warnings = [...identifiers.warnings];
+  const summary = {
+    identifier_collisions_resolved: identifiers.collisionCount,
+  };
   const lines = [];
   xmlCustomfwicApps.clear();
   xmlPredefServiceMap.clear();
+  prepareXmlApplicationGroupApplications(config.application_groups, identifierNames);
 
   // Detect source vendor for 1:1 passthrough (SRX→SRX needs no app mapping)
   const sourceVendor = config.metadata?.source_vendor || '';
 
   // Compute UTM/IDP/SecIntel assignment maps (mirrors srx-converter logic)
-  const { utmPolicyMap, utmProfiles } = computeUtmMap(config.security_policies);
-  const { idpPolicyMap } = computeIdpMap(config.security_policies);
-  const blockLists = (config.external_lists || []).filter(e => e.isBlockList);
+  const { utmPolicyMap, utmProfiles } = computeUtmMap(config, identifierNames);
+  const { idpPolicyMap } = computeIdpMap(config.security_policies, identifierNames);
+  const blockLists = (config.external_lists || [])
+    .map((list, index) => ({ list, index }))
+    .filter(({ list }) => list.isBlockList)
+    .sort((left, right) => String(left.list.name).localeCompare(String(right.list.name)));
   const secIntelEnabled = blockLists.length > 0;
+  const secIntelPolicyName = secIntelEnabled
+    ? identifierNames.generated(`external_lists[${blockLists[0].index}]`, 'security-intelligence-policy')
+    : null;
 
   // Determine context wrapping
   const ctx = targetContext || config.target_context;
@@ -102,7 +127,7 @@ export function buildSrxXml(config, interfaceMappings = {}, targetContext = null
       'targetContext.type',
     );
     lines.push(ctxTag === 'logical-systems' ? '  <logical-systems>' : '  <tenants>');
-    lines.push(`    <name>${xmlText(sanitizeJunosName(ctx.name))}</name>`);
+    lines.push(`    <name>${xmlText(identifiers.nameForDefinition(targetContextPath), targetContextPath)}</name>`);
   }
 
   // System configuration (Day-0)
@@ -115,73 +140,73 @@ export function buildSrxXml(config, interfaceMappings = {}, targetContext = null
   lines.push(`${indent}<security>`);
 
   // Zones
-  buildZonesXml(config.zones, lines, interfaceMappings);
+  buildZonesXml(config.zones, lines, interfaceMappings, identifierNames);
 
   // Address book
-  buildAddressBookXml(config.address_objects, config.address_groups, lines);
+  buildAddressBookXml(config.address_objects, config.address_groups, lines, identifierNames);
 
   // UTM
-  buildUtmXml(utmProfiles, lines);
+  buildUtmXml(utmProfiles, lines, identifierNames);
 
   // Policies
-  buildPoliciesXml(config.security_policies, lines, warnings, { utmPolicyMap, idpPolicyMap, secIntelEnabled }, config.application_groups, sourceVendor, config._rule_groups);
+  buildPoliciesXml(config.security_policies, lines, warnings, { utmPolicyMap, idpPolicyMap, secIntelEnabled, secIntelPolicyName }, config.application_groups, sourceVendor, config._rule_groups, identifierNames);
 
   // NAT
-  buildNatXml(config.nat_rules, lines, warnings);
+  buildNatXml(config.nat_rules, config.zones, lines, warnings, identifierNames);
 
   // IDP
-  buildIdpXml(config.security_policies, lines);
+  buildIdpXml(config, lines, identifierNames);
 
   lines.push(`${indent}</security>`);
 
   // Routing (static routes, BGP, OSPF)
-  buildRoutingXml(config, lines);
+  buildRoutingXml(config, lines, identifierNames);
 
   // Chassis Cluster / HA
   buildHaXml(config.ha_config, lines);
 
   // Security Screens
-  buildScreenXml(config.screen_config, lines);
+  buildScreenXml(config.screen_config, lines, identifierNames);
 
   // VPN / IPsec
-  buildVpnXml(config.vpn_tunnels, lines);
+  buildVpnXml(config.vpn_tunnels, lines, identifierNames);
 
   // Syslog
   buildSyslogXml(config.syslog_config, lines);
 
   // SNMP
-  buildSnmpXml(config.snmp_config, lines);
+  buildSnmpXml(config.snmp_config, lines, identifierNames);
 
   // AAA
-  buildAaaXml(config.aaa_config, lines);
+  buildAaaXml(config.aaa_config, lines, identifierNames);
 
   // DHCP
-  buildDhcpXml(config.dhcp_config, lines);
+  buildDhcpXml(config.dhcp_config, lines, identifierNames);
 
   // QoS / CoS
-  buildQosXml(config.qos_config, lines);
+  buildQosXml(config.qos_config, lines, identifierNames);
 
   // L2 / Bridge Domains / Virtual-Wire
-  buildL2Xml(config, lines, interfaceMappings);
+  buildL2Xml(config, lines, interfaceMappings, identifierNames);
 
   // Policy-Based Forwarding (filter-based forwarding)
-  buildPbfXml(config.pbf_rules, lines, interfaceMappings);
+  buildPbfXml(config.pbf_rules, lines, interfaceMappings, identifierNames);
 
   // SSL Proxy / PKI
-  buildSslProxyXml(config, lines);
+  buildSslProxyXml(config, lines, identifierNames);
 
   // Flow Monitoring (Inline Jflow)
-  buildFlowMonitoringXml(config.flow_monitoring_config, lines);
+  buildFlowMonitoringXml(config.flow_monitoring_config, lines, identifierNames);
 
   // Applications (includes Customfwic placeholders for unmapped apps)
-  buildApplicationsXml(config.service_objects, config.applications, config.service_groups, lines, xmlCustomfwicApps);
+  buildApplicationsXml(config.service_objects, config.applications, config.service_groups, lines, xmlCustomfwicApps, identifierNames);
 
   // Schedulers
-  buildSchedulersXml(config.schedules, lines);
+  buildSchedulersXml(config.schedules, lines, identifierNames);
 
   // Services (SecIntel)
   if (secIntelEnabled) {
-    buildSecIntelXml(blockLists, lines);
+    buildSecIntelXml(config.external_lists || [], lines, identifierNames);
   }
 
   // User Identification (JIMS) — when policies use source-identity
@@ -212,19 +237,21 @@ export function buildSrxXml(config, interfaceMappings = {}, targetContext = null
 
   const xml = lines.join('\n');
   if (!omitWrapper) validateXmlOutput(xml);
-  return { xml, warnings };
+  return { xml, warnings, summary, identifierMappings: identifiers.mapping };
 }
 
 // ---------------------------------------------------------------------------
 // Zone XML Builder
 // ---------------------------------------------------------------------------
 
-function buildZonesXml(zones, lines, interfaceMappings = {}) {
+function buildZonesXml(zones, lines, interfaceMappings = {}, identifierNames) {
   if (!zones || zones.length === 0) return;
 
   lines.push('    <zones>');
-  for (const zone of zones) {
-    const name = sanitizeJunosName(zone.name);
+  for (let zoneIndex = 0; zoneIndex < zones.length; zoneIndex += 1) {
+    const zone = zones[zoneIndex];
+    const path = `zones[${zoneIndex}].name`;
+    const name = identifierNames.definition(path);
     lines.push(`      <security-zone>`);
     lines.push(`        <name>${xmlText(name)}</name>`);
     if (zone.description) {
@@ -256,7 +283,7 @@ function buildZonesXml(zones, lines, interfaceMappings = {}) {
 // Address Book XML Builder
 // ---------------------------------------------------------------------------
 
-function buildAddressBookXml(addressObjects, addressGroups, lines) {
+function buildAddressBookXml(addressObjects, addressGroups, lines, identifierNames) {
   if ((!addressObjects || addressObjects.length === 0) &&
       (!addressGroups || addressGroups.length === 0)) return;
 
@@ -264,8 +291,9 @@ function buildAddressBookXml(addressObjects, addressGroups, lines) {
   lines.push('      <name>global</name>');
 
   // Address entries
-  for (const obj of (addressObjects || [])) {
-    const name = sanitizeJunosName(obj.name);
+  for (let objectIndex = 0; objectIndex < (addressObjects || []).length; objectIndex += 1) {
+    const obj = addressObjects[objectIndex];
+    const name = identifierNames.definition(`address_objects[${objectIndex}].name`);
     lines.push('      <address>');
     lines.push(`        <name>${xmlText(name)}</name>`);
 
@@ -310,22 +338,25 @@ function buildAddressBookXml(addressObjects, addressGroups, lines) {
 
   // Address sets (groups)
   const addrGroupNameSet = new Set((addressGroups || []).map(g => g.name));
-  for (const group of (addressGroups || [])) {
+  for (let groupIndex = 0; groupIndex < (addressGroups || []).length; groupIndex += 1) {
+    const group = addressGroups[groupIndex];
+    const groupName = identifierNames.definition(`address_groups[${groupIndex}].name`);
     if (group._dynamic) {
       lines.push(`      ${xmlComment(`UNSUPPORTED: Dynamic address group "${group.name}" — SRX does not support tag-based dynamic groups`, 'address_groups')}`);
       continue;
     }
-    const groupName = sanitizeJunosName(group.name);
     lines.push('      <address-set>');
     lines.push(`        <name>${xmlText(groupName)}</name>`);
-    for (const member of group.members) {
+    for (let memberIndex = 0; memberIndex < group.members.length; memberIndex += 1) {
+      const member = group.members[memberIndex];
+      const memberName = identifierNames.reference(`address_groups[${groupIndex}].members[${memberIndex}]`);
       if (addrGroupNameSet.has(member)) {
         lines.push('        <address-set>');
-        lines.push(`          <name>${xmlText(sanitizeJunosName(member))}</name>`);
+        lines.push(`          <name>${xmlText(memberName)}</name>`);
         lines.push('        </address-set>');
       } else {
         lines.push('        <address>');
-        lines.push(`          <name>${xmlText(sanitizeJunosName(member))}</name>`);
+        lines.push(`          <name>${xmlText(memberName)}</name>`);
         lines.push('        </address>');
       }
     }
@@ -361,10 +392,12 @@ function buildUserIdentificationXml(policies, lines) {
 // Security Policies XML Builder
 // ---------------------------------------------------------------------------
 
-function buildPoliciesXml(policies, lines, warnings, profileMaps = {}, appGroups = [], sourceVendor = '', ruleGroups = []) {
+function buildPoliciesXml(policies, lines, warnings, profileMaps = {}, appGroups = [], sourceVendor = '', ruleGroups = [], identifierNames) {
   if (!policies || policies.length === 0) return;
 
-  const { utmPolicyMap = {}, idpPolicyMap = {}, secIntelEnabled = false } = profileMaps;
+  const {
+    utmPolicyMap = {}, idpPolicyMap = {}, secIntelEnabled = false, secIntelPolicyName = null,
+  } = profileMaps;
 
   // Build rule-index→group map for group comment insertion
   const groupByIndex = {};
@@ -378,15 +411,50 @@ function buildPoliciesXml(policies, lines, warnings, profileMaps = {}, appGroups
 
   // Group policies by zone pair
   const zonePairs = {};
-  for (const policy of policies) {
+  for (let policyIndex = 0; policyIndex < policies.length; policyIndex += 1) {
+    const policy = policies[policyIndex];
+    for (let addressIndex = 0; addressIndex < policy.src_addresses.length; addressIndex += 1) {
+      identifierNames.reference(`security_policies[${policyIndex}].src_addresses[${addressIndex}]`);
+    }
+    for (let addressIndex = 0; addressIndex < policy.dst_addresses.length; addressIndex += 1) {
+      identifierNames.reference(`security_policies[${policyIndex}].dst_addresses[${addressIndex}]`);
+    }
     const srcZones = policy.src_zones.length > 0 ? policy.src_zones : ['any'];
     const dstZones = policy.dst_zones.length > 0 ? policy.dst_zones : ['any'];
-
-    for (const src of srcZones) {
-      for (const dst of dstZones) {
-        const key = `${src}|${dst}`;
-        if (!zonePairs[key]) zonePairs[key] = { from: src, to: dst, policies: [] };
-        zonePairs[key].policies.push(policy);
+    let definitionIndex = 0;
+    const definedPairs = new Set();
+    for (let sourceIndex = 0; sourceIndex < srcZones.length; sourceIndex += 1) {
+      const src = srcZones[sourceIndex];
+      identifierNames.reference(policy.src_zones.length > 0
+        ? `security_policies[${policyIndex}].src_zones[${sourceIndex}]`
+        : `security_policies[${policyIndex}]#effective-source-zone`);
+      for (let destinationIndex = 0; destinationIndex < dstZones.length; destinationIndex += 1) {
+        const dst = dstZones[destinationIndex];
+        if (sourceIndex === 0) {
+          identifierNames.reference(policy.dst_zones.length > 0
+            ? `security_policies[${policyIndex}].dst_zones[${destinationIndex}]`
+            : `security_policies[${policyIndex}]#effective-destination-zone`);
+        }
+        const isGlobal = src === 'any' || dst === 'any';
+        const contextKey = isGlobal ? 'global' : `${src}|${dst}`;
+        if (!zonePairs[contextKey]) {
+          zonePairs[contextKey] = { from: src, to: dst, isGlobal, policies: [] };
+        }
+        if (definedPairs.has(contextKey)) continue;
+        definedPairs.add(contextKey);
+        definitionIndex += 1;
+        const occurrence = definitionIndex;
+        const genericName = !policy.name
+          || /^(rule|policy|permit|deny)[-_]?\d+$/i.test(policy.name)
+          || /^\d+$/.test(policy.name);
+        const outputName = genericName
+          ? identifierNames.generated(`security_policies[${policyIndex}]`, `security-policy-${occurrence}`)
+          : identifierNames.definition(occurrence === 1
+            ? `security_policies[${policyIndex}].name`
+            : `security_policies[${policyIndex}].name#zone-pair:${src}->${dst}`);
+        zonePairs[contextKey].policies.push({
+          policy, policyIndex, sourceIndex, destinationIndex, outputName,
+        });
       }
     }
   }
@@ -394,27 +462,38 @@ function buildPoliciesXml(policies, lines, warnings, profileMaps = {}, appGroups
   lines.push('    <policies>');
 
   for (const pair of Object.values(zonePairs)) {
-    lines.push('      <policy>');
-    lines.push(`        <from-zone-name>${xmlText(sanitizeJunosName(pair.from))}</from-zone-name>`);
-    lines.push(`        <to-zone-name>${xmlText(sanitizeJunosName(pair.to))}</to-zone-name>`);
+    const first = pair.policies[0];
+    const sourcePath = first.policy.src_zones.length > 0
+      ? `security_policies[${first.policyIndex}].src_zones[${first.sourceIndex}]`
+      : `security_policies[${first.policyIndex}]#effective-source-zone`;
+    const destinationPath = first.policy.dst_zones.length > 0
+      ? `security_policies[${first.policyIndex}].dst_zones[${first.destinationIndex}]`
+      : `security_policies[${first.policyIndex}]#effective-destination-zone`;
+    lines.push(pair.isGlobal ? '      <global>' : '      <policy>');
+    if (!pair.isGlobal) {
+      lines.push(`        <from-zone-name>${xmlText(identifierNames.reference(sourcePath))}</from-zone-name>`);
+      lines.push(`        <to-zone-name>${xmlText(identifierNames.reference(destinationPath))}</to-zone-name>`);
+    }
 
     let currentGroup = null;
-    for (const policy of pair.policies) {
+    for (const item of pair.policies) {
+      const { policy, policyIndex: pIdx, outputName: name } = item;
       // Emit XML comment for group boundaries
-      const pIdx = policies.indexOf(policy);
       const ruleGroup = groupByIndex[pIdx] || policy._group || null;
       if (ruleGroup && ruleGroup !== currentGroup) {
         lines.push(`        ${xmlComment(`===== Group: ${ruleGroup} =====`, `security_policies[${pIdx}]._group`)}`);
         currentGroup = ruleGroup;
       }
-      const name = sanitizeJunosName(policy.name);
-
       // Clean EDL addresses from match criteria
       const secIntelAddrs = new Set(policy._secIntelAddresses || []);
-      let srcAddrs = policy.src_addresses.filter(a => !secIntelAddrs.has(a));
-      let dstAddrs = policy.dst_addresses.filter(a => !secIntelAddrs.has(a));
-      if (srcAddrs.length === 0 && policy.src_addresses.length > 0) srcAddrs = ['any'];
-      if (dstAddrs.length === 0 && policy.dst_addresses.length > 0) dstAddrs = ['any'];
+      let srcAddrs = policy.src_addresses
+        .map((value, index) => ({ value, index }))
+        .filter(({ value }) => !secIntelAddrs.has(value));
+      let dstAddrs = policy.dst_addresses
+        .map((value, index) => ({ value, index }))
+        .filter(({ value }) => !secIntelAddrs.has(value));
+      if (srcAddrs.length === 0 && policy.src_addresses.length > 0) srcAddrs = [{ value: 'any', index: null }];
+      if (dstAddrs.length === 0 && policy.dst_addresses.length > 0) dstAddrs = [{ value: 'any', index: null }];
 
       lines.push('        <policy>');
       lines.push(`          <name>${xmlText(name)}</name>`);
@@ -424,14 +503,16 @@ function buildPoliciesXml(policies, lines, warnings, profileMaps = {}, appGroups
 
       // Match
       lines.push('          <match>');
-      for (const addr of (srcAddrs.length > 0 ? srcAddrs : ['any'])) {
-        lines.push(`            <source-address>${xmlText(sanitizeJunosName(addr))}</source-address>`);
+      for (const { index: addressIndex } of (srcAddrs.length > 0 ? srcAddrs : [{ value: 'any', index: null }])) {
+        const output = addressIndex === null ? 'any' : identifierNames.reference(`security_policies[${pIdx}].src_addresses[${addressIndex}]`);
+        lines.push(`            <source-address>${xmlText(output)}</source-address>`);
       }
-      for (const addr of (dstAddrs.length > 0 ? dstAddrs : ['any'])) {
-        lines.push(`            <destination-address>${xmlText(sanitizeJunosName(addr))}</destination-address>`);
+      for (const { index: addressIndex } of (dstAddrs.length > 0 ? dstAddrs : [{ value: 'any', index: null }])) {
+        const output = addressIndex === null ? 'any' : identifierNames.reference(`security_policies[${pIdx}].dst_addresses[${addressIndex}]`);
+        lines.push(`            <destination-address>${xmlText(output)}</destination-address>`);
       }
 
-      const apps = resolveApps(policy.applications, policy.services, warnings, policy.name, appGroups, sourceVendor);
+      const apps = resolveApps(policy.applications, policy.services, warnings, policy.name, appGroups, sourceVendor, pIdx, identifierNames);
       for (const app of apps) {
         lines.push(`            <application>${xmlText(app)}</application>`);
       }
@@ -462,8 +543,8 @@ function buildPoliciesXml(policies, lines, warnings, profileMaps = {}, appGroups
       }
 
       // Application services (UTM / IDP / SecIntel)
-      const hasUtm = !!utmPolicyMap[policy.name];
-      const hasIdp = !!idpPolicyMap[policy.name];
+      const hasUtm = !!utmPolicyMap[pIdx];
+      const hasIdp = !!idpPolicyMap[pIdx];
       const hasProfileGroup = policy.profile_group && Object.keys(policy.security_profiles || {}).length === 0;
       const hasSecIntel = secIntelEnabled && policy.action === 'allow' &&
         policy.dst_zones.some(z => z.toLowerCase() === 'untrust');
@@ -473,20 +554,20 @@ function buildPoliciesXml(policies, lines, warnings, profileMaps = {}, appGroups
       if (hasUtm || hasIdp || hasSecIntel || hasProfileGroup || hasSslProxy) {
         lines.push('            <application-services>');
         if (hasUtm) {
-          lines.push(`              <utm-policy>${xmlText(utmPolicyMap[policy.name])}</utm-policy>`);
+          lines.push(`              <utm-policy>${xmlText(utmPolicyMap[pIdx])}</utm-policy>`);
         } else if (hasProfileGroup) {
-          lines.push('              <utm-policy>default-utm</utm-policy>');
+          lines.push(`              <utm-policy>${xmlText(identifierNames.reference(`security_policies[${pIdx}]#utm-policy`))}</utm-policy>`);
         }
         if (hasIdp) {
-          lines.push(`              <idp-policy>${xmlText(idpPolicyMap[policy.name])}</idp-policy>`);
+          lines.push(`              <idp-policy>${xmlText(idpPolicyMap[pIdx])}</idp-policy>`);
         }
         if (hasSecIntel) {
-          lines.push('              <security-intelligence-policy>secIntel-policy</security-intelligence-policy>');
+          lines.push(`              <security-intelligence-policy>${xmlText(secIntelPolicyName)}</security-intelligence-policy>`);
         }
         if (hasSslProxy) {
-          const sslProfile = policy._srx_decrypt_profile
-            ? sanitizeJunosName(policy._srx_decrypt_profile)
-            : 'ssl-fwd-proxy';
+          const sslProfile = identifierNames.reference(policy._srx_decrypt_profile
+            ? `security_policies[${pIdx}]._srx_decrypt_profile`
+            : `security_policies[${pIdx}]#ssl-proxy-profile`);
           lines.push('              <ssl-proxy>');
           lines.push(`                <profile-name>${xmlText(sslProfile)}</profile-name>`);
           lines.push('              </ssl-proxy>');
@@ -498,13 +579,13 @@ function buildPoliciesXml(policies, lines, warnings, profileMaps = {}, appGroups
 
       // Scheduler
       if (policy.schedule) {
-        lines.push(`          <scheduler-name>${xmlText(sanitizeJunosName(policy.schedule))}</scheduler-name>`);
+        lines.push(`          <scheduler-name>${xmlText(identifierNames.reference(`security_policies[${pIdx}].schedule`))}</scheduler-name>`);
       }
 
       lines.push('        </policy>');
     }
 
-    lines.push('      </policy>');
+    lines.push(pair.isGlobal ? '      </global>' : '      </policy>');
   }
 
   lines.push('    </policies>');
@@ -530,8 +611,68 @@ function groupNatByZonePair(rules) {
   return groups;
 }
 
-function buildNatXml(natRules, lines, warnings) {
+function natRuleNamePath(rule, ruleIndex, targetType, targetFrom, targetTo) {
+  const types = rule.type === 'source-and-destination'
+    ? ['source', 'destination']
+    : [rule.type || 'source'];
+  let occurrence = 0;
+  for (const type of types) {
+    const pairs = type === 'static'
+      ? [{ from: 'STATIC-NAT', to: '*' }]
+      : (rule.src_zones?.length ? rule.src_zones : ['any']).flatMap(from => (
+        (rule.dst_zones?.length ? rule.dst_zones : ['any']).map(to => ({ from, to }))
+      ));
+    for (const { from, to } of pairs) {
+      occurrence += 1;
+      if (type === targetType && from === targetFrom && to === targetTo) {
+        return occurrence === 1
+          ? `nat_rules[${ruleIndex}].name`
+          : `nat_rules[${ruleIndex}].name#${type}:${from}->${to}`;
+      }
+    }
+  }
+  throw new Error('NAT identifier path was not cataloged');
+}
+
+function buildNatXml(natRules, configuredZones, lines, warnings, identifierNames) {
   if (!natRules || natRules.length === 0) return;
+
+  for (let ruleIndex = 0; ruleIndex < natRules.length; ruleIndex += 1) {
+    const rule = natRules[ruleIndex];
+    const sourceZones = rule.src_zones?.length ? rule.src_zones : ['any'];
+    const destinationZones = rule.dst_zones?.length ? rule.dst_zones : ['any'];
+    for (let zoneIndex = 0; zoneIndex < sourceZones.length; zoneIndex += 1) {
+      identifierNames.reference(rule.src_zones?.length
+        ? `nat_rules[${ruleIndex}].src_zones[${zoneIndex}]`
+        : `nat_rules[${ruleIndex}]#effective-source-zone`);
+    }
+    for (let zoneIndex = 0; zoneIndex < destinationZones.length; zoneIndex += 1) {
+      identifierNames.reference(rule.dst_zones?.length
+        ? `nat_rules[${ruleIndex}].dst_zones[${zoneIndex}]`
+        : `nat_rules[${ruleIndex}]#effective-destination-zone`);
+    }
+    for (const field of ['src_addresses', 'dst_addresses']) {
+      for (let addressIndex = 0; addressIndex < (rule[field] || []).length; addressIndex += 1) {
+        identifierNames.reference(`nat_rules[${ruleIndex}].${field}[${addressIndex}]`);
+      }
+    }
+  }
+
+  const configuredZoneNames = new Set((configuredZones || []).map(zone => zone.name));
+  const missingZones = new Set();
+  for (const rule of natRules) {
+    for (const zone of [...(rule.src_zones?.length ? rule.src_zones : ['any']), ...(rule.dst_zones?.length ? rule.dst_zones : ['any'])]) {
+      if (zone !== 'any' && !configuredZoneNames.has(zone)) missingZones.add(zone);
+    }
+  }
+  if (missingZones.size > 0) {
+    lines.push('    <zones>');
+    for (const zone of [...missingZones].sort()) {
+      const name = identifierNames.generated('nat_rules', `nat-missing-zone:${zone}`);
+      lines.push(`      <security-zone><name>${xmlText(name)}</name></security-zone>`);
+    }
+    lines.push('    </zones>');
+  }
 
   lines.push('    <nat>');
 
@@ -545,23 +686,44 @@ function buildNatXml(natRules, lines, warnings) {
     const groups = groupNatByZonePair(sourceRules);
     for (const [zonePair, rules] of Object.entries(groups)) {
       const [fromZone, toZone] = zonePair.split('->');
-      const ruleSetName = sanitizeJunosName(`${fromZone}-to-${toZone}`);
+      const firstRuleIndex = natRules.indexOf(rules[0]);
+      const ruleSetName = identifierNames.generated(
+        `nat_rules[${firstRuleIndex}]`,
+        `source-nat-rule-set:${fromZone}->${toZone}`,
+      );
       lines.push('        <rule-set>');
       lines.push(`          <name>${xmlText(ruleSetName)}</name>`);
-      lines.push(`          <from><zone>${xmlText(sanitizeJunosName(fromZone))}</zone></from>`);
-      lines.push(`          <to><zone>${xmlText(sanitizeJunosName(toZone))}</zone></to>`);
+      const firstSourceIndex = (rules[0].src_zones?.length ? rules[0].src_zones : ['any']).indexOf(fromZone);
+      const firstDestIndex = (rules[0].dst_zones?.length ? rules[0].dst_zones : ['any']).indexOf(toZone);
+      const fromPath = rules[0].src_zones?.length
+        ? `nat_rules[${firstRuleIndex}].src_zones[${firstSourceIndex}]`
+        : `nat_rules[${firstRuleIndex}]#effective-source-zone`;
+      const toPath = rules[0].dst_zones?.length
+        ? `nat_rules[${firstRuleIndex}].dst_zones[${firstDestIndex}]`
+        : `nat_rules[${firstRuleIndex}]#effective-destination-zone`;
+      lines.push(`          <from><zone>${xmlText(identifierNames.reference(fromPath))}</zone></from>`);
+      lines.push(`          <to><zone>${xmlText(identifierNames.reference(toPath))}</zone></to>`);
 
       for (const rule of rules) {
-        const ruleName = sanitizeJunosName(rule.name);
+        const ruleIndex = natRules.indexOf(rule);
+        const rulePath = natRuleNamePath(rule, ruleIndex, 'source', fromZone, toZone);
+        const ruleName = identifierNames.definition(rulePath);
         lines.push('          <rule>');
         lines.push(`            <name>${xmlText(ruleName)}</name>`);
         const anyAddr = natAnyAddress(rule);
         lines.push('            <src-nat-rule-match>');
-        for (const addr of (rule.src_addresses || [anyAddr])) {
-          lines.push(`              <source-address>${xmlText(addr === 'any' ? anyAddr : addr)}</source-address>`);
+        for (let addressIndex = 0; addressIndex < (rule.src_addresses || [anyAddr]).length; addressIndex += 1) {
+          const addr = (rule.src_addresses || [anyAddr])[addressIndex];
+          const output = rule.src_addresses
+            ? identifierNames.reference(`nat_rules[${ruleIndex}].src_addresses[${addressIndex}]`)
+            : anyAddr;
+          lines.push(`              <source-address>${xmlText(output === 'any' ? anyAddr : output)}</source-address>`);
         }
-        for (const addr of (rule.dst_addresses || [anyAddr])) {
-          lines.push(`              <destination-address>${xmlText(addr === 'any' ? anyAddr : addr)}</destination-address>`);
+        for (let addressIndex = 0; addressIndex < (rule.dst_addresses || [anyAddr]).length; addressIndex += 1) {
+          const output = rule.dst_addresses
+            ? identifierNames.reference(`nat_rules[${ruleIndex}].dst_addresses[${addressIndex}]`)
+            : anyAddr;
+          lines.push(`              <destination-address>${xmlText(output === 'any' ? anyAddr : output)}</destination-address>`);
         }
         lines.push('            </src-nat-rule-match>');
         lines.push('            <then>');
@@ -569,10 +731,10 @@ function buildNatXml(natRules, lines, warnings) {
           if (rule.translated_src.type === 'interface') {
             lines.push('              <source-nat><interface/></source-nat>');
           } else if (rule.translated_src.type === 'dynamic-ip-pool') {
-            const poolName = sanitizeJunosName(`pool-${rule.name}`);
+            const poolName = identifierNames.generated(`nat_rules[${ruleIndex}]`, 'source-nat-pool');
             lines.push(`              <source-nat><pool><pool-name>${xmlText(poolName)}</pool-name></pool></source-nat>`);
           } else if (rule.translated_src.type === 'static') {
-            const poolName = sanitizeJunosName(`${rule.name}-static`);
+            const poolName = identifierNames.generated(`nat_rules[${ruleIndex}]`, 'static-source-nat-pool');
             lines.push(`              <source-nat><pool><pool-name>${xmlText(poolName)}</pool-name></pool></source-nat>`);
           }
         }
@@ -587,8 +749,9 @@ function buildNatXml(natRules, lines, warnings) {
 
     // Source NAT pools
     for (const rule of sourceRules) {
+      const ruleIndex = natRules.indexOf(rule);
       if (rule.translated_src && rule.translated_src.type === 'dynamic-ip-pool') {
-        const poolName = sanitizeJunosName(`pool-${rule.name}`);
+        const poolName = identifierNames.generated(`nat_rules[${ruleIndex}]`, 'source-nat-pool');
         lines.push('        <pool>');
         lines.push(`          <name>${xmlText(poolName)}</name>`);
         for (const addr of rule.translated_src.addresses) {
@@ -596,7 +759,7 @@ function buildNatXml(natRules, lines, warnings) {
         }
         lines.push('        </pool>');
       } else if (rule.translated_src && rule.translated_src.type === 'static' && rule.translated_src.address) {
-        const poolName = sanitizeJunosName(`${rule.name}-static`);
+        const poolName = identifierNames.generated(`nat_rules[${ruleIndex}]`, 'static-source-nat-pool');
         lines.push('        <pool>');
         lines.push(`          <name>${xmlText(poolName)}</name>`);
         lines.push(`          <address><name>${xmlText(rule.translated_src.address)}</name></address>`);
@@ -612,19 +775,33 @@ function buildNatXml(natRules, lines, warnings) {
     const groups = groupNatByZonePair(destRules);
     for (const [zonePair, rules] of Object.entries(groups)) {
       const [fromZone] = zonePair.split('->');
-      const ruleSetName = sanitizeJunosName(`${fromZone}-dnat`);
+      const firstRuleIndex = natRules.indexOf(rules[0]);
+      const toZone = zonePair.split('->')[1];
+      const ruleSetName = identifierNames.generated(
+        `nat_rules[${firstRuleIndex}]`,
+        `destination-nat-rule-set:${fromZone}->${toZone}`,
+      );
       lines.push('        <rule-set>');
       lines.push(`          <name>${xmlText(ruleSetName)}</name>`);
-      lines.push(`          <from><zone>${xmlText(sanitizeJunosName(fromZone))}</zone></from>`);
+      const firstSourceIndex = (rules[0].src_zones?.length ? rules[0].src_zones : ['any']).indexOf(fromZone);
+      const fromPath = rules[0].src_zones?.length
+        ? `nat_rules[${firstRuleIndex}].src_zones[${firstSourceIndex}]`
+        : `nat_rules[${firstRuleIndex}]#effective-source-zone`;
+      lines.push(`          <from><zone>${xmlText(identifierNames.reference(fromPath))}</zone></from>`);
 
       for (const rule of rules) {
-        const ruleName = sanitizeJunosName(rule.name);
+        const ruleIndex = natRules.indexOf(rule);
+        const rulePath = natRuleNamePath(rule, ruleIndex, 'destination', fromZone, toZone);
+        const ruleName = identifierNames.definition(rulePath);
         lines.push('          <rule>');
         lines.push(`            <name>${xmlText(ruleName)}</name>`);
         const dnatAny = natAnyAddress(rule);
         lines.push('            <dest-nat-rule-match>');
-        for (const addr of (rule.dst_addresses || [dnatAny])) {
-          lines.push(`              <destination-address>${xmlText(addr === 'any' ? dnatAny : addr)}</destination-address>`);
+        for (let addressIndex = 0; addressIndex < (rule.dst_addresses || [dnatAny]).length; addressIndex += 1) {
+          const output = rule.dst_addresses
+            ? identifierNames.reference(`nat_rules[${ruleIndex}].dst_addresses[${addressIndex}]`)
+            : dnatAny;
+          lines.push(`              <destination-address>${xmlText(output === 'any' ? dnatAny : output)}</destination-address>`);
         }
         if (rule.match_port) {
           lines.push(`              <destination-port>${xmlText(rule.match_port)}</destination-port>`);
@@ -633,7 +810,7 @@ function buildNatXml(natRules, lines, warnings) {
         lines.push('            <then>');
         const dstAddr = typeof rule.translated_dst === 'string' ? rule.translated_dst : (rule.translated_dst?.address || '');
         if (dstAddr) {
-          const poolName = sanitizeJunosName(`dnat-pool-${rule.name}`);
+          const poolName = identifierNames.generated(`nat_rules[${ruleIndex}]`, 'destination-nat-pool');
           lines.push(`              <destination-nat><pool><pool-name>${xmlText(poolName)}</pool-name></pool></destination-nat>`);
         }
         lines.push('            </then>');
@@ -644,9 +821,10 @@ function buildNatXml(natRules, lines, warnings) {
 
     // Destination NAT pools
     for (const rule of destRules) {
+      const ruleIndex = natRules.indexOf(rule);
       const dstAddr = typeof rule.translated_dst === 'string' ? rule.translated_dst : (rule.translated_dst?.address || '');
       if (dstAddr) {
-        const poolName = sanitizeJunosName(`dnat-pool-${rule.name}`);
+        const poolName = identifierNames.generated(`nat_rules[${ruleIndex}]`, 'destination-nat-pool');
         lines.push('        <pool>');
         lines.push(`          <name>${xmlText(poolName)}</name>`);
         lines.push(`          <address><ip-prefix>${xmlText(dstAddr)}</ip-prefix></address>`);
@@ -663,14 +841,17 @@ function buildNatXml(natRules, lines, warnings) {
   if (staticRules.length > 0) {
     lines.push('      <static>');
     lines.push('        <rule-set>');
-    lines.push('          <name>STATIC-NAT</name>');
+    const firstStaticIndex = natRules.indexOf(staticRules[0]);
+    lines.push(`          <name>${xmlText(identifierNames.generated(`nat_rules[${firstStaticIndex}]`, 'static-nat-rule-set'))}</name>`);
     for (const rule of staticRules) {
-      const ruleName = sanitizeJunosName(rule.name);
+      const ruleIndex = natRules.indexOf(rule);
+      const ruleName = identifierNames.definition(natRuleNamePath(rule, ruleIndex, 'static', 'STATIC-NAT', '*'));
       lines.push('          <rule>');
       lines.push(`            <name>${xmlText(ruleName)}</name>`);
       lines.push('            <match>');
-      for (const addr of (rule.dst_addresses || []).filter(a => a !== 'any')) {
-        lines.push(`              <destination-address>${xmlText(addr)}</destination-address>`);
+      for (let addressIndex = 0; addressIndex < (rule.dst_addresses || []).length; addressIndex += 1) {
+        if (rule.dst_addresses[addressIndex] === 'any') continue;
+        lines.push(`              <destination-address>${xmlText(identifierNames.reference(`nat_rules[${ruleIndex}].dst_addresses[${addressIndex}]`))}</destination-address>`);
       }
       lines.push('            </match>');
       lines.push('            <then>');
@@ -693,16 +874,19 @@ function buildNatXml(natRules, lines, warnings) {
 // Applications XML Builder
 // ---------------------------------------------------------------------------
 
-function buildApplicationsXml(serviceObjects, applications, serviceGroups, lines, customfwicMap) {
-  const allApps = [...(serviceObjects || []), ...(applications || [])];
+function buildApplicationsXml(serviceObjects, applications, serviceGroups, lines, customfwicMap, identifierNames) {
+  const allApps = [
+    ...(serviceObjects || []).map((app, index) => ({ app, index, root: 'service_objects', kind: 'service', portField: 'port_range' })),
+    ...(applications || []).map((app, index) => ({ app, index, root: 'applications', kind: 'application', portField: 'port' })),
+  ];
   const groups = serviceGroups || [];
   const hasCustomfwic = customfwicMap && customfwicMap.size > 0;
   if (allApps.length === 0 && groups.length === 0 && !hasCustomfwic) return;
 
   lines.push('  <applications>');
 
-  for (const app of allApps) {
-    const name = sanitizeJunosName(app.name);
+  for (const descriptor of allApps) {
+    const { app, index, root, kind, portField } = descriptor;
     const protocol = app.protocol || 'tcp';
     const port = app.port_range || app.port || '';
 
@@ -710,10 +894,40 @@ function buildApplicationsXml(serviceObjects, applications, serviceGroups, lines
     const predefApp = isPredefEquivalent(app.name, protocol, port);
     if (predefApp) {
       xmlPredefServiceMap.set(app.name, predefApp);
-      xmlPredefServiceMap.set(name, predefApp);
       lines.push(`    ${xmlComment(`Skipped: "${app.name}" (${protocol}/${port}) → predefined ${predefApp}`, 'service_objects')}`);
       continue;
     }
+
+    const ownerPath = `${root}[${index}]`;
+    if (port.includes(',')) {
+      const setName = identifierNames.generated(ownerPath, `${kind}-multi-port-set`);
+      const parts = [...new Set(port.split(',').map(part => part.trim()))].sort();
+      for (const part of parts) {
+        const childName = identifierNames.generated(ownerPath, `${kind}-port:${part}`);
+        lines.push('    <application>');
+        lines.push(`      <name>${xmlText(childName)}</name>`);
+        lines.push(`      <protocol>${xmlText(protocol)}</protocol>`);
+        lines.push(`      <destination-port>${xmlText(part)}</destination-port>`);
+        lines.push('    </application>');
+      }
+      lines.push('    <application-set>');
+      lines.push(`      <name>${xmlText(setName)}</name>`);
+      for (const part of parts) {
+        const childName = identifierNames.generated(ownerPath, `${kind}-port:${part}`);
+        lines.push(`      <application><name>${xmlText(childName)}</name></application>`);
+      }
+      lines.push('    </application-set>');
+      identifierNames.reference(`${ownerPath}.name`);
+      continue;
+    }
+
+    const emitsWithoutPort = root === 'service_objects'
+      && (['icmp', 'icmp6'].includes(protocol) || (protocol === 'ip' && app.protocol_number));
+    if ((root === 'applications' && (!app.protocol || !port)) || (!port && !emitsWithoutPort)) {
+      continue;
+    }
+
+    const name = identifierNames.definition(`${ownerPath}.name`);
 
     if (protocol === 'icmp' || protocol === 'icmp6') {
       lines.push('    <application>');
@@ -752,23 +966,21 @@ function buildApplicationsXml(serviceObjects, applications, serviceGroups, lines
 
   // Application sets (service groups)
   const svcGroupNameSet = new Set(groups.map(g => g.name));
-  for (const group of groups) {
-    const groupName = sanitizeJunosName(group.name);
+  for (let groupIndex = 0; groupIndex < groups.length; groupIndex += 1) {
+    const group = groups[groupIndex];
+    const groupName = identifierNames.definition(`service_groups[${groupIndex}].name`);
     lines.push('    <application-set>');
     lines.push(`      <name>${xmlText(groupName)}</name>`);
-    for (const member of group.members) {
-      const predefName = xmlPredefServiceMap.get(member);
-      if (predefName) {
-        lines.push('      <application>');
-        lines.push(`        <name>${xmlText(predefName)}</name>`);
-        lines.push('      </application>');
-      } else if (svcGroupNameSet.has(member)) {
+    for (let memberIndex = 0; memberIndex < group.members.length; memberIndex += 1) {
+      const member = group.members[memberIndex];
+      const memberName = identifierNames.reference(`service_groups[${groupIndex}].members[${memberIndex}]`);
+      if (svcGroupNameSet.has(member)) {
         lines.push('      <application-set>');
-        lines.push(`        <name>${xmlText(sanitizeJunosName(member))}</name>`);
+        lines.push(`        <name>${xmlText(memberName)}</name>`);
         lines.push('      </application-set>');
       } else {
         lines.push('      <application>');
-        lines.push(`        <name>${xmlText(sanitizeJunosName(member))}</name>`);
+        lines.push(`        <name>${xmlText(memberName)}</name>`);
         lines.push('      </application>');
       }
     }
@@ -778,13 +990,25 @@ function buildApplicationsXml(serviceObjects, applications, serviceGroups, lines
   // Placeholder Customfwic applications for unmapped apps
   if (hasCustomfwic) {
     lines.push('    <!-- Placeholder applications (Customfwic) - REQUIRES MANUAL CONFIGURATION -->');
-    for (const [customName, originalName] of customfwicMap) {
+    for (const [customName, details] of customfwicMap) {
+      if (details.kind === 'application-set') continue;
       lines.push('    <application>');
       lines.push(`      <name>${xmlText(customName)}</name>`);
       lines.push('      <protocol>tcp</protocol>');
       lines.push('      <destination-port>0</destination-port>');
-      lines.push(`      <description>Placeholder for ${xmlText(originalName)} - REQUIRES MANUAL CONFIGURATION</description>`);
+      lines.push(`      <description>Placeholder for ${xmlText(details.originalName)} - REQUIRES MANUAL CONFIGURATION</description>`);
       lines.push('    </application>');
+    }
+    for (const [customName, details] of customfwicMap) {
+      if (details.kind !== 'application-set') continue;
+      lines.push('    <application-set>');
+      lines.push(`      <name>${xmlText(customName)}</name>`);
+      for (const [childName, childDetails] of customfwicMap) {
+        if (childDetails.kind === 'application' && childDetails.originalName === details.originalName) {
+          lines.push(`      <application><name>${xmlText(childName)}</name></application>`);
+        }
+      }
+      lines.push('    </application-set>');
     }
   }
 
@@ -802,13 +1026,14 @@ const XML_SCHEDULE_DAYS = {
   thursday: 'thursday', friday: 'friday', saturday: 'saturday',
 };
 
-function buildSchedulersXml(schedules, lines) {
+function buildSchedulersXml(schedules, lines, identifierNames) {
   if (!schedules || schedules.length === 0) return;
 
   lines.push('  <schedulers>');
 
-  for (const sched of schedules) {
-    const name = sanitizeJunosName(sched.name);
+  for (let scheduleIndex = 0; scheduleIndex < schedules.length; scheduleIndex += 1) {
+    const sched = schedules[scheduleIndex];
+    const name = identifierNames.definition(`schedules[${scheduleIndex}].name`);
     lines.push('    <scheduler>');
     lines.push(`      <name>${xmlText(name)}</name>`);
 
@@ -846,17 +1071,25 @@ function buildSchedulersXml(schedules, lines) {
 // UTM XML Builder
 // ---------------------------------------------------------------------------
 
-function computeUtmMap(policies) {
+function computeUtmMap(config, identifierNames) {
+  const policies = config.security_policies || [];
   const utmPolicyMap = {};
-  const utmProfiles = []; // { policyName, profiles: { type → mapped } }
-  if (!policies) return { utmPolicyMap, utmProfiles };
+  const utmProfiles = [];
+  if (policies.length === 0) return { utmPolicyMap, utmProfiles };
 
   const utmTypes = ['virus', 'wildfire-analysis', 'url-filtering', 'file-blocking', 'email-filter',
     'application-control', 'dlp', 'dns-security', 'decryption', 'waf', 'casb', 'voip'];
   const comboMap = new Map();
-  let idx = 0;
+  const securityFeatures = canonicalizeJunosSecurityFeatures(config);
+  const featureUseLookup = new Map();
+  for (const feature of securityFeatures) {
+    for (const use of feature.uses) {
+      featureUseLookup.set(`${use.policyIndex}\0${use.type}`, feature);
+    }
+  }
 
-  for (const policy of policies) {
+  for (let policyIndex = 0; policyIndex < policies.length; policyIndex += 1) {
+    const policy = policies[policyIndex];
     const sp = policy.security_profiles || {};
     const utmP = {};
     for (const t of utmTypes) {
@@ -867,29 +1100,63 @@ function computeUtmMap(policies) {
 
     const key = JSON.stringify(utmP);
     if (!comboMap.has(key)) {
-      idx++;
-      const pName = `utm-policy-${idx}`;
-      const mapped = {};
-      for (const [pt, pv] of Object.entries(utmP)) {
-        mapped[pt] = mapProfileToSrx(pt, pv);
-      }
-      comboMap.set(key, { policyName: pName, profiles: mapped });
-      utmProfiles.push({ policyName: pName, profiles: mapped });
+      comboMap.set(key, { profiles: utmP, policyIndexes: [] });
     }
-    utmPolicyMap[policy.name] = comboMap.get(key).policyName;
+    comboMap.get(key).policyIndexes.push(policyIndex);
+  }
+
+  const orderedCombos = [...comboMap.entries()].sort(([left], [right]) => left.localeCompare(right));
+  for (const [, combo] of orderedCombos) {
+    const ownerIndex = combo.policyIndexes[0];
+    const policyName = identifierNames.generated(`security_policies[${ownerIndex}]`, 'utm-policy');
+    const profiles = {};
+    for (const [type, value] of Object.entries(combo.profiles)) {
+      const feature = featureUseLookup.get(`${ownerIndex}\0${type}`);
+      const mapped = mapProfileToSrx(type, value);
+      profiles[type] = {
+        mapped,
+        feature,
+        outputName: feature
+          ? identifierNames.generated(`security_policies[${feature.ownerIndex}]`, feature.role)
+          : mapped.srxProfile,
+      };
+      if (feature) {
+        for (const policyIndex of combo.policyIndexes) {
+          identifierNames.reference(`security_policies[${policyIndex}].security_profiles.${type}`);
+        }
+      }
+    }
+    utmProfiles.push({ policyName, profiles });
+    for (const policyIndex of combo.policyIndexes) {
+      utmPolicyMap[policyIndex] = identifierNames.reference(`security_policies[${policyIndex}]#utm-policy`);
+    }
+  }
+
+  const defaults = policies
+    .map((policy, policyIndex) => ({ policy, policyIndex }))
+    .filter(({ policy }) => policy.profile_group && Object.keys(policy.security_profiles || {}).length === 0);
+  if (defaults.length > 0) {
+    const owner = [...defaults].sort((left, right) => (
+      String(left.policy.name || '').localeCompare(String(right.policy.name || ''))
+    ))[0];
+    const policyName = identifierNames.generated(`security_policies[${owner.policyIndex}]`, 'default-utm-policy');
+    utmProfiles.push({ policyName, profiles: {} });
+    for (const { policyIndex } of defaults) {
+      utmPolicyMap[policyIndex] = identifierNames.reference(`security_policies[${policyIndex}]#utm-policy`);
+    }
   }
   return { utmPolicyMap, utmProfiles };
 }
 
-function computeIdpMap(policies) {
+function computeIdpMap(policies, identifierNames) {
   const idpPolicyMap = {};
-  if (!policies) return { idpPolicyMap };
+  const idpProfiles = [];
+  if (!policies) return { idpPolicyMap, idpProfiles };
 
   const idpTypes = ['spyware', 'vulnerability'];
   const comboMap = new Map();
-  let idx = 0;
-
-  for (const policy of policies) {
+  for (let policyIndex = 0; policyIndex < policies.length; policyIndex += 1) {
+    const policy = policies[policyIndex];
     const sp = policy.security_profiles || {};
     const hasIdp = idpTypes.some(t => sp[t]);
     if (!hasIdp) continue;
@@ -900,15 +1167,23 @@ function computeIdpMap(policies) {
     }
     const key = JSON.stringify(idpP);
     if (!comboMap.has(key)) {
-      idx++;
-      comboMap.set(key, `idp-policy-${idx}`);
+      comboMap.set(key, { profiles: idpP, policyIndexes: [] });
     }
-    idpPolicyMap[policy.name] = comboMap.get(key);
+    comboMap.get(key).policyIndexes.push(policyIndex);
   }
-  return { idpPolicyMap };
+  const orderedCombos = [...comboMap.entries()].sort(([left], [right]) => left.localeCompare(right));
+  for (const [, combo] of orderedCombos) {
+    const ownerIndex = combo.policyIndexes[0];
+    const policyName = identifierNames.generated(`security_policies[${ownerIndex}]`, 'idp-policy');
+    idpProfiles.push({ ...combo, ownerIndex, policyName });
+    for (const policyIndex of combo.policyIndexes) {
+      idpPolicyMap[policyIndex] = identifierNames.reference(`security_policies[${policyIndex}]#idp-policy`);
+    }
+  }
+  return { idpPolicyMap, idpProfiles };
 }
 
-function buildUtmXml(utmProfiles, lines) {
+function buildUtmXml(utmProfiles, lines, identifierNames) {
   if (!utmProfiles || utmProfiles.length === 0) return;
 
   lines.push('    <utm>');
@@ -918,14 +1193,15 @@ function buildUtmXml(utmProfiles, lines) {
   lines.push('      <!-- NOTE: Generated profiles use recommended defaults — review and customize -->');
   lines.push('      <feature-profile>');
   for (const combo of utmProfiles) {
-    for (const mapped of Object.values(combo.profiles)) {
-      if (mapped.srxFeature !== 'utm' || emitted.has(mapped.srxProfile)) continue;
-      emitted.add(mapped.srxProfile);
+    for (const profile of Object.values(combo.profiles)) {
+      const { mapped, outputName } = profile;
+      if (mapped.srxFeature !== 'utm' || emitted.has(outputName)) continue;
+      emitted.add(outputName);
 
       if (mapped.srxType === 'anti-virus') {
         lines.push('        <anti-virus>');
         lines.push(`          <profile>`);
-        lines.push(`            <name>${xmlText(mapped.srxProfile)}</name>`);
+        lines.push(`            <name>${xmlText(outputName)}</name>`);
         lines.push('            <fallback-options><default>log-and-permit</default><content-size>log-and-permit</content-size></fallback-options>');
         lines.push('            <scan-options><content-size-limit>20000</content-size-limit><timeout>180</timeout></scan-options>');
         lines.push('          </profile>');
@@ -933,7 +1209,7 @@ function buildUtmXml(utmProfiles, lines) {
       } else if (mapped.srxType === 'web-filtering') {
         lines.push('        <web-filtering>');
         lines.push(`          <profile>`);
-        lines.push(`            <name>${xmlText(mapped.srxProfile)}</name>`);
+        lines.push(`            <name>${xmlText(outputName)}</name>`);
         lines.push('            <type>juniper-enhanced</type>');
         lines.push('            <default>block</default>');
         lines.push('          </profile>');
@@ -941,35 +1217,64 @@ function buildUtmXml(utmProfiles, lines) {
       } else if (mapped.srxType === 'content-filtering') {
         lines.push('        <content-filtering>');
         lines.push(`          <profile>`);
-        lines.push(`            <name>${xmlText(mapped.srxProfile)}</name>`);
+        lines.push(`            <name>${xmlText(outputName)}</name>`);
         lines.push('          </profile>');
         lines.push('        </content-filtering>');
       } else if (mapped.srxType === 'anti-spam') {
         lines.push('        <anti-spam>');
         lines.push(`          <profile>`);
-        lines.push(`            <name>${xmlText(mapped.srxProfile)}</name>`);
+        lines.push(`            <name>${xmlText(outputName)}</name>`);
         lines.push('          </profile>');
         lines.push('        </anti-spam>');
       } else if (mapped.srxType === 'dns-security') {
-        lines.push(`        <!-- DNS Security: configure SRX DNS Security (requires ATP license) -->`);
+        lines.push('        <dns-filtering>');
+        lines.push(`          <rule><name>${xmlText(outputName)}</name></rule>`);
+        lines.push('        </dns-filtering>');
       }
     }
   }
   lines.push('      </feature-profile>');
 
+  const emittedAppFw = new Set();
+  for (const combo of utmProfiles) {
+    for (const profile of Object.values(combo.profiles)) {
+      const { mapped, outputName, feature } = profile;
+      if (mapped.srxFeature !== 'appfw' || !feature || emittedAppFw.has(outputName)) continue;
+      emittedAppFw.add(outputName);
+      lines.push('      <application-firewall>');
+      lines.push('        <rule-sets>');
+      lines.push(`          <name>${xmlText(outputName)}</name>`);
+      for (let ruleIndex = 0; ruleIndex < feature.applicationFirewallRules.length; ruleIndex += 1) {
+        const [category] = feature.applicationFirewallRules[ruleIndex];
+        const ruleName = identifierNames.generated(
+          `security_policies[${feature.ownerIndex}]`,
+          `application-firewall-rule-${ruleIndex + 1}`,
+        );
+        lines.push('          <rule>');
+        lines.push(`            <name>${xmlText(ruleName)}</name>`);
+        lines.push(`            <match><dynamic-application-group>junos:${xmlText(category)}</dynamic-application-group></match>`);
+        lines.push('            <then><deny/></then>');
+        lines.push('          </rule>');
+      }
+      lines.push('        </rule-sets>');
+      lines.push('      </application-firewall>');
+    }
+  }
+
   // UTM policies
   for (const combo of utmProfiles) {
     lines.push(`      <utm-policy name="${xmlAttribute(combo.policyName, 'utm.policyName')}">`);
-    for (const mapped of Object.values(combo.profiles)) {
+    for (const profile of Object.values(combo.profiles)) {
+      const { mapped, outputName } = profile;
       if (mapped.srxFeature !== 'utm') continue;
       if (mapped.srxType === 'anti-virus') {
-        lines.push(`        <anti-virus><http-profile>${xmlText(mapped.srxProfile)}</http-profile></anti-virus>`);
+        lines.push(`        <anti-virus><http-profile>${xmlText(outputName)}</http-profile></anti-virus>`);
       } else if (mapped.srxType === 'web-filtering') {
-        lines.push(`        <web-filtering><http-profile>${xmlText(mapped.srxProfile)}</http-profile></web-filtering>`);
+        lines.push(`        <web-filtering><http-profile>${xmlText(outputName)}</http-profile></web-filtering>`);
       } else if (mapped.srxType === 'content-filtering') {
-        lines.push(`        <content-filtering><rule-set>${xmlText(mapped.srxProfile)}</rule-set></content-filtering>`);
+        lines.push(`        <content-filtering><rule-set>${xmlText(outputName)}</rule-set></content-filtering>`);
       } else if (mapped.srxType === 'anti-spam') {
-        lines.push(`        <anti-spam><smtp-profile>${xmlText(mapped.srxProfile)}</smtp-profile></anti-spam>`);
+        lines.push(`        <anti-spam><smtp-profile>${xmlText(outputName)}</smtp-profile></anti-spam>`);
       }
     }
     lines.push('      </utm-policy>');
@@ -982,14 +1287,14 @@ function buildUtmXml(utmProfiles, lines) {
 // IDP XML Builder
 // ---------------------------------------------------------------------------
 
-function buildIdpXml(policies, lines) {
-  if (!policies) return;
+function buildIdpXml(config, lines, identifierNames) {
+  const policies = config.security_policies || [];
+  if (policies.length === 0) return;
 
   const idpTypes = ['spyware', 'vulnerability'];
   const comboMap = new Map();
-  let idx = 0;
-
-  for (const policy of policies) {
+  for (let policyIndex = 0; policyIndex < policies.length; policyIndex += 1) {
+    const policy = policies[policyIndex];
     const sp = policy.security_profiles || {};
     const hasIdp = idpTypes.some(t => sp[t]);
     if (!hasIdp) continue;
@@ -1000,57 +1305,78 @@ function buildIdpXml(policies, lines) {
     }
     const key = JSON.stringify(idpP);
     if (!comboMap.has(key)) {
-      idx++;
-      comboMap.set(key, { profiles: idpP, policyName: `idp-policy-${idx}` });
+      comboMap.set(key, { profiles: idpP, policyIndexes: [] });
     }
+    comboMap.get(key).policyIndexes.push(policyIndex);
   }
 
   if (comboMap.size === 0) return;
 
   lines.push('    <idp>');
 
-  for (const [, combo] of comboMap) {
+  const orderedCombos = [...comboMap.entries()].sort(([left], [right]) => left.localeCompare(right));
+  for (const [, combo] of orderedCombos) {
+    const ownerIndex = combo.policyIndexes[0];
+    const policyName = identifierNames.generated(`security_policies[${ownerIndex}]`, 'idp-policy');
     lines.push(`      <idp-policy>`);
-    lines.push(`        <name>${xmlText(combo.policyName)}</name>`);
+    lines.push(`        <name>${xmlText(policyName)}</name>`);
     lines.push('        <rulebase-ips>');
 
     let ruleIdx = 0;
     for (const [pType, pValue] of Object.entries(combo.profiles)) {
-      ruleIdx++;
-      const ruleName = `${pType}-rule-${ruleIdx}`;
+      const definition = config.security_profile_definitions?.[`${pType}:${pValue}`];
+      const severityActions = definition?.severityActions || {};
+      const severities = ['critical', 'high', 'medium', 'low', 'info']
+        .filter(severity => severityActions[severity]);
+      const ruleParts = severities.length > 0 ? severities : [null];
+      for (const severity of ruleParts) {
+        ruleIdx += 1;
+        const ruleName = identifierNames.generated(
+          `security_policies[${ownerIndex}]`,
+          `idp-rule-${ruleIdx}`,
+        );
+        const sourceAction = severity ? severityActions[severity] : null;
+        const actionMap = {
+          'reset-both': 'drop-connection', 'reset-client': 'drop-connection',
+          'reset-server': 'drop-connection', drop: 'drop-packet', block: 'drop-connection',
+          'block-all': 'drop-connection', alert: 'no-action', monitor: 'no-action',
+          pass: 'no-action', default: 'recommended',
+        };
+        const nameLower = pValue.toLowerCase();
+        const idpAction = sourceAction
+          ? (actionMap[sourceAction] || 'recommended')
+          : nameLower.includes('strict') || nameLower.includes('critical')
+            ? 'drop-connection'
+            : nameLower.includes('alert') || nameLower.includes('monitor')
+              ? 'no-action' : 'recommended';
+        const attackGroup = severity
+          ? `${severity.charAt(0).toUpperCase()}${severity.slice(1)} - Recommended`
+          : 'Recommended';
 
-      // Determine action from source profile name
-      const nameLower = pValue.toLowerCase();
-      let idpAction = 'recommended';
-      if (nameLower.includes('strict') || nameLower.includes('critical')) {
-        idpAction = 'drop-connection';
-      } else if (nameLower.includes('alert') || nameLower.includes('monitor')) {
-        idpAction = 'no-action';
+        lines.push('          <rule>');
+        lines.push(`            <name>${xmlText(ruleName)}</name>`);
+        lines.push('            <match>');
+        lines.push('              <attacks>');
+        lines.push(`                <predefined-attack-groups>${xmlText(attackGroup)}</predefined-attack-groups>`);
+        lines.push('              </attacks>');
+        lines.push('            </match>');
+        lines.push('            <then>');
+        const actionTag = xmlElementName(
+          idpAction,
+          ['recommended', 'drop-connection', 'drop-packet', 'no-action'],
+          'security_profiles.idp.action',
+        );
+        const actionElement = {
+          recommended: '<recommended/>',
+          'drop-connection': '<drop-connection/>',
+          'drop-packet': '<drop-packet/>',
+          'no-action': '<no-action/>',
+        }[actionTag];
+        lines.push(`              <action>${actionElement}</action>`);
+        lines.push('              <notification><log-attacks/></notification>');
+        lines.push('            </then>');
+        lines.push('          </rule>');
       }
-
-      lines.push('          <rule>');
-      lines.push(`            <name>${xmlText(ruleName)}</name>`);
-      lines.push('            <match>');
-      lines.push('              <attacks>');
-      lines.push('                <predefined-attack-groups>Recommended</predefined-attack-groups>');
-      lines.push('              </attacks>');
-      lines.push('            </match>');
-      lines.push('            <then>');
-      const actionTag = xmlElementName(
-        idpAction,
-        ['recommended', 'drop-connection', 'drop-packet', 'no-action'],
-        'security_profiles.idp.action',
-      );
-      const actionElement = {
-        recommended: '<recommended/>',
-        'drop-connection': '<drop-connection/>',
-        'drop-packet': '<drop-packet/>',
-        'no-action': '<no-action/>',
-      }[actionTag];
-      lines.push(`              <action>${actionElement}</action>`);
-      lines.push('              <notification><log-attacks/></notification>');
-      lines.push('            </then>');
-      lines.push('          </rule>');
     }
 
     lines.push('        </rulebase-ips>');
@@ -1064,17 +1390,24 @@ function buildIdpXml(policies, lines) {
 // SecIntel XML Builder
 // ---------------------------------------------------------------------------
 
-function buildSecIntelXml(blockLists, lines) {
+function buildSecIntelXml(externalLists, lines, identifierNames) {
+  const blockLists = externalLists
+    .map((list, index) => ({ list, index }))
+    .filter(({ list }) => list.isBlockList)
+    .sort((left, right) => String(left.list.name).localeCompare(String(right.list.name)));
   if (!blockLists || blockLists.length === 0) return;
+  const ownerIndex = blockLists[0].index;
+  const profileName = identifierNames.generated(`external_lists[${ownerIndex}]`, 'security-intelligence-profile');
+  const policyName = identifierNames.generated(`external_lists[${ownerIndex}]`, 'security-intelligence-policy');
 
   lines.push('  <services>');
   lines.push('    <security-intelligence>');
 
   lines.push('      <profile>');
-  lines.push('        <name>secIntel-profile</name>');
+  lines.push(`        <name>${xmlText(profileName)}</name>`);
   lines.push('        <category>BlockList</category>');
-  blockLists.forEach((bl, i) => {
-    const ruleName = `secIntel-rule-${i + 1}`;
+  blockLists.forEach(({ index }) => {
+    const ruleName = identifierNames.generated(`external_lists[${index}].name`, 'security-intelligence-rule');
     lines.push(`        <rule>`);
     lines.push(`          <name>${xmlText(ruleName)}</name>`);
     lines.push('          <match><threat-level>10</threat-level></match>');
@@ -1084,8 +1417,8 @@ function buildSecIntelXml(blockLists, lines) {
   lines.push('      </profile>');
 
   lines.push('      <policy>');
-  lines.push('        <name>secIntel-policy</name>');
-  lines.push('        <profile>secIntel-profile</profile>');
+  lines.push(`        <name>${xmlText(policyName)}</name>`);
+  lines.push(`        <profile>${xmlText(profileName)}</profile>`);
   lines.push('      </policy>');
 
   lines.push('    </security-intelligence>');
@@ -1102,29 +1435,44 @@ const xmlCustomfwicApps = new Map();
 /** Tracks service objects that map to predefined Junos apps (XML path) */
 const xmlPredefServiceMap = new Map();
 
-function resolveApps(applications, services, warnings, policyName, appGroups = [], sourceVendor = '') {
+function prepareXmlApplicationGroupApplications(groups, identifierNames) {
+  for (let groupIndex = 0; groupIndex < (groups || []).length; groupIndex += 1) {
+    const group = groups[groupIndex];
+    for (let memberIndex = 0; memberIndex < (group.members || []).length; memberIndex += 1) {
+      const member = group.members[memberIndex];
+      if (member === 'service-set') continue;
+      const path = `application_groups[${groupIndex}].members[${memberIndex}]`;
+      identifierNames.reference(path);
+      for (const entry of identifierNames.generatedEntries(path)) {
+        const role = entry.definitionPath.slice(entry.definitionPath.lastIndexOf('#generated:') + 11);
+        const generatedName = identifierNames.generated(path, role);
+        xmlCustomfwicApps.set(generatedName, { originalName: member, kind: entry.kind });
+      }
+    }
+  }
+}
+
+function resolveApps(applications, services, warnings, policyName, appGroups = [], sourceVendor = '', policyIndex, identifierNames) {
   const resolved = [];
   const isSrxSource = sourceVendor === 'srx' || sourceVendor === 'greenfield' || sourceVendor === 'srx_healthcheck';
 
   // Helper to map a single app name to Junos (with Customfwic fallback)
-  const mapSingleApp = (appName) => {
-    // SRX→SRX: pass through as-is (already a Junos application name)
-    if (isSrxSource) {
-      resolved.push(appName);
-      return;
+  const mapSingleApp = (appName, path) => {
+    if (appName === 'service-set') return;
+    const outputName = identifierNames.reference(path);
+    resolved.push(outputName);
+    const junos = mapAppToJunos(appName, sourceVendor);
+    for (const entry of identifierNames.generatedEntries(path)) {
+      const role = entry.definitionPath.slice(entry.definitionPath.lastIndexOf('#generated:') + 11);
+      const generatedName = identifierNames.generated(path, role);
+      xmlCustomfwicApps.set(generatedName, { originalName: appName, kind: entry.kind });
     }
-    const junos = mapAppToJunos(appName);
-    if (junos) {
-      resolved.push(junos);
-    } else {
-      const customName = sanitizeJunosName(appName) + 'Customfwic';
-      resolved.push(customName);
-      xmlCustomfwicApps.set(customName, appName);
+    if (!junos && !isSrxSource) {
       if (warnings) {
         warnings.push(createWarning(
           'warning',
           `policy/${policyName}`,
-          `Application "${appName}" has no predefined Junos equivalent — using placeholder "${customName}"`,
+          `Application "${appName}" has no predefined Junos equivalent — using placeholder "${outputName}"`,
           'Create a custom application on the SRX with the correct protocol/port definition for this application'
         ));
       }
@@ -1132,38 +1480,37 @@ function resolveApps(applications, services, warnings, policyName, appGroups = [
   };
 
   if (applications && applications.length > 0) {
-    for (const app of applications) {
-      if (app === 'any') { resolved.push('any'); continue; }
+    for (let appIndex = 0; appIndex < applications.length; appIndex += 1) {
+      const app = applications[appIndex];
+      if (app === 'any') {
+        resolved.push(identifierNames.reference(`security_policies[${policyIndex}].applications[${appIndex}]`));
+        continue;
+      }
+      if (app === 'service-set') continue;
 
       // Check if this is an application group reference — expand to members
       const group = appGroups.find(g => g.name === app);
       if (group && group.members.length > 0) {
-        for (const member of group.members) {
-          mapSingleApp(member);
+        for (let memberIndex = 0; memberIndex < group.members.length; memberIndex += 1) {
+          mapSingleApp(
+            group.members[memberIndex],
+            `security_policies[${policyIndex}].applications[${appIndex}]#member:${memberIndex}`,
+          );
         }
         continue;
       }
 
-      mapSingleApp(app);
+      mapSingleApp(app, `security_policies[${policyIndex}].applications[${appIndex}]`);
     }
   }
   if (services && services.length > 0) {
-    for (const svc of services) {
-      if (svc === 'application-default' || svc === 'any') continue;
-      // Check if this service was mapped to a predefined app during buildApplicationsXml
-      const predefName = xmlPredefServiceMap.get(svc);
-      if (predefName) {
-        resolved.push(predefName);
-        continue;
-      }
-      const junos = mapAppToJunos(svc);
-      if (junos) {
-        resolved.push(junos);
-      } else {
-        resolved.push(sanitizeJunosName(svc));
-      }
+    for (let serviceIndex = 0; serviceIndex < services.length; serviceIndex += 1) {
+      const svc = services[serviceIndex];
+      if (svc === 'application-default' || svc === 'any' || svc === 'service-set') continue;
+      resolved.push(identifierNames.reference(`security_policies[${policyIndex}].services[${serviceIndex}]`));
     }
   }
+  if (resolved.includes('any')) return ['any'];
   if (resolved.length === 0) resolved.push('any');
   return [...new Set(resolved)];
 }
@@ -1172,7 +1519,80 @@ function resolveApps(applications, services, warnings, policyName, appGroups = [
 // Static Routes XML Builder
 // ---------------------------------------------------------------------------
 
-function buildRoutingXml(config, lines) {
+function routingInstanceDefinitionPath(config, sourceName) {
+  if (sourceName === 'default' || sourceName === 'master') return null;
+  for (let index = 0; index < (config.static_routes || []).length; index += 1) {
+    const route = config.static_routes[index];
+    if (route.vrf === sourceName) return `static_routes[${index}].vrf`;
+    if (route.next_hop_type === 'next-vr' && route.next_hop === sourceName) return `static_routes[${index}].next_hop`;
+  }
+  for (const field of ['bgp_config', 'ospf_config', 'ospf3_config', 'evpn_config', 'vxlan_config']) {
+    for (let index = 0; index < (config[field] || []).length; index += 1) {
+      if (config[field][index].instance === sourceName) return `${field}[${index}].instance`;
+    }
+  }
+  return null;
+}
+
+function routingInstanceUseName(config, sourceName, localPath, identifierNames) {
+  const definitionPath = routingInstanceDefinitionPath(config, sourceName);
+  return definitionPath === localPath
+    ? identifierNames.definition(localPath)
+    : identifierNames.reference(localPath);
+}
+
+function buildAdditionalBgpBodyXml(bgp, bgpIndex, lines, indent, identifierNames) {
+  for (let groupIndex = 0; groupIndex < (bgp.peer_groups || []).length; groupIndex += 1) {
+    const group = bgp.peer_groups[groupIndex];
+    lines.push(`${indent}<group>`);
+    lines.push(`${indent}  <name>${xmlText(identifierNames.definition(`bgp_config[${bgpIndex}].peer_groups[${groupIndex}].name`))}</name>`);
+    lines.push(`${indent}  <type>${xmlText(group.type || 'external')}</type>`);
+    for (let neighborIndex = 0; neighborIndex < (group.neighbors || []).length; neighborIndex += 1) {
+      const neighbor = group.neighbors[neighborIndex];
+      lines.push(`${indent}  <neighbor>`);
+      lines.push(`${indent}    <name>${xmlText(neighbor.address)}</name>`);
+      if (neighbor.peer_as) lines.push(`${indent}    <peer-as>${neighbor.peer_as}</peer-as>`);
+      if (neighbor.import_policy) {
+        lines.push(`${indent}    <import>${xmlText(identifierNames.reference(`bgp_config[${bgpIndex}].peer_groups[${groupIndex}].neighbors[${neighborIndex}].import_policy`))}</import>`);
+      }
+      if (neighbor.export_policy) {
+        lines.push(`${indent}    <export>${xmlText(identifierNames.reference(`bgp_config[${bgpIndex}].peer_groups[${groupIndex}].neighbors[${neighborIndex}].export_policy`))}</export>`);
+      }
+      lines.push(`${indent}  </neighbor>`);
+    }
+    if (groupIndex === 0) {
+      for (let networkIndex = 0; networkIndex < (bgp.networks || []).length; networkIndex += 1) {
+        if (bgp.networks[networkIndex].policy) {
+          lines.push(`${indent}  <export>${xmlText(identifierNames.reference(`bgp_config[${bgpIndex}].networks[${networkIndex}].policy`))}</export>`);
+        }
+      }
+    }
+    lines.push(`${indent}</group>`);
+  }
+  const needsDefaultGroup = (bgp.networks || []).some(network => network.policy)
+    && !bgp.peer_groups?.[0]?.name;
+  if (needsDefaultGroup) {
+    const groupName = identifierNames.generated(`bgp_config[${bgpIndex}]`, 'default-bgp-group');
+    identifierNames.reference(`bgp_config[${bgpIndex}]#default-bgp-group`);
+    lines.push(`${indent}<group>`);
+    lines.push(`${indent}  <name>${xmlText(groupName)}</name>`);
+    for (let networkIndex = 0; networkIndex < (bgp.networks || []).length; networkIndex += 1) {
+      if (bgp.networks[networkIndex].policy) {
+        lines.push(`${indent}  <export>${xmlText(identifierNames.reference(`bgp_config[${bgpIndex}].networks[${networkIndex}].policy`))}</export>`);
+      }
+    }
+    lines.push(`${indent}</group>`);
+  }
+  for (let redistIndex = 0; redistIndex < (bgp.redistribute || []).length; redistIndex += 1) {
+    const policyName = identifierNames.generated(
+      `bgp_config[${bgpIndex}].redistribute[${redistIndex}]`,
+      'bgp-redistribution-policy',
+    );
+    lines.push(`${indent}<export>${xmlText(policyName)}</export>`);
+  }
+}
+
+function buildRoutingXml(config, lines, identifierNames) {
   const routes = config.static_routes || [];
   const bgpConfigs = config.bgp_config || [];
   const ospfConfigs = config.ospf_config || [];
@@ -1180,15 +1600,34 @@ function buildRoutingXml(config, lines) {
   const evpnConfigs = config.evpn_config || [];
   const vxlanConfigs = config.vxlan_config || [];
 
-  const globalRoutes = routes.filter(r => !r.vrf);
+  for (let routeIndex = 0; routeIndex < routes.length; routeIndex += 1) {
+    const route = routes[routeIndex];
+    if (route.vrf) {
+      routingInstanceUseName(config, route.vrf, `static_routes[${routeIndex}].vrf`, identifierNames);
+    }
+    if (route.next_hop_type === 'next-vr' && route.next_hop) {
+      routingInstanceUseName(config, route.next_hop, `static_routes[${routeIndex}].next_hop`, identifierNames);
+    }
+  }
+  for (const field of ['bgp_config', 'ospf_config', 'ospf3_config', 'evpn_config', 'vxlan_config']) {
+    for (let configIndex = 0; configIndex < (config[field] || []).length; configIndex += 1) {
+      const item = config[field][configIndex];
+      if (item.instance) {
+        routingInstanceUseName(config, item.instance, `${field}[${configIndex}].instance`, identifierNames);
+      }
+    }
+  }
+
+  const globalRoutes = routes.filter(r => !r.vrf || ['default', 'master'].includes(r.vrf));
   const vrfGroups = {};
-  for (const r of routes.filter(r => r.vrf)) {
+  for (const r of routes.filter(r => r.vrf && !['default', 'master'].includes(r.vrf))) {
     if (!vrfGroups[r.vrf]) vrfGroups[r.vrf] = [];
     vrfGroups[r.vrf].push(r);
   }
 
   // Find global BGP/OSPF/OSPFv3/EVPN (instance === '')
   const globalBgp = bgpConfigs.find(b => !b.instance);
+  const globalBgpIndex = bgpConfigs.indexOf(globalBgp);
   const globalOspf = ospfConfigs.find(o => !o.instance);
   const globalOspf3 = ospf3Configs.find(o => !o.instance);
   const globalEvpn = evpnConfigs.find(e => !e.instance);
@@ -1218,12 +1657,16 @@ function buildRoutingXml(config, lines) {
     if (globalRoutes.length > 0) {
       lines.push('    <static>');
       for (const route of globalRoutes) {
+        const routeIndex = routes.indexOf(route);
         lines.push('      <route>');
         lines.push(`        <name>${xmlText(route.destination)}</name>`);
         if (route.next_hop_type === 'discard') {
           lines.push('        <discard/>');
         } else if (route.next_hop_type === 'next-vr' && route.next_hop) {
-          lines.push(`        <next-table>${xmlText(route.next_hop)}.inet.0</next-table>`);
+          const instance = routingInstanceUseName(
+            config, route.next_hop, `static_routes[${routeIndex}].next_hop`, identifierNames,
+          );
+          lines.push(`        <next-table>${xmlText(instance)}.inet.0</next-table>`);
         } else if (route.next_hop) {
           lines.push(`        <next-hop>${xmlText(route.next_hop)}</next-hop>`);
         }
@@ -1245,11 +1688,13 @@ function buildRoutingXml(config, lines) {
     // BGP
     if (globalBgp) {
       lines.push('    <bgp>');
-      for (const group of globalBgp.peer_groups || []) {
+      for (let groupIndex = 0; groupIndex < (globalBgp.peer_groups || []).length; groupIndex += 1) {
+        const group = globalBgp.peer_groups[groupIndex];
         lines.push('      <group>');
-        lines.push(`        <name>${xmlText(group.name)}</name>`);
+        lines.push(`        <name>${xmlText(identifierNames.definition(`bgp_config[${globalBgpIndex}].peer_groups[${groupIndex}].name`))}</name>`);
         lines.push(`        <type>${xmlText(group.type || 'external')}</type>`);
-        for (const neighbor of group.neighbors || []) {
+        for (let neighborIndex = 0; neighborIndex < (group.neighbors || []).length; neighborIndex += 1) {
+          const neighbor = group.neighbors[neighborIndex];
           lines.push('        <neighbor>');
           lines.push(`          <name>${xmlText(neighbor.address)}</name>`);
           if (neighbor.peer_as) {
@@ -1262,17 +1707,39 @@ function buildRoutingXml(config, lines) {
             lines.push(`          <local-address>${xmlText(neighbor.local_address)}</local-address>`);
           }
           if (neighbor.import_policy) {
-            lines.push(`          <import>${xmlText(neighbor.import_policy)}</import>`);
+            lines.push(`          <import>${xmlText(identifierNames.reference(`bgp_config[${globalBgpIndex}].peer_groups[${groupIndex}].neighbors[${neighborIndex}].import_policy`))}</import>`);
           }
           if (neighbor.export_policy) {
-            lines.push(`          <export>${xmlText(neighbor.export_policy)}</export>`);
+            lines.push(`          <export>${xmlText(identifierNames.reference(`bgp_config[${globalBgpIndex}].peer_groups[${groupIndex}].neighbors[${neighborIndex}].export_policy`))}</export>`);
           }
           if (neighbor.authentication_key) {
             lines.push(`          <authentication-key>${xmlText(neighbor.authentication_key)}</authentication-key>`);
           }
           lines.push('        </neighbor>');
         }
+        if (groupIndex === 0) {
+          for (let networkIndex = 0; networkIndex < (globalBgp.networks || []).length; networkIndex += 1) {
+            if (globalBgp.networks[networkIndex].policy) {
+              lines.push(`        <export>${xmlText(identifierNames.reference(`bgp_config[${globalBgpIndex}].networks[${networkIndex}].policy`))}</export>`);
+            }
+          }
+        }
         lines.push('      </group>');
+      }
+      const needsDefaultGroup = (globalBgp.networks || []).some(network => network.policy)
+        && !globalBgp.peer_groups?.[0]?.name;
+      if (needsDefaultGroup) {
+        const groupName = identifierNames.generated(`bgp_config[${globalBgpIndex}]`, 'default-bgp-group');
+        lines.push('      <group>');
+        lines.push(`        <name>${xmlText(groupName)}</name>`);
+        for (let networkIndex = 0; networkIndex < (globalBgp.networks || []).length; networkIndex += 1) {
+          const network = globalBgp.networks[networkIndex];
+          if (network.policy) {
+            lines.push(`        <export>${xmlText(identifierNames.reference(`bgp_config[${globalBgpIndex}].networks[${networkIndex}].policy`))}</export>`);
+          }
+        }
+        lines.push('      </group>');
+        identifierNames.reference(`bgp_config[${globalBgpIndex}]#default-bgp-group`);
       }
       lines.push('    </bgp>');
     }
@@ -1319,8 +1786,9 @@ function buildRoutingXml(config, lines) {
         }
         lines.push('      </area>');
       }
-      for (const redist of globalOspf.redistribute || []) {
-        const stmtName = `OSPF-REDIST-${redist.protocol.toUpperCase()}`;
+      const ospfIndex = ospfConfigs.indexOf(globalOspf);
+      for (let redistIndex = 0; redistIndex < (globalOspf.redistribute || []).length; redistIndex += 1) {
+        const stmtName = identifierNames.generated(`ospf_config[${ospfIndex}].redistribute[${redistIndex}]`, 'ospf-redistribution-policy');
         lines.push(`      <export>${xmlText(stmtName)}</export>`);
       }
       lines.push('    </ospf>');
@@ -1357,8 +1825,9 @@ function buildRoutingXml(config, lines) {
         }
         lines.push('      </area>');
       }
-      for (const redist of globalOspf3.redistribute || []) {
-        const stmtName = `OSPF3-REDIST-${redist.protocol.toUpperCase()}`;
+      const ospf3Index = ospf3Configs.indexOf(globalOspf3);
+      for (let redistIndex = 0; redistIndex < (globalOspf3.redistribute || []).length; redistIndex += 1) {
+        const stmtName = identifierNames.generated(`ospf3_config[${ospf3Index}].redistribute[${redistIndex}]`, 'ospf3-redistribution-policy');
         lines.push(`      <export>${xmlText(stmtName)}</export>`);
       }
       lines.push('    </ospf3>');
@@ -1399,13 +1868,20 @@ function buildRoutingXml(config, lines) {
 
   // VLANs (for EVPN VxLAN VNI mappings)
   const allVlans = [
-    ...(globalEvpn?.vlans || []),
-    ...evpnConfigs.filter(e => e.instance).flatMap(e => e.vlans || []),
+    ...evpnConfigs.flatMap((evpn, evpnIndex) => (
+      (evpn.vlans || []).map((vlan, vlanIndex) => ({ vlan, evpnIndex, vlanIndex, source: 'evpn' }))
+    )),
+    ...vxlanConfigs.flatMap((vxlan, vxlanIndex) => (
+      (vxlan.vnis || []).map((vlan, vlanIndex) => ({ vlan, vxlanIndex, vlanIndex, source: 'vxlan' }))
+        .filter(({ vlan }) => vlan.vlan_id)
+    )),
   ];
   if (allVlans.length > 0) {
     lines.push('  <vlans>');
-    for (const vlan of allVlans) {
-      const vlanName = sanitizeJunosName(vlan.name);
+    for (const { vlan, evpnIndex, vxlanIndex, vlanIndex, source } of allVlans) {
+      const vlanName = source === 'evpn'
+        ? identifierNames.definition(`evpn_config[${evpnIndex}].vlans[${vlanIndex}].name`)
+        : identifierNames.generated(`vxlan_config[${vxlanIndex}].vnis[${vlanIndex}]`, 'vxlan-vlan');
       lines.push(`    <vlan>`);
       lines.push(`      <name>${xmlText(vlanName)}</name>`);
       lines.push(`      <vlan-id>${vlan.vlan_id}</vlan-id>`);
@@ -1437,11 +1913,14 @@ function buildRoutingXml(config, lines) {
     ...Object.keys(instOspf3Map),
     ...Object.keys(instEvpnMap),
   ]);
+  allInstNames.delete('default');
+  allInstNames.delete('master');
 
   if (allInstNames.size > 0) {
     lines.push('  <routing-instances>');
     for (const instName of allInstNames) {
-      const name = sanitizeJunosName(instName);
+      const definitionPath = routingInstanceDefinitionPath(config, instName);
+      const name = identifierNames.definition(definitionPath);
       const instRoutes = vrfGroups[instName] || [];
       const instBgp = instBgpMap[instName];
       const instOspf = instOspfMap[instName];
@@ -1486,19 +1965,63 @@ function buildRoutingXml(config, lines) {
         lines.push('      <protocols>');
         if (instBgp) {
           lines.push('        <bgp>');
-          for (const group of instBgp.peer_groups || []) {
+          const bgpIndex = bgpConfigs.indexOf(instBgp);
+          for (let groupIndex = 0; groupIndex < (instBgp.peer_groups || []).length; groupIndex += 1) {
+            const group = instBgp.peer_groups[groupIndex];
             lines.push('          <group>');
-            lines.push(`            <name>${xmlText(group.name)}</name>`);
+            lines.push(`            <name>${xmlText(identifierNames.definition(`bgp_config[${bgpIndex}].peer_groups[${groupIndex}].name`))}</name>`);
             lines.push(`            <type>${xmlText(group.type || 'external')}</type>`);
-            for (const neighbor of group.neighbors || []) {
+            for (let neighborIndex = 0; neighborIndex < (group.neighbors || []).length; neighborIndex += 1) {
+              const neighbor = group.neighbors[neighborIndex];
               lines.push('            <neighbor>');
               lines.push(`              <name>${xmlText(neighbor.address)}</name>`);
               if (neighbor.peer_as) lines.push(`              <peer-as>${neighbor.peer_as}</peer-as>`);
               if (neighbor.description) lines.push(`              <description>${xmlText(neighbor.description)}</description>`);
+              if (neighbor.import_policy) {
+                lines.push(`              <import>${xmlText(identifierNames.reference(`bgp_config[${bgpIndex}].peer_groups[${groupIndex}].neighbors[${neighborIndex}].import_policy`))}</import>`);
+              }
+              if (neighbor.export_policy) {
+                lines.push(`              <export>${xmlText(identifierNames.reference(`bgp_config[${bgpIndex}].peer_groups[${groupIndex}].neighbors[${neighborIndex}].export_policy`))}</export>`);
+              }
               lines.push('            </neighbor>');
+            }
+            if (groupIndex === 0) {
+              for (let networkIndex = 0; networkIndex < (instBgp.networks || []).length; networkIndex += 1) {
+                if (instBgp.networks[networkIndex].policy) {
+                  lines.push(`            <export>${xmlText(identifierNames.reference(`bgp_config[${bgpIndex}].networks[${networkIndex}].policy`))}</export>`);
+                }
+              }
             }
             lines.push('          </group>');
           }
+          const needsDefaultGroup = (instBgp.networks || []).some(network => network.policy)
+            && !instBgp.peer_groups?.[0]?.name;
+          if (needsDefaultGroup) {
+            const groupName = identifierNames.generated(`bgp_config[${bgpIndex}]`, 'default-bgp-group');
+            identifierNames.reference(`bgp_config[${bgpIndex}]#default-bgp-group`);
+            lines.push('          <group>');
+            lines.push(`            <name>${xmlText(groupName)}</name>`);
+            for (let networkIndex = 0; networkIndex < (instBgp.networks || []).length; networkIndex += 1) {
+              if (instBgp.networks[networkIndex].policy) {
+                lines.push(`            <export>${xmlText(identifierNames.reference(`bgp_config[${bgpIndex}].networks[${networkIndex}].policy`))}</export>`);
+              }
+            }
+            lines.push('          </group>');
+          }
+          for (let redistIndex = 0; redistIndex < (instBgp.redistribute || []).length; redistIndex += 1) {
+            const policyName = identifierNames.generated(
+              `bgp_config[${bgpIndex}].redistribute[${redistIndex}]`,
+              'bgp-redistribution-policy',
+            );
+            lines.push(`          <export>${xmlText(policyName)}</export>`);
+          }
+          lines.push('        </bgp>');
+        }
+        for (let extraIndex = 0; extraIndex < bgpConfigs.length; extraIndex += 1) {
+          const extraBgp = bgpConfigs[extraIndex];
+          if (extraBgp === instBgp || extraBgp.instance !== instName) continue;
+          lines.push('        <bgp>');
+          buildAdditionalBgpBodyXml(extraBgp, extraIndex, lines, '          ', identifierNames);
           lines.push('        </bgp>');
         }
         if (instOspf) {
@@ -1514,6 +2037,14 @@ function buildRoutingXml(config, lines) {
               lines.push('            </interface>');
             }
             lines.push('          </area>');
+          }
+          const ospfIndex = ospfConfigs.indexOf(instOspf);
+          for (let redistIndex = 0; redistIndex < (instOspf.redistribute || []).length; redistIndex += 1) {
+            const policyName = identifierNames.generated(
+              `ospf_config[${ospfIndex}].redistribute[${redistIndex}]`,
+              'ospf-redistribution-policy',
+            );
+            lines.push(`          <export>${xmlText(policyName)}</export>`);
           }
           lines.push('        </ospf>');
         }
@@ -1532,6 +2063,14 @@ function buildRoutingXml(config, lines) {
             }
             lines.push('          </area>');
           }
+          const ospf3Index = ospf3Configs.indexOf(instOspf3);
+          for (let redistIndex = 0; redistIndex < (instOspf3.redistribute || []).length; redistIndex += 1) {
+            const policyName = identifierNames.generated(
+              `ospf3_config[${ospf3Index}].redistribute[${redistIndex}]`,
+              'ospf3-redistribution-policy',
+            );
+            lines.push(`          <export>${xmlText(policyName)}</export>`);
+          }
           lines.push('        </ospf3>');
         }
         if (instEvpn) {
@@ -1545,13 +2084,79 @@ function buildRoutingXml(config, lines) {
         lines.push('      </protocols>');
       }
 
+      const instancePolicies = [];
+      for (const [field, role] of [
+        ['bgp_config', 'bgp-redistribution-policy'],
+        ['ospf_config', 'ospf-redistribution-policy'],
+        ['ospf3_config', 'ospf3-redistribution-policy'],
+      ]) {
+        for (let itemIndex = 0; itemIndex < (config[field] || []).length; itemIndex += 1) {
+          const item = config[field][itemIndex];
+          if (item.instance !== instName) continue;
+          for (let redistIndex = 0; redistIndex < (item.redistribute || []).length; redistIndex += 1) {
+            instancePolicies.push(identifierNames.generated(
+              `${field}[${itemIndex}].redistribute[${redistIndex}]`, role,
+            ));
+          }
+        }
+      }
+      if (instancePolicies.length > 0) {
+        lines.push('      <policy-options>');
+        for (const policyName of instancePolicies) {
+          lines.push(`        <policy-statement><name>${xmlText(policyName)}</name><then><accept/></then></policy-statement>`);
+        }
+        lines.push('      </policy-options>');
+      }
+
       lines.push('    </instance>');
     }
     lines.push('  </routing-instances>');
   }
+
+  const additionalGlobalBgp = [];
+  for (let bgpIndex = 0; bgpIndex < bgpConfigs.length; bgpIndex += 1) {
+    const bgp = bgpConfigs[bgpIndex];
+    if (bgp === globalBgp || bgp.instance) continue;
+    additionalGlobalBgp.push({ bgp, bgpIndex });
+  }
+  if (additionalGlobalBgp.length > 0) {
+    lines.push('  <protocols><bgp>');
+    for (const { bgp, bgpIndex } of additionalGlobalBgp) {
+      buildAdditionalBgpBodyXml(bgp, bgpIndex, lines, '    ', identifierNames);
+    }
+    lines.push('  </bgp></protocols>');
+  }
+
+  const redistributionPolicies = [];
+  for (let bgpIndex = 0; bgpIndex < bgpConfigs.length; bgpIndex += 1) {
+    if (bgpConfigs[bgpIndex].instance) continue;
+    for (let redistIndex = 0; redistIndex < (bgpConfigs[bgpIndex].redistribute || []).length; redistIndex += 1) {
+      redistributionPolicies.push(identifierNames.generated(
+        `bgp_config[${bgpIndex}].redistribute[${redistIndex}]`,
+        'bgp-redistribution-policy',
+      ));
+    }
+  }
+  for (const [field, role] of [['ospf_config', 'ospf-redistribution-policy'], ['ospf3_config', 'ospf3-redistribution-policy']]) {
+    for (let configIndex = 0; configIndex < (config[field] || []).length; configIndex += 1) {
+      if (config[field][configIndex].instance) continue;
+      for (let redistIndex = 0; redistIndex < (config[field][configIndex].redistribute || []).length; redistIndex += 1) {
+        redistributionPolicies.push(identifierNames.generated(
+          `${field}[${configIndex}].redistribute[${redistIndex}]`, role,
+        ));
+      }
+    }
+  }
+  if (redistributionPolicies.length > 0) {
+    lines.push('  <policy-options>');
+    for (const policyName of redistributionPolicies) {
+      lines.push(`    <policy-statement><name>${xmlText(policyName)}</name><then><accept/></then></policy-statement>`);
+    }
+    lines.push('  </policy-options>');
+  }
 }
 
-function buildVpnXml(tunnels, lines) {
+function buildVpnXml(tunnels, lines, identifierNames) {
   if (!tunnels || tunnels.length === 0) return;
 
   // IKE section
@@ -1559,26 +2164,40 @@ function buildVpnXml(tunnels, lines) {
   lines.push('    <ike>');
 
   const emittedProposals = new Set();
-  for (const vpn of tunnels) {
+  for (let vpnIndex = 0; vpnIndex < tunnels.length; vpnIndex += 1) {
+    const vpn = tunnels[vpnIndex];
+    const ownerPath = `vpn_tunnels[${vpnIndex}]`;
+    const ikeProposalName = vpn.ike_proposal?.name
+      ? identifierNames.definition(`${ownerPath}.ike_proposal.name`)
+      : identifierNames.generated(ownerPath, 'ike-proposal');
+    const ikeProposal = vpn.ike_proposal || {};
     // IKE proposal
-    if (vpn.ike_proposal && !emittedProposals.has(vpn.ike_proposal.name)) {
-      emittedProposals.add(vpn.ike_proposal.name);
+    if (!emittedProposals.has(ikeProposalName)) {
+      emittedProposals.add(ikeProposalName);
       lines.push('      <proposal>');
-      lines.push(`        <name>${xmlText(vpn.ike_proposal.name)}</name>`);
-      lines.push(`        <authentication-method>${vpn.ike_proposal.auth_method || 'pre-shared-keys'}</authentication-method>`);
-      lines.push(`        <dh-group>${vpn.ike_proposal.dh_group || 'group14'}</dh-group>`);
-      lines.push(`        <encryption-algorithm>${vpn.ike_proposal.encryption || 'aes-256-cbc'}</encryption-algorithm>`);
-      lines.push(`        <authentication-algorithm>${vpn.ike_proposal.authentication || 'sha-256'}</authentication-algorithm>`);
-      if (vpn.ike_proposal.lifetime) lines.push(`        <lifetime-seconds>${vpn.ike_proposal.lifetime}</lifetime-seconds>`);
+      lines.push(`        <name>${xmlText(ikeProposalName)}</name>`);
+      lines.push(`        <authentication-method>${ikeProposal.auth_method || 'pre-shared-keys'}</authentication-method>`);
+      lines.push(`        <dh-group>${ikeProposal.dh_group || 'group14'}</dh-group>`);
+      lines.push(`        <encryption-algorithm>${ikeProposal.encryption || 'aes-256-cbc'}</encryption-algorithm>`);
+      lines.push(`        <authentication-algorithm>${ikeProposal.authentication || 'sha-256'}</authentication-algorithm>`);
+      if (ikeProposal.lifetime) lines.push(`        <lifetime-seconds>${ikeProposal.lifetime}</lifetime-seconds>`);
       lines.push('      </proposal>');
     }
 
     // IKE gateway
-    const gwName = vpn.ike_gateway?.name || `gw-${vpn.name}`;
+    const gwName = vpn.ike_gateway?.name
+      ? identifierNames.definition(`${ownerPath}.ike_gateway.name`)
+      : identifierNames.generated(ownerPath, 'ike-gateway');
+    const ikePolicyName = identifierNames.generated(ownerPath, 'ike-policy');
+    const ikeProposalReference = identifierNames.reference(`${ownerPath}.ike_proposal.name`);
+    lines.push('      <policy>');
+    lines.push(`        <name>${xmlText(ikePolicyName)}</name>`);
+    lines.push(`        <proposals>${xmlText(ikeProposalReference)}</proposals>`);
+    lines.push('      </policy>');
     lines.push('      <gateway>');
     lines.push(`        <name>${xmlText(gwName)}</name>`);
     if (vpn.ike_gateway?.address) lines.push(`        <address>${vpn.ike_gateway.address}</address>`);
-    lines.push(`        <ike-policy>ike-pol-${xmlText(vpn.name)}</ike-policy>`);
+    lines.push(`        <ike-policy>${xmlText(identifierNames.reference(`${ownerPath}.name#ike-policy`))}</ike-policy>`);
     if (vpn.ike_gateway?.ike_version === 'v2') lines.push('        <version>v2-only</version>');
     lines.push('      </gateway>');
   }
@@ -1587,29 +2206,48 @@ function buildVpnXml(tunnels, lines) {
   // IPsec section
   lines.push('    <ipsec>');
   const emittedIpsec = new Set();
-  for (const vpn of tunnels) {
-    if (vpn.ipsec_proposal && !emittedIpsec.has(vpn.ipsec_proposal.name)) {
-      emittedIpsec.add(vpn.ipsec_proposal.name);
+  for (let vpnIndex = 0; vpnIndex < tunnels.length; vpnIndex += 1) {
+    const vpn = tunnels[vpnIndex];
+    const ownerPath = `vpn_tunnels[${vpnIndex}]`;
+    const ipsecProposalName = vpn.ipsec_proposal?.name
+      ? identifierNames.definition(`${ownerPath}.ipsec_proposal.name`)
+      : identifierNames.generated(ownerPath, 'ipsec-proposal');
+    const ipsecProposal = vpn.ipsec_proposal || {};
+    if (!emittedIpsec.has(ipsecProposalName)) {
+      emittedIpsec.add(ipsecProposalName);
       lines.push('      <proposal>');
-      lines.push(`        <name>${xmlText(vpn.ipsec_proposal.name)}</name>`);
-      lines.push(`        <protocol>${vpn.ipsec_proposal.protocol || 'esp'}</protocol>`);
-      lines.push(`        <encryption-algorithm>${vpn.ipsec_proposal.encryption || 'aes-256-cbc'}</encryption-algorithm>`);
-      lines.push(`        <authentication-algorithm>${vpn.ipsec_proposal.authentication || 'hmac-sha-256-128'}</authentication-algorithm>`);
-      if (vpn.ipsec_proposal.lifetime) lines.push(`        <lifetime-seconds>${vpn.ipsec_proposal.lifetime}</lifetime-seconds>`);
+      lines.push(`        <name>${xmlText(ipsecProposalName)}</name>`);
+      lines.push(`        <protocol>${ipsecProposal.protocol || 'esp'}</protocol>`);
+      lines.push(`        <encryption-algorithm>${ipsecProposal.encryption || 'aes-256-cbc'}</encryption-algorithm>`);
+      lines.push(`        <authentication-algorithm>${ipsecProposal.authentication || 'hmac-sha-256-128'}</authentication-algorithm>`);
+      if (ipsecProposal.lifetime) lines.push(`        <lifetime-seconds>${ipsecProposal.lifetime}</lifetime-seconds>`);
       lines.push('      </proposal>');
     }
 
+    const ipsecPolicyName = identifierNames.generated(ownerPath, 'ipsec-policy');
+    lines.push('      <policy>');
+    lines.push(`        <name>${xmlText(ipsecPolicyName)}</name>`);
+    lines.push(`        <proposals>${xmlText(identifierNames.reference(`${ownerPath}.ipsec_proposal.name`))}</proposals>`);
+    lines.push('      </policy>');
+
     // VPN definition
+    const vpnName = vpn.name
+      ? identifierNames.definition(`${ownerPath}.name`)
+      : identifierNames.generated(ownerPath, 'ipsec-vpn');
     lines.push('      <vpn>');
-    lines.push(`        <name>${xmlText(vpn.name)}</name>`);
-    lines.push(`        <ike><gateway>${xmlText(vpn.ike_gateway?.name || 'gw-' + vpn.name)}</gateway></ike>`);
+    lines.push(`        <name>${xmlText(vpnName)}</name>`);
+    lines.push(`        <ike><gateway>${xmlText(identifierNames.reference(`${ownerPath}.ike_gateway.name`))}</gateway></ike>`);
+    lines.push(`        <ipsec-policy>${xmlText(identifierNames.reference(`${ownerPath}.name#ipsec-policy`))}</ipsec-policy>`);
     if (vpn.tunnel_interface) {
       const bindIf = vpn.tunnel_interface.startsWith('st0') ? vpn.tunnel_interface : 'st0.0';
       lines.push(`        <bind-interface>${bindIf}</bind-interface>`);
     }
     if (vpn.proxy_id && vpn.proxy_id.length > 0) {
       for (let i = 0; i < vpn.proxy_id.length; i++) {
-        lines.push(`        <traffic-selector><name>ts${i + 1}</name>`);
+        const selectorPath = `${ownerPath}.proxy_id[${i}]`;
+        const selectorName = identifierNames.generated(selectorPath, 'vpn-traffic-selector');
+        identifierNames.reference(`${selectorPath}#traffic-selector`);
+        lines.push(`        <traffic-selector><name>${xmlText(selectorName)}</name>`);
         if (vpn.proxy_id[i].local) lines.push(`          <local-ip>${vpn.proxy_id[i].local}</local-ip>`);
         if (vpn.proxy_id[i].remote) lines.push(`          <remote-ip>${vpn.proxy_id[i].remote}</remote-ip>`);
         lines.push('        </traffic-selector>');
@@ -1621,15 +2259,25 @@ function buildVpnXml(tunnels, lines) {
   lines.push('  </security>');
 }
 
-function buildScreenXml(screens, lines) {
+function buildScreenXml(screens, lines, identifierNames) {
   if (!screens || screens.length === 0) return;
 
   // Screen definitions go inside <security><screen>
   lines.push('  <security>');
   lines.push('    <screen>');
 
-  for (const screen of screens) {
-    const name = screen.name || 'default-screen';
+  const zoneAssignments = [];
+  for (let screenIndex = 0; screenIndex < screens.length; screenIndex += 1) {
+    const screen = screens[screenIndex];
+    const name = screen.name
+      ? identifierNames.definition(`screen_config[${screenIndex}].name`)
+      : identifierNames.generated(`screen_config[${screenIndex}]`, 'default-screen-profile');
+    if (screen.zone) {
+      zoneAssignments.push({
+        profileName: name,
+        zoneName: identifierNames.reference(`screen_config[${screenIndex}].zone`),
+      });
+    }
     lines.push('      <ids-option>');
     lines.push(`        <name>${xmlText(name)}</name>`);
 
@@ -1694,6 +2342,16 @@ function buildScreenXml(screens, lines) {
   }
 
   lines.push('    </screen>');
+  if (zoneAssignments.length > 0) {
+    lines.push('    <zones>');
+    for (const assignment of zoneAssignments) {
+      lines.push('      <security-zone>');
+      lines.push(`        <name>${xmlText(assignment.zoneName)}</name>`);
+      lines.push(`        <screen>${xmlText(assignment.profileName)}</screen>`);
+      lines.push('      </security-zone>');
+    }
+    lines.push('    </zones>');
+  }
   lines.push('  </security>');
 }
 
@@ -1866,7 +2524,7 @@ const SNMP_CATEGORY_NAMES = [
   'routing', 'rmon-alarm', 'services', 'startup',
 ];
 
-function buildSnmpXml(snmpConfig, lines) {
+function buildSnmpXml(snmpConfig, lines, identifierNames) {
   if (!snmpConfig || snmpConfig.length === 0) return;
 
   lines.push('  <snmp>');
@@ -1881,10 +2539,11 @@ function buildSnmpXml(snmpConfig, lines) {
     lines.push(`    <location>${xmlText(locationEntry.location)}</location>`);
   }
 
-  for (const entry of snmpConfig) {
+  for (let entryIndex = 0; entryIndex < snmpConfig.length; entryIndex += 1) {
+    const entry = snmpConfig[entryIndex];
     if (entry.type === 'community') {
       lines.push('    <community>');
-      lines.push(`      <name>${xmlText(entry.name)}</name>`);
+      lines.push(`      <name>${xmlText(identifierNames.definition(`snmp_config[${entryIndex}].name`))}</name>`);
       const auth = entry.authorization === 'read-write' ? 'read-write' : 'read-only';
       lines.push(`      <authorization>${auth}</authorization>`);
       if (entry.clients && entry.clients.length > 0) {
@@ -1899,7 +2558,7 @@ function buildSnmpXml(snmpConfig, lines) {
 
     if (entry.type === 'trap-group') {
       lines.push('    <trap-group>');
-      lines.push(`      <name>${xmlText(entry.name)}</name>`);
+      lines.push(`      <name>${xmlText(identifierNames.definition(`snmp_config[${entryIndex}].name`))}</name>`);
       if (entry.version) {
         lines.push(`      <version>${xmlText(entry.version)}</version>`);
       }
@@ -1926,7 +2585,7 @@ function buildSnmpXml(snmpConfig, lines) {
       lines.push('      <usm>');
       lines.push('        <local-engine>');
       lines.push('          <user>');
-      lines.push(`            <name>${xmlText(entry.name)}</name>`);
+      lines.push(`            <name>${xmlText(identifierNames.definition(`snmp_config[${entryIndex}].name`))}</name>`);
       if (entry.auth_protocol && entry.auth_protocol !== 'none' && VALID_AUTH.includes(entry.auth_protocol)) {
         lines.push(`            <authentication-${entry.auth_protocol}/>`);
       }
@@ -1948,7 +2607,7 @@ function buildSnmpXml(snmpConfig, lines) {
 // AAA XML Builder
 // ---------------------------------------------------------------------------
 
-function buildAaaXml(aaaConfig, lines) {
+function buildAaaXml(aaaConfig, lines, identifierNames) {
   if (!aaaConfig || aaaConfig.length === 0) return;
 
   const radiusServers = aaaConfig.filter(e => e.type === 'radius' && e.server);
@@ -2005,8 +2664,9 @@ function buildAaaXml(aaaConfig, lines) {
   if (profiles.length > 0) {
     lines.push('  <access>');
     for (const profile of profiles) {
+      const profileIndex = aaaConfig.indexOf(profile);
       lines.push('    <profile>');
-      lines.push(`      <name>${xmlText(profile.name)}</name>`);
+      lines.push(`      <name>${xmlText(identifierNames.definition(`aaa_config[${profileIndex}].name`))}</name>`);
       if (profile.authentication_order) {
         for (const method of profile.authentication_order) {
           lines.push(`      <authentication-order>${xmlText(method)}</authentication-order>`);
@@ -2023,7 +2683,7 @@ function buildAaaXml(aaaConfig, lines) {
 // DHCP XML Builder
 // ---------------------------------------------------------------------------
 
-function buildDhcpXml(dhcpConfig, lines) {
+function buildDhcpXml(dhcpConfig, lines, identifierNames) {
   if (!dhcpConfig || dhcpConfig.length === 0) return;
 
   let hasRelay = false;
@@ -2057,9 +2717,12 @@ function buildDhcpXml(dhcpConfig, lines) {
   if (hasPool) {
     lines.push('  <access>');
     lines.push('    <address-assignment>');
-    for (const cfg of dhcpConfig) {
+    for (let configIndex = 0; configIndex < dhcpConfig.length; configIndex += 1) {
+      const cfg = dhcpConfig[configIndex];
       if (cfg.type !== 'server' && cfg.type !== 'pool') continue;
-      const poolName = cfg.name || cfg.interface || 'dhcp-pool';
+      const poolName = cfg.name
+        ? identifierNames.definition(`dhcp_config[${configIndex}].name`)
+        : identifierNames.generated(`dhcp_config[${configIndex}]`, 'dhcp-pool');
       lines.push(`      <pool><name>${xmlText(poolName)}</name>`);
       lines.push('        <family><inet>');
 
@@ -2068,8 +2731,12 @@ function buildDhcpXml(dhcpConfig, lines) {
       }
 
       if (cfg.ranges) {
-        for (const range of cfg.ranges) {
-          lines.push(`          <range><name>${xmlText(range.name || 'range1')}</name>`);
+        for (let rangeIndex = 0; rangeIndex < cfg.ranges.length; rangeIndex += 1) {
+          const range = cfg.ranges[rangeIndex];
+          const rangeName = range.name
+            ? identifierNames.definition(`dhcp_config[${configIndex}].ranges[${rangeIndex}].name`)
+            : identifierNames.generated(`dhcp_config[${configIndex}].ranges[${rangeIndex}]`, 'dhcp-named-range');
+          lines.push(`          <range><name>${xmlText(rangeName)}</name>`);
           if (range.low) lines.push(`            <low>${range.low}</low>`);
           if (range.high) lines.push(`            <high>${range.high}</high>`);
           lines.push('          </range>');
@@ -2081,7 +2748,8 @@ function buildDhcpXml(dhcpConfig, lines) {
           const pool = cfg.pools[i];
           if (pool.includes('-')) {
             const [low, high] = pool.split('-');
-            lines.push(`          <range><name>range${i + 1}</name><low>${low}</low><high>${high}</high></range>`);
+            const rangeName = identifierNames.generated(`dhcp_config[${configIndex}].pools[${i}]`, 'dhcp-pool-range');
+            lines.push(`          <range><name>${xmlText(rangeName)}</name><low>${low}</low><high>${high}</high></range>`);
           }
         }
       }
@@ -2110,15 +2778,17 @@ function buildDhcpXml(dhcpConfig, lines) {
 // QoS / CoS XML Builder
 // ---------------------------------------------------------------------------
 
-function buildQosXml(qosConfig, lines) {
+function buildQosXml(qosConfig, lines, identifierNames) {
   if (!qosConfig || qosConfig.length === 0) return;
 
   lines.push('  <class-of-service>');
 
-  for (const qos of qosConfig) {
+  for (let qosIndex = 0; qosIndex < qosConfig.length; qosIndex += 1) {
+    const qos = qosConfig[qosIndex];
+    const qosPath = `qos_config[${qosIndex}]`;
     if (qos.type === 'scheduler') {
       lines.push('    <schedulers>');
-      lines.push(`      <name>${xmlText(qos.name)}</name>`);
+      lines.push(`      <name>${xmlText(identifierNames.definition(`${qosPath}.name`))}</name>`);
       if (qos.transmit_rate) lines.push(`      <transmit-rate>${xmlText(qos.transmit_rate)}</transmit-rate>`);
       if (qos.buffer_size) lines.push(`      <buffer-size>${xmlText(qos.buffer_size)}</buffer-size>`);
       if (qos.priority) lines.push(`      <priority>${xmlText(qos.priority)}</priority>`);
@@ -2126,7 +2796,7 @@ function buildQosXml(qosConfig, lines) {
     } else if (qos.type === 'interface-cos') {
       lines.push('    <interfaces>');
       lines.push(`      <interface><name>${xmlText(qos.interface)}</name>`);
-      if (qos.scheduler_map) lines.push(`        <scheduler-map>${xmlText(qos.scheduler_map)}</scheduler-map>`);
+      if (qos.scheduler_map) lines.push(`        <scheduler-map>${xmlText(identifierNames.reference(`${qosPath}.scheduler_map`))}</scheduler-map>`);
       if (qos.shaping_rate) lines.push(`        <shaping-rate>${xmlText(qos.shaping_rate)}</shaping-rate>`);
       lines.push('      </interface>');
       lines.push('    </interfaces>');
@@ -2135,18 +2805,29 @@ function buildQosXml(qosConfig, lines) {
       const classes = qos.classes || [];
       if (classes.length > 0) {
         lines.push('    <scheduler-maps>');
-        lines.push(`      <name>${xmlText(qos.name)}</name>`);
-        for (const cls of classes) {
-          const clsName = cls.name || 'default';
-          lines.push(`      <forwarding-class><class-name>${xmlText(clsName)}</class-name>`);
-          lines.push(`        <scheduler>${xmlText(clsName)}</scheduler>`);
+        lines.push(`      <name>${xmlText(identifierNames.definition(`${qosPath}.name`))}</name>`);
+        for (let classIndex = 0; classIndex < classes.length; classIndex += 1) {
+          const cls = classes[classIndex];
+          const classPath = `${qosPath}.classes[${classIndex}]`;
+          const schedulerName = cls.name
+            ? identifierNames.definition(`${classPath}.name`)
+            : identifierNames.generated(classPath, 'qos-default-scheduler');
+          const forwardingClass = cls.name
+            ? identifierNames.definition(`${classPath}.name#forwarding-class`)
+            : identifierNames.generated(classPath, 'qos-default-forwarding-class');
+          lines.push(`      <forwarding-class><class-name>${xmlText(forwardingClass)}</class-name>`);
+          lines.push(`        <scheduler>${xmlText(schedulerName)}</scheduler>`);
           lines.push('      </forwarding-class>');
         }
         lines.push('    </scheduler-maps>');
 
         // Emit scheduler definitions for each class
-        for (const cls of classes) {
-          const clsName = cls.name || 'default';
+        for (let classIndex = 0; classIndex < classes.length; classIndex += 1) {
+          const cls = classes[classIndex];
+          const classPath = `${qosPath}.classes[${classIndex}]`;
+          const clsName = cls.name
+            ? identifierNames.definition(`${classPath}.name`)
+            : identifierNames.generated(classPath, 'qos-default-scheduler');
           lines.push('    <schedulers>');
           lines.push(`      <name>${xmlText(clsName)}</name>`);
           if (cls.guaranteed_bandwidth || cls.maximum_bandwidth || cls.police_rate) {
@@ -2169,7 +2850,7 @@ function buildQosXml(qosConfig, lines) {
 // L2 / Bridge Domains / Virtual-Wire
 // ---------------------------------------------------------------------------
 
-function buildL2Xml(config, lines, interfaceMappings = {}) {
+function buildL2Xml(config, lines, interfaceMappings = {}, identifierNames) {
   const bridgeDomains = config.bridge_domains || [];
   const l2Interfaces = config.l2_interfaces || [];
   const vwirePairs = config.vwire_pairs || [];
@@ -2180,8 +2861,9 @@ function buildL2Xml(config, lines, interfaceMappings = {}) {
   lines.push('  <bridge-domains>');
 
   // Explicit bridge domains
-  for (const bd of bridgeDomains) {
-    const bdName = sanitizeJunosName(bd.name);
+  for (let bridgeIndex = 0; bridgeIndex < bridgeDomains.length; bridgeIndex += 1) {
+    const bd = bridgeDomains[bridgeIndex];
+    const bdName = identifierNames.definition(`bridge_domains[${bridgeIndex}].name`);
     lines.push('    <domain>');
     lines.push(`      <name>${xmlText(bdName)}</name>`);
     lines.push('      <domain-type>bridge</domain-type>');
@@ -2191,8 +2873,9 @@ function buildL2Xml(config, lines, interfaceMappings = {}) {
   }
 
   // Virtual-wire bridge domains
-  for (const vw of vwirePairs) {
-    const bdName = sanitizeJunosName(`vwire-${vw.name}`);
+  for (let vwireIndex = 0; vwireIndex < vwirePairs.length; vwireIndex += 1) {
+    const vw = vwirePairs[vwireIndex];
+    const bdName = identifierNames.generated(`vwire_pairs[${vwireIndex}]`, 'vwire-bridge-domain');
     lines.push('    <domain>');
     lines.push(`      <name>${xmlText(bdName)}</name>`);
     lines.push('      <domain-type>bridge</domain-type>');
@@ -2209,8 +2892,9 @@ function buildL2Xml(config, lines, interfaceMappings = {}) {
 
   // Interface family bridge assignments for resolved vwire interfaces
   const bridgeInterfaces = [];
-  for (const vw of vwirePairs) {
-    const bdName = sanitizeJunosName(`vwire-${vw.name}`);
+  for (let vwireIndex = 0; vwireIndex < vwirePairs.length; vwireIndex += 1) {
+    const vw = vwirePairs[vwireIndex];
+    const bdName = identifierNames.generated(`vwire_pairs[${vwireIndex}]`, 'vwire-bridge-domain');
     for (const srcIf of [vw.interface1, vw.interface2]) {
       let srxName = srcIf;
       if (interfaceMappings[srcIf]) {
@@ -2229,10 +2913,16 @@ function buildL2Xml(config, lines, interfaceMappings = {}) {
       }
     }
   }
-  for (const l2if of l2Interfaces) {
+  for (let interfaceIndex = 0; interfaceIndex < l2Interfaces.length; interfaceIndex += 1) {
+    const l2if = l2Interfaces[interfaceIndex];
     const parts = l2if.name.match(/^(.+?)\.(\d+)$/);
     const srxName = parts ? l2if.name : `${l2if.name}.0`;
-    bridgeInterfaces.push({ srxName, bdName: l2if.bridge_domain });
+    bridgeInterfaces.push({
+      srxName,
+      bdName: l2if.bridge_domain
+        ? identifierNames.reference(`l2_interfaces[${interfaceIndex}].bridge_domain`)
+        : null,
+    });
   }
 
   if (bridgeInterfaces.length > 0) {
@@ -2250,7 +2940,7 @@ function buildL2Xml(config, lines, interfaceMappings = {}) {
         lines.push('            <interface-mode>trunk</interface-mode>');
         lines.push(`            <vlan-id-list>${xmlText(bi.vlanList.join(' '))}</vlan-id-list>`);
       } else if (bi.bdName) {
-        lines.push(`            <bridge-domain-name>${xmlText(sanitizeJunosName(bi.bdName))}</bridge-domain-name>`);
+        lines.push(`            <bridge-domain-name>${xmlText(bi.bdName)}</bridge-domain-name>`);
       }
       lines.push('          </bridge>');
       lines.push('        </family>');
@@ -2266,18 +2956,27 @@ function buildL2Xml(config, lines, interfaceMappings = {}) {
 // Policy-Based Forwarding (Filter-Based Forwarding)
 // ---------------------------------------------------------------------------
 
-function buildPbfXml(pbfRules, lines, interfaceMappings = {}) {
+function buildPbfXml(pbfRules, lines, interfaceMappings = {}, identifierNames) {
   if (!pbfRules || pbfRules.length === 0) return;
 
   const activeRules = pbfRules.filter(r => !r.disabled);
   if (activeRules.length === 0) return;
+  const isIpOrPrefixLiteral = value => (
+    /^\d{1,3}(?:\.\d{1,3}){3}(?:\/\d{1,3})?$/.test(value)
+    || (value.includes(':') && /^[0-9A-Fa-f:.]+(?:\/\d{1,3})?$/.test(value))
+  );
 
   // Collect routing instances (type forwarding)
   const instances = new Map();
   for (const rule of activeRules) {
     if (rule.action === 'forward' && rule.next_hop_value) {
       if (!instances.has(rule.next_hop_value)) {
-        instances.set(rule.next_hop_value, sanitizeJunosName(`PBF-${rule.name}`));
+        const candidates = activeRules
+          .map((candidate, index) => ({ candidate, index: pbfRules.indexOf(candidate) }))
+          .filter(({ candidate }) => candidate.action === 'forward' && candidate.next_hop_value === rule.next_hop_value)
+          .sort((left, right) => String(left.candidate.name).localeCompare(String(right.candidate.name)));
+        const ownerIndex = candidates[0].index;
+        instances.set(rule.next_hop_value, identifierNames.generated(`pbf_rules[${ownerIndex}]`, 'pbf-routing-instance'));
       }
     }
   }
@@ -2308,10 +3007,11 @@ function buildPbfXml(pbfRules, lines, interfaceMappings = {}) {
   lines.push('  <!-- PBF Firewall Filter -->');
   lines.push('  <firewall>');
   lines.push('    <filter>');
-  lines.push('      <name>PBF-FILTER</name>');
+  lines.push(`      <name>${xmlText(identifierNames.generated('pbf_rules', 'pbf-filter'))}</name>`);
 
   for (const rule of activeRules) {
-    const termName = sanitizeJunosName(rule.name);
+    const ruleIndex = pbfRules.indexOf(rule);
+    const termName = identifierNames.definition(`pbf_rules[${ruleIndex}].name`);
     lines.push('      <term>');
     lines.push(`        <name>${xmlText(termName)}</name>`);
 
@@ -2320,11 +3020,19 @@ function buildPbfXml(pbfRules, lines, interfaceMappings = {}) {
     const hasDst = (rule.dst_addresses || []).some(a => a !== 'any');
     if (hasSrc || hasDst) {
       lines.push('        <from>');
-      for (const src of (rule.src_addresses || []).filter(a => a !== 'any')) {
-        lines.push(`          <source-address>${xmlText(src)}</source-address>`);
+      for (let addressIndex = 0; addressIndex < (rule.src_addresses || []).length; addressIndex += 1) {
+        const src = rule.src_addresses[addressIndex];
+        if (src === 'any') continue;
+        const output = isIpOrPrefixLiteral(src)
+          ? src : identifierNames.reference(`pbf_rules[${ruleIndex}].src_addresses[${addressIndex}]`);
+        lines.push(`          <source-address>${xmlText(output)}</source-address>`);
       }
-      for (const dst of (rule.dst_addresses || []).filter(a => a !== 'any')) {
-        lines.push(`          <destination-address>${xmlText(dst)}</destination-address>`);
+      for (let addressIndex = 0; addressIndex < (rule.dst_addresses || []).length; addressIndex += 1) {
+        const dst = rule.dst_addresses[addressIndex];
+        if (dst === 'any') continue;
+        const output = isIpOrPrefixLiteral(dst)
+          ? dst : identifierNames.reference(`pbf_rules[${ruleIndex}].dst_addresses[${addressIndex}]`);
+        lines.push(`          <destination-address>${xmlText(output)}</destination-address>`);
       }
       lines.push('        </from>');
     }
@@ -2332,6 +3040,7 @@ function buildPbfXml(pbfRules, lines, interfaceMappings = {}) {
     // then clause
     lines.push('        <then>');
     if (rule.action === 'forward' && rule.next_hop_value) {
+      identifierNames.reference(`pbf_rules[${ruleIndex}].next_hop_value#routing-instance`);
       const instName = instances.get(rule.next_hop_value);
       lines.push(`          <routing-instance>${xmlText(instName)}</routing-instance>`);
     } else if (rule.action === 'discard') {
@@ -2345,7 +3054,7 @@ function buildPbfXml(pbfRules, lines, interfaceMappings = {}) {
 
   // Default accept term
   lines.push('      <term>');
-  lines.push('        <name>default</name>');
+  lines.push(`        <name>${xmlText(identifierNames.generated('pbf_rules', 'pbf-default-term'))}</name>`);
   lines.push('        <then><accept/></then>');
   lines.push('      </term>');
   lines.push('    </filter>');
@@ -2360,49 +3069,84 @@ function buildPbfXml(pbfRules, lines, interfaceMappings = {}) {
 /**
  * Builds SSL proxy profile and PKI ca-profile XML from decryption rules.
  */
-function buildSslProxyXml(config, lines) {
+function buildSslProxyXml(config, lines, identifierNames) {
   const decryptionRules = config.decryption_rules || [];
-  const hasDecryptPolicies = (config.security_policies || []).some(p => p._srx_decrypt);
-  const hasDecryptRules = decryptionRules.some(r => r.action === 'decrypt');
+  const fallbackDecryptPolicies = (config.security_policies || [])
+    .map((policy, index) => ({ policy, index }))
+    .filter(({ policy }) => policy._srx_decrypt && policy.action === 'allow' && !policy._srx_decrypt_profile);
+  const hasDecryptRules = decryptionRules.some(r => (
+    !r.disabled && ['decrypt', 'decrypt-and-forward'].includes(r.action)
+  ));
 
-  if (!hasDecryptRules && !hasDecryptPolicies) return;
+  if (!hasDecryptRules && fallbackDecryptPolicies.length === 0) return;
 
   // Collect profiles
   const fwdProxyProfiles = new Set();
   const inboundProfiles = new Map();
+  let caProfileName = null;
 
-  for (const rule of decryptionRules) {
+  const sharedProfiles = new Map();
+  for (let ruleIndex = 0; ruleIndex < decryptionRules.length; ruleIndex += 1) {
+    const rule = decryptionRules[ruleIndex];
     if (rule.disabled) continue;
     if (rule.action === 'decrypt' || rule.action === 'decrypt-and-forward') {
       if (rule.decryption_type === 'ssl-forward-proxy') {
-        fwdProxyProfiles.add(rule.decryption_profile
-          ? sanitizeJunosName(`ssl-fwd-${rule.decryption_profile}`)
-          : 'ssl-fwd-proxy');
+        const key = `forward:${rule.decryption_profile || 'ssl-fwd-proxy'}`;
+        if (!sharedProfiles.has(key)) {
+          sharedProfiles.set(key, identifierNames.generated(`decryption_rules[${ruleIndex}]`, 'ssl-forward-profile'));
+        }
+        if (rule.decryption_profile) identifierNames.reference(`decryption_rules[${ruleIndex}].decryption_profile`);
+        fwdProxyProfiles.add(sharedProfiles.get(key));
       } else if (rule.decryption_type === 'ssl-inbound-inspection') {
-        const pName = rule.decryption_profile
-          ? sanitizeJunosName(`ssl-inbound-${rule.decryption_profile}`)
-          : 'ssl-inbound-proxy';
+        const key = `inbound:${rule.decryption_profile || 'ssl-inbound-proxy'}`;
+        if (!sharedProfiles.has(key)) {
+          sharedProfiles.set(key, identifierNames.generated(`decryption_rules[${ruleIndex}]`, 'ssl-inbound-profile'));
+        }
+        if (rule.decryption_profile) identifierNames.reference(`decryption_rules[${ruleIndex}].decryption_profile`);
+        const pName = sharedProfiles.get(key);
         inboundProfiles.set(pName, rule.ssl_certificate || 'SERVER-CERT');
       } else if (rule.decryption_type !== 'ssh-proxy') {
-        fwdProxyProfiles.add('ssl-fwd-proxy');
+        const key = 'forward:ssl-fwd-proxy';
+        if (!sharedProfiles.has(key)) {
+          sharedProfiles.set(key, identifierNames.generated(`decryption_rules[${ruleIndex}]`, 'ssl-forward-profile'));
+        }
+        fwdProxyProfiles.add(sharedProfiles.get(key));
       }
     }
   }
 
-  if (fwdProxyProfiles.size === 0 && hasDecryptPolicies) {
-    fwdProxyProfiles.add('ssl-fwd-proxy');
+  if (fwdProxyProfiles.size === 0 && fallbackDecryptPolicies.length > 0) {
+    const owner = [...fallbackDecryptPolicies].sort((left, right) => (
+      String(left.policy.name || '').localeCompare(String(right.policy.name || ''))
+    ))[0];
+    fwdProxyProfiles.add(identifierNames.generated(`security_policies[${owner.index}]`, 'ssl-forward-profile'));
   }
 
   if (fwdProxyProfiles.size === 0 && inboundProfiles.size === 0) return;
 
   // PKI ca-profile (inside <security>)
   if (fwdProxyProfiles.size > 0) {
+    const pkiOwners = [];
+    for (let ruleIndex = 0; ruleIndex < decryptionRules.length; ruleIndex += 1) {
+      const rule = decryptionRules[ruleIndex];
+      if (!rule.disabled && ['decrypt', 'decrypt-and-forward'].includes(rule.action)
+          && rule.decryption_type !== 'ssl-inbound-inspection' && rule.decryption_type !== 'ssh-proxy') {
+        pkiOwners.push({ path: `decryption_rules[${ruleIndex}]`, key: `rule:${rule.name || ''}` });
+      }
+    }
+    for (const { policy, index } of fallbackDecryptPolicies) {
+      pkiOwners.push({ path: `security_policies[${index}]`, key: `policy:${policy.name || ''}` });
+    }
+    const pkiOwner = [...pkiOwners].sort((left, right) => left.key.localeCompare(right.key))[0];
+    const caProfile = identifierNames.generated(pkiOwner.path, 'ssl-pki-ca-profile');
+    caProfileName = caProfile;
+    const caIdentity = identifierNames.generated(pkiOwner.path, 'ssl-pki-ca-identity');
     lines.push('  <!-- PKI CA Profile for SSL Forward Proxy -->');
     lines.push('  <security>');
     lines.push('    <pki>');
     lines.push('      <ca-profile>');
-    lines.push('        <name>FPIC-CA</name>');
-    lines.push('        <ca-identity>FPIC-CA</ca-identity>');
+    lines.push(`        <name>${xmlText(caProfile)}</name>`);
+    lines.push(`        <ca-identity>${xmlText(caIdentity)}</ca-identity>`);
     lines.push('      </ca-profile>');
     lines.push('    </pki>');
     lines.push('  </security>');
@@ -2417,7 +3161,7 @@ function buildSslProxyXml(config, lines) {
   for (const profileName of fwdProxyProfiles) {
     lines.push('        <profile>');
     lines.push(`          <name>${xmlText(profileName)}</name>`);
-    lines.push('          <root-ca>FPIC-CA</root-ca>');
+    lines.push(`          <root-ca>${xmlText(caProfileName)}</root-ca>`);
     lines.push('          <protocol-version>tls12-and-above</protocol-version>');
     lines.push('          <actions>');
     lines.push('            <log/>');
@@ -2450,10 +3194,12 @@ function buildSslProxyXml(config, lines) {
 /**
  * Builds SRX inline-jflow XML configuration from flow monitoring config.
  */
-function buildFlowMonitoringXml(flowConfig, lines) {
+function buildFlowMonitoringXml(flowConfig, lines, identifierNames) {
   if (!flowConfig || !flowConfig.collectors || flowConfig.collectors.length === 0) return;
 
-  const instanceName = flowConfig.instance_name || 'FLOW-SAMPLE';
+  const instanceName = flowConfig.instance_name
+    ? identifierNames.definition('flow_monitoring_config.instance_name')
+    : identifierNames.generated('flow_monitoring_config', 'sampling-instance');
   const sampling = flowConfig.sampling || {};
   const rate = sampling.input_rate || 1000;
   const templates = flowConfig.templates || [];
@@ -2473,8 +3219,7 @@ function buildFlowMonitoringXml(flowConfig, lines) {
 
   for (let i = 0; i < flowConfig.collectors.length; i++) {
     const collector = flowConfig.collectors[i];
-    const tpl = templates[i] || { name: `flow-tpl-${i + 1}` };
-    const tplName = sanitizeJunosName(tpl.name);
+    const tplName = identifierNames.reference(`flow_monitoring_config.collectors[${i}]#template`);
     const isIpfix = !collector.protocol || collector.protocol === 'ipfix' || collector.protocol === 'netflow-v10';
 
     lines.push('              <flow-server>');
@@ -2508,12 +3253,13 @@ function buildFlowMonitoringXml(flowConfig, lines) {
   lines.push('  </forwarding-options>');
 
   // services > flow-monitoring templates
-  if (templates.length > 0) {
+  if (templates.length > 0 || flowConfig.collectors.length > templates.length) {
     lines.push('  <services>');
     lines.push('    <flow-monitoring>');
 
-    for (const tpl of templates) {
-      const tplName = sanitizeJunosName(tpl.name);
+    for (let templateIndex = 0; templateIndex < templates.length; templateIndex += 1) {
+      const tpl = templates[templateIndex];
+      const tplName = identifierNames.definition(`flow_monitoring_config.templates[${templateIndex}].name`);
       lines.push('      <version-ipfix>');
       lines.push('        <template>');
       lines.push(`          <name>${xmlText(tplName)}</name>`);
@@ -2524,6 +3270,29 @@ function buildFlowMonitoringXml(flowConfig, lines) {
       if (tpl.flow_type === 'ipv6') {
         lines.push('          <ipv6-template/>');
       }
+      lines.push('        </template>');
+      lines.push('      </version-ipfix>');
+    }
+
+    const emittedFallbacks = new Set();
+    for (let collectorIndex = 0; collectorIndex < flowConfig.collectors.length; collectorIndex += 1) {
+      if (templates[collectorIndex]) continue;
+      const collector = flowConfig.collectors[collectorIndex];
+      const key = JSON.stringify([
+        collector.address || '', collector.port || 2055, collector.protocol || 'ipfix',
+        collector.source_address || '',
+      ]);
+      if (emittedFallbacks.has(key)) continue;
+      emittedFallbacks.add(key);
+      const tplName = identifierNames.generated(
+        `flow_monitoring_config.collectors[${collectorIndex}]`,
+        'collector-flow-template',
+      );
+      lines.push('      <version-ipfix>');
+      lines.push('        <template>');
+      lines.push(`          <name>${xmlText(tplName)}</name>`);
+      lines.push('          <flow-active-timeout>60</flow-active-timeout>');
+      lines.push('          <template-refresh-rate><packets>1000</packets></template-refresh-rate>');
       lines.push('        </template>');
       lines.push('      </version-ipfix>');
     }

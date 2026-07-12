@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { convertToSrxSetCommands } from '../src/converters/srx-converter.js';
+import { buildSrxXml } from '../src/converters/srx-xml-builder.js';
 import { setMapVendorApp } from '../src/parsers/parser-utils.js';
 import {
   JunosIdentifierPlanningError,
@@ -1324,5 +1325,398 @@ describe('Set identifier-plan integration', () => {
 
     expect(() => convertToSrxSetCommands(config, {}, null, { identifierPlan: emptyPlan }))
       .toThrow(expect.objectContaining({ code: 'missing_catalog_coverage' }));
+  });
+});
+
+describe('XML identifier-plan integration', () => {
+  it('reuses one planned XML policy name across global any-zone combinations', () => {
+    const config = baseConfig({
+      zones: [{ name: 'trust', interfaces: [] }, { name: 'untrust', interfaces: [] }],
+      security_policies: [policy('Global Access', 'any', 'trust', 'any', {
+        dst_zones: ['trust', 'untrust'],
+      })],
+    });
+    const setResult = convertToSrxSetCommands(config);
+    const xmlResult = buildSrxXml(config);
+
+    expect(xmlResult.identifierMappings).toEqual(setResult.identifierMappings);
+    const policyEntry = xmlResult.identifierMappings.entries.find(
+      entry => entry.namespace === 'security-policy',
+    );
+    expect(xmlResult.xml).toContain(`>${policyEntry.outputName}<`);
+  });
+
+  it.each(['Named Multi Pair', 'rule-1'])(
+    'captures each planned XML policy occurrence for %s',
+    policyName => {
+      const config = baseConfig({
+        zones: [
+          { name: 'trust', interfaces: [] },
+          { name: 'untrust', interfaces: [] },
+          { name: 'dmz', interfaces: [] },
+        ],
+        security_policies: [policy(policyName, 'trust', 'untrust', 'any', {
+          dst_zones: ['untrust', 'dmz'],
+        })],
+      });
+      const setResult = convertToSrxSetCommands(config);
+      const xmlResult = buildSrxXml(config);
+
+      expect(xmlResult.identifierMappings).toEqual(setResult.identifierMappings);
+      for (const entry of xmlResult.identifierMappings.entries.filter(
+        item => item.namespace === 'security-policy',
+      )) {
+        expect(xmlResult.xml).toContain(`>${entry.outputName}<`);
+      }
+    },
+  );
+
+  it('treats built-in routing instances as planned literals', () => {
+    const config = baseAdvancedConfig();
+    config.static_routes = [{
+      destination: '192.0.2.0/24', next_hop: '198.51.100.1', vrf: 'default',
+    }];
+
+    expect(() => buildSrxXml(config)).not.toThrow();
+    expect(buildSrxXml(config).identifierMappings).toEqual(
+      convertToSrxSetCommands(config).identifierMappings,
+    );
+  });
+
+  it('keeps same-name BGP groups and policies scoped to their routing instances', () => {
+    const config = baseAdvancedConfig();
+    config.bgp_config = [
+      {
+        instance: 'Blue', peer_groups: [{ name: 'Peers', type: 'external', neighbors: [] }],
+        redistribute: [{ protocol: 'static' }],
+      },
+      {
+        instance: 'Red', peer_groups: [{ name: 'Peers', type: 'external', neighbors: [] }],
+        redistribute: [{ protocol: 'static' }],
+      },
+    ];
+    const result = buildSrxXml(config);
+
+    expect(result.xml.match(/<name>Peers<\/name>/g)).toHaveLength(2);
+    expect(result.xml.match(/<name>BGP-REDIST-STATIC<\/name>/g)).toHaveLength(2);
+    const rootTail = result.xml.slice(result.xml.lastIndexOf('</routing-instances>') + 20);
+    expect(rootTail).not.toContain('<name>Peers</name>');
+    expect(rootTail).not.toContain('<name>BGP-REDIST-STATIC</name>');
+  });
+
+  it('emits every BGP record that shares one routing instance', () => {
+    const config = baseAdvancedConfig();
+    config.bgp_config = [
+      { instance: 'Blue', peer_groups: [{ name: 'First', type: 'external', neighbors: [] }] },
+      { instance: 'Blue', peer_groups: [{ name: 'Second', type: 'external', neighbors: [] }] },
+    ];
+    const result = buildSrxXml(config);
+
+    expect(result.xml).toContain('<name>First</name>');
+    expect(result.xml).toContain('<name>Second</name>');
+    const rootTail = result.xml.slice(result.xml.lastIndexOf('</routing-instances>') + 20);
+    expect(rootTail).not.toContain('<name>First</name>');
+    expect(rootTail).not.toContain('<name>Second</name>');
+  });
+
+  it('consumes references from secondary global BGP records', () => {
+    const config = baseAdvancedConfig();
+    config.bgp_config = [
+      { peer_groups: [{ name: 'Primary', type: 'external', neighbors: [] }] },
+      {
+        peer_groups: [{
+          name: 'Secondary',
+          type: 'external',
+          neighbors: [{
+            address: '192.0.2.2', import_policy: 'IMPORT-SECONDARY', export_policy: 'EXPORT-SECONDARY',
+          }],
+        }],
+        networks: [{ prefix: '198.51.100.0/24', policy: 'NETWORK-SECONDARY' }],
+      },
+    ];
+    const plan = planJunosIdentifiers(config);
+    const seen = new Set();
+    const identifierPlan = {
+      ...plan,
+      nameForReference(path) {
+        seen.add(path);
+        return plan.nameForReference(path);
+      },
+    };
+    const result = buildSrxXml(config, {}, null, { identifierPlan });
+
+    for (const path of [
+      'bgp_config[1].peer_groups[0].neighbors[0].import_policy',
+      'bgp_config[1].peer_groups[0].neighbors[0].export_policy',
+      'bgp_config[1].networks[0].policy',
+    ]) {
+      expect(seen).toContain(path);
+      expect(result.xml).toContain(plan.nameForReference(path));
+    }
+  });
+
+  it('emits planned fallback proposal definitions for minimal VPNs', () => {
+    const config = baseAdvancedConfig();
+    config.vpn_tunnels = [{ name: 'Minimal VPN' }];
+    const result = buildSrxXml(config);
+    const proposals = result.identifierMappings.entries.filter(entry => (
+      ['ike-proposal', 'ipsec-proposal'].includes(entry.namespace)
+    ));
+
+    expect(proposals).toHaveLength(2);
+    for (const proposal of proposals) {
+      expect(result.xml.match(new RegExp(`<proposal>\\s*<name>${proposal.outputName}</name>`)))
+        .not.toBeNull();
+    }
+  });
+
+  it('matches Set guards for any and service-set application operands', () => {
+    const config = baseConfig({
+      zones: [{ name: 'trust', interfaces: [] }, { name: 'untrust', interfaces: [] }],
+      application_groups: [{ name: 'Mixed Group', members: ['service-set', 'any'] }],
+      security_policies: [policy('Operand Guards', 'trust', 'untrust', 'any', {
+        applications: ['any', 'service-set', 'Mixed Group'],
+        services: ['service-set'],
+      })],
+    });
+    const setResult = convertToSrxSetCommands(config);
+    const xmlResult = buildSrxXml(config);
+
+    expect(xmlResult.identifierMappings).toEqual(setResult.identifierMappings);
+    expect(xmlResult.xml).toContain('<application>any</application>');
+  });
+
+  it('emits application-group-owned generated definitions structurally', () => {
+    const config = baseConfig({
+      zones: [{ name: 'trust', interfaces: [] }, { name: 'untrust', interfaces: [] }],
+      application_groups: [{ name: 'Customer Group', members: ['unknown group app'] }],
+      security_policies: [policy('Grouped App', 'trust', 'untrust', 'any', {
+        applications: ['Customer Group'],
+      })],
+    });
+    const result = buildSrxXml(config);
+    const generated = result.identifierMappings.entries.find(entry => (
+      entry.definitionPath?.startsWith('application_groups[0].members[0]#generated:')
+    ));
+
+    expect(generated).toBeDefined();
+    expect(result.xml).toMatch(new RegExp(
+      `<application>\\s*<name>${generated.outputName}</name>`,
+    ));
+  });
+
+  it('emits every planned generated application and NAT definition', () => {
+    const config = baseConfig({
+      zones: [
+        { name: 'trust', interfaces: [] },
+        { name: 'untrust', interfaces: [] },
+      ],
+      service_objects: [{ name: 'Discrete Service', protocol: 'tcp', port_range: '8443,9443' }],
+      applications: [{ name: 'Discrete App', protocol: 'udp', port: '5000,5001' }],
+      security_policies: [policy('Generated Apps', 'trust', 'untrust', 'any', {
+        applications: ['Discrete App', 'foo bar', 'foo@bar'],
+        services: ['Discrete Service'],
+      })],
+      nat_rules: [
+        {
+          name: 'Outbound NAT', type: 'source', src_zones: ['trust'], dst_zones: ['untrust'],
+          src_addresses: ['any'], dst_addresses: ['any'],
+          translated_src: { type: 'dynamic-ip-pool', addresses: ['198.51.100.10/32'] },
+        },
+        {
+          name: 'Outbound@NAT', type: 'source', src_zones: ['trust'], dst_zones: ['untrust'],
+          src_addresses: ['any'], dst_addresses: ['any'],
+          translated_src: { type: 'dynamic-ip-pool', addresses: ['198.51.100.11/32'] },
+        },
+      ],
+    });
+    const result = buildSrxXml(config);
+
+    for (const entry of result.identifierMappings.entries) {
+      if (entry.definitionPath !== null) {
+        expect(result.xml).toContain(`>${entry.outputName}<`);
+      }
+    }
+  });
+
+  it('honors supplied plans, path prefixes, and target context paths', () => {
+    const first = baseConfig({ zones: [{ name: 'Inside Zone', interfaces: [] }] });
+    const second = baseConfig({ zones: [{ name: 'Inside@Zone', interfaces: [] }] });
+    const slots = [
+      { lsName: 'Branch Office', intermediateConfig: first },
+      { lsName: 'Branch@Office', intermediateConfig: second },
+    ];
+    const identifierPlan = planMergedJunosIdentifiers(slots);
+    const result = buildSrxXml(
+      first,
+      {},
+      { type: 'logical-system', name: slots[0].lsName },
+      {
+        identifierPlan,
+        pathPrefix: 'configSlots[0].intermediateConfig.',
+        targetContextPath: 'configSlots[0].lsName',
+      },
+    );
+    const targetName = identifierPlan.nameForDefinition('configSlots[0].lsName');
+    const zoneName = identifierPlan.nameForDefinition(
+      'configSlots[0].intermediateConfig.zones[0].name',
+    );
+
+    expect(result.identifierMappings).toBe(identifierPlan.mapping);
+    expect(result.xml).toContain(`<name>${targetName}</name>`);
+    expect(result.xml).toContain(`<name>${zoneName}</name>`);
+  });
+
+  it('fails closed when a supplied plan omits an XML definition lookup', () => {
+    const config = collisionConfig();
+    const plan = planJunosIdentifiers(config);
+    const identifierPlan = {
+      ...plan,
+      nameForDefinition(path) {
+        if (path === 'zones[0].name') {
+          throw new JunosIdentifierPlanningError('missing_catalog_coverage', {
+            definitionPaths: [path],
+          });
+        }
+        return plan.nameForDefinition(path);
+      },
+    };
+
+    expect(() => buildSrxXml(config, {}, null, { identifierPlan }))
+      .toThrow(expect.objectContaining({ code: 'missing_catalog_coverage' }));
+  });
+
+  it.each([
+    ['reference', 'security_policies[0].dst_addresses[0]', null],
+    ['generated', 'security_policies[0].applications[0]', 'unmapped-application'],
+  ])('fails closed when a supplied plan omits an XML %s lookup', (lookup, missingPath, missingRole) => {
+    const config = baseConfig({
+      zones: [
+        { name: 'trust', interfaces: [] },
+        { name: 'untrust', interfaces: [] },
+      ],
+      address_objects: [{ name: 'Web Server', type: 'host', value: '192.0.2.10/32' }],
+      security_policies: [policy('Guarded XML', 'trust', 'untrust', 'Web Server', {
+        applications: ['customer unknown app'],
+      })],
+    });
+    const plan = planJunosIdentifiers(config);
+    const identifierPlan = {
+      ...plan,
+      nameForReference(path) {
+        if (lookup === 'reference' && path === missingPath) {
+          throw new JunosIdentifierPlanningError('missing_catalog_coverage', { referencePaths: [path] });
+        }
+        return plan.nameForReference(path);
+      },
+      nameForGenerated(path, role) {
+        if (lookup === 'generated' && path === missingPath && role === missingRole) {
+          throw new JunosIdentifierPlanningError('missing_catalog_coverage', { definitionPaths: [path] });
+        }
+        return plan.nameForGenerated(path, role);
+      },
+    };
+
+    expect(() => buildSrxXml(config, {}, null, { identifierPlan }))
+      .toThrow(expect.objectContaining({ code: 'missing_catalog_coverage' }));
+  });
+
+  it.each([
+    ['routing instance', addRoutingInstanceCollision],
+    ['BGP group', addBgpGroupCollision],
+    ['BGP fallback group', addBgpFallbackGroupCollision],
+    ['screen profile', addScreenCollision],
+    ['VPN', addVpnCollision],
+    ['SNMP', addSnmpCollision],
+    ['DHCP', addDhcpCollision],
+    ['bridge domain', addBridgeDomainCollision],
+    ['PBF', addPbfCollision],
+    ['flow template', addFlowTemplateCollision],
+    ['UTM', addUtmCollision],
+    ['IDP', addIdpCoverage],
+    ['SecIntel', addSecIntelCoverage],
+    ['AppFW', addAppFwCollision],
+    ['SSL', addSslCollision],
+    ['SSL policy reference', addSslPolicyReferenceCollision],
+    ['VLAN', addVlanCollision],
+    ['QoS', addQosCollision],
+    ['QoS classifier', addQosClassifierMapCollision],
+    ['AAA', addAaaCollision],
+    ['generated routing policy', addGeneratedRoutingPolicyCollision],
+  ])('emits every planned %s definition and shares the Set mapping', (_label, mutate) => {
+    const config = baseAdvancedConfig();
+    mutate(config);
+    const setResult = convertToSrxSetCommands(config);
+    const plan = planJunosIdentifiers(config);
+    const definitionLookups = new Set();
+    const referenceLookups = new Set();
+    const identifierPlan = {
+      ...plan,
+      nameForDefinition(path) {
+        definitionLookups.add(path);
+        return plan.nameForDefinition(path);
+      },
+      nameForReference(path) {
+        referenceLookups.add(path);
+        return plan.nameForReference(path);
+      },
+      nameForGenerated(path, role) {
+        definitionLookups.add(`${path}#generated:${role}`);
+        return plan.nameForGenerated(path, role);
+      },
+    };
+    const xmlResult = buildSrxXml(config, {}, null, { identifierPlan });
+
+    expect(xmlResult.identifierMappings).toEqual(setResult.identifierMappings);
+    for (const entry of xmlResult.identifierMappings.entries) {
+      if (entry.definitionPath !== null) {
+        expect(xmlResult.xml).toContain(`>${entry.outputName}<`);
+        expect(definitionLookups).toContain(entry.definitionPath);
+      }
+      for (const referencePath of entry.referencePaths) {
+        expect(referenceLookups).toContain(referencePath);
+      }
+    }
+  });
+
+  it('uses identical identifier mappings in Set and XML', () => {
+    const config = collisionConfig();
+    const setResult = convertToSrxSetCommands(config);
+    const xmlResult = buildSrxXml(config);
+
+    expect(xmlResult.identifierMappings).toEqual(setResult.identifierMappings);
+    expect(xmlResult.summary.identifier_collisions_resolved)
+      .toBe(setResult.summary.identifier_collisions_resolved);
+    for (const entry of xmlResult.identifierMappings.entries) {
+      if (entry.definitionPath !== null) {
+        expect(xmlResult.xml).toContain(`>${entry.outputName}<`);
+      }
+    }
+  });
+
+  it('rejects malformed exact duplicates with the same planning details in Set and XML', () => {
+    const config = baseConfig({
+      security_policies: [
+        policy('Repeated Policy', 'trust', 'untrust', 'any'),
+        policy('Repeated Policy', 'trust', 'untrust', 'any'),
+      ],
+    });
+    const capture = converter => {
+      try {
+        converter(config);
+      } catch (error) {
+        return error;
+      }
+      throw new Error('expected duplicate-definition planning failure');
+    };
+
+    const setError = capture(convertToSrxSetCommands);
+    const xmlError = capture(buildSrxXml);
+
+    expect(xmlError).toEqual(expect.objectContaining({
+      code: setError.code,
+      namespace: setError.namespace,
+      context: setError.context,
+    }));
   });
 });

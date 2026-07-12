@@ -396,13 +396,23 @@ function resolveUid(uidOrObj, uidMap) {
 }
 
 /**
+ * Returns the source name used when referencing an object. Check Point stores
+ * DNS-domain definitions with a leading dot that is not part of the emitted
+ * definition name, so references must apply the same semantic transformation.
+ */
+function formatObjectReferenceName(obj, fallback = '') {
+  const name = obj?.name || fallback;
+  return obj?.type === 'dns-domain' ? name.replace(/^\./, '') : name;
+}
+
+/**
  * Resolves a UID to its object name, or the raw UID if unresolved.
  */
 function resolveUidToName(uidOrObj, uidMap, warnings, context) {
   const obj = resolveUid(uidOrObj, uidMap);
   if (obj) {
     if (obj._special === 'any') return 'any';
-    return obj.name || extractUidString(uidOrObj);
+    return formatObjectReferenceName(obj, extractUidString(uidOrObj));
   }
   const raw = extractUidString(uidOrObj);
   if (raw && raw !== 'any') {
@@ -684,7 +694,7 @@ function parseAddressGroups(uidMap, warnings) {
         const memberObj = resolveUid(m, uidMap);
         if (memberObj) {
           if (memberObj._special === 'any') return 'any';
-          return memberObj.name || extractUidString(m);
+          return formatObjectReferenceName(memberObj, extractUidString(m));
         }
         return extractUidString(m);
       }).filter(Boolean);
@@ -711,10 +721,12 @@ function parseAddressGroups(uidMap, warnings) {
       if (includeObj && Array.isArray(includeObj.members)) {
         members = includeObj.members.map(m => {
           const memberObj = resolveUid(m, uidMap);
-          return memberObj ? (memberObj.name || extractUidString(m)) : extractUidString(m);
+          return memberObj
+            ? formatObjectReferenceName(memberObj, extractUidString(m))
+            : extractUidString(m);
         }).filter(Boolean);
       } else if (includeObj) {
-        members = [includeObj.name || extractUidString(includeRef)];
+        members = [formatObjectReferenceName(includeObj, extractUidString(includeRef))];
       }
 
       const exceptName = exceptRef

@@ -10,6 +10,7 @@ import {
 } from '../public/utils/conversion-output-consumer.js';
 
 const read = relativePath => fs.readFileSync(new URL(`../${relativePath}`, import.meta.url), 'utf8');
+const IDENTIFIER_MAPPINGS = { version: 1, entries: [] };
 
 const setOutput = {
   format: 'set',
@@ -19,11 +20,13 @@ const setOutput = {
     '',
     'set system services ssh',
   ].filter(Boolean),
+  identifierMappings: IDENTIFIER_MAPPINGS,
 };
 
 const xmlOutput = {
   format: 'xml',
   xml: '<configuration><system><host-name>edge-1</host-name></system></configuration>',
+  identifierMappings: IDENTIFIER_MAPPINGS,
 };
 
 describe('canonical conversion output consumer behavior', () => {
@@ -48,6 +51,7 @@ describe('canonical conversion output consumer behavior', () => {
         'set system host-name edge-1',
         '# end generated configuration',
       ],
+      identifierMappings: IDENTIFIER_MAPPINGS,
     })).toEqual({
       config: 'set system host-name edge-1',
       format: 'set',
@@ -66,9 +70,19 @@ describe('canonical conversion output consumer behavior', () => {
 
   it.each([
     null,
-    { format: 'set', commands: [] },
-    { format: 'set', commands: ['set system host-name edge-1'], xml: '<configuration />' },
-    { format: 'xml', xml: '<configuration />', commands: ['set system host-name edge-1'] },
+    { format: 'set', commands: [], identifierMappings: IDENTIFIER_MAPPINGS },
+    {
+      format: 'set',
+      commands: ['set system host-name edge-1'],
+      xml: '<configuration />',
+      identifierMappings: IDENTIFIER_MAPPINGS,
+    },
+    {
+      format: 'xml',
+      xml: '<configuration />',
+      commands: ['set system host-name edge-1'],
+      identifierMappings: IDENTIFIER_MAPPINGS,
+    },
   ])('rejects malformed device output before restoration or payload creation: %j', malformedOutput => {
     const restoreText = vi.fn(text => text);
 
@@ -113,7 +127,12 @@ describe('canonical conversion output consumer behavior', () => {
   });
 
   it('cannot produce presentation, push, or Set-export data from malformed output', () => {
-    const malformedOutput = { format: 'xml', xml: '<configuration />', commands: ['set system host-name bypass'] };
+    const malformedOutput = {
+      format: 'xml',
+      xml: '<configuration />',
+      commands: ['set system host-name bypass'],
+      identifierMappings: IDENTIFIER_MAPPINGS,
+    };
 
     expect(hasConversionOutput(malformedOutput)).toBe(false);
     expect(() => getConversionOutputPresentation(malformedOutput, 'set')).toThrow();

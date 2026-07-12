@@ -112,7 +112,16 @@ function section(name) {
   console.log(`\n--- ${name} ---`);
 }
 
-const setOutput = text => normalizeConversionOutput(text, 'set');
+const EMPTY_IDENTIFIER_MAPPINGS = Object.freeze({
+  version: 1,
+  entries: Object.freeze([]),
+});
+
+const setOutput = text => normalizeConversionOutput({
+  format: 'set',
+  commands: text.split('\n'),
+  identifierMappings: EMPTY_IDENTIFIER_MAPPINGS,
+});
 
 // ---------------------------------------------------------------------------
 // Hardware Checks

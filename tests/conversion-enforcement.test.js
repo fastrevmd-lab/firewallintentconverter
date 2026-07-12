@@ -11,6 +11,7 @@ import { runValidation } from '../src/validators/srx-validation-engine.js';
 
 const modelDb = {};
 const capacityLimits = {};
+const IDENTIFIER_MAPPINGS = { version: 1, entries: [] };
 const intermediateConfig = {
   security_policies: [],
   zones: [],
@@ -27,6 +28,7 @@ describe('canonical license enforcement', () => {
       ],
       warnings: [{ type: 'warning', message: 'preserve me' }],
       summary: { policies_converted: 1 },
+      identifierMappings: IDENTIFIER_MAPPINGS,
     }, 'set');
 
     const result = runValidation({
@@ -50,6 +52,7 @@ describe('canonical license enforcement', () => {
   it('blocks XML and malformed output instead of validating an empty string', () => {
     const xml = normalizeConversionOutput({
       xml: '<configuration><system><host-name>edge-1</host-name></system></configuration>',
+      identifierMappings: IDENTIFIER_MAPPINGS,
     }, 'xml');
 
     expect(() => runValidation({
@@ -76,6 +79,7 @@ describe('canonical license enforcement', () => {
   it('reports an empty filtered command list when enforcement removes everything', () => {
     const output = normalizeConversionOutput({
       commands: ['set services idp active-policy recommended'],
+      identifierMappings: IDENTIFIER_MAPPINGS,
     }, 'set');
     const result = runValidation({
       intermediateConfig,
@@ -99,6 +103,7 @@ describe('canonical license enforcement', () => {
         '# license-gated feature follows',
         'set services idp active-policy recommended',
       ],
+      identifierMappings: IDENTIFIER_MAPPINGS,
     }, 'set');
     const result = runValidation({
       intermediateConfig,

@@ -40,7 +40,7 @@ function cfgWithApp(appName, sourceVendor = 'panos') {
 console.log('--- Converter app emission ---');
 
 test('known PAN-OS app (ssl) resolves to junos-https — no custom app emitted', () => {
-  const { commands } = convertToSrxSetCommands(cfgWithApp('ssl'), {}, { target_model: 'SRX380' });
+  const { commands } = convertToSrxSetCommands(cfgWithApp('ssl'), {});
   const joined = commands.join('\n');
   assert(joined.includes('match application junos-https'),
     'policy should reference junos-https');
@@ -51,7 +51,7 @@ test('known PAN-OS app (ssl) resolves to junos-https — no custom app emitted',
 });
 
 test('unknown customer-specific app goes to single INTERVIEW block, not tcp/1', () => {
-  const { commands } = convertToSrxSetCommands(cfgWithApp('MGT-Applications'), {}, { target_model: 'SRX380' });
+  const { commands } = convertToSrxSetCommands(cfgWithApp('MGT-Applications'), {});
   const joined = commands.join('\n');
   const headerMatches = joined.match(/# INTERVIEW REQUIRED/g) || [];
   assert(headerMatches.length >= 1, 'should include INTERVIEW REQUIRED header');
@@ -60,7 +60,7 @@ test('unknown customer-specific app goes to single INTERVIEW block, not tcp/1', 
 });
 
 test('junos-ldap passthrough — no placeholder, no custom-app emission', () => {
-  const { commands } = convertToSrxSetCommands(cfgWithApp('junos-ldap'), {}, { target_model: 'SRX380' });
+  const { commands } = convertToSrxSetCommands(cfgWithApp('junos-ldap'), {});
   const joined = commands.join('\n');
   assert(joined.includes('match application junos-ldap'),
     'policy should reference junos-ldap directly');
@@ -84,7 +84,7 @@ test('realistic PAN-OS policy with 5 apps produces 0 destination-port 1 lines', 
       action: 'permit',
     }],
   };
-  const { commands } = convertToSrxSetCommands(cfg, {}, { target_model: 'SRX380' });
+  const { commands } = convertToSrxSetCommands(cfg, {});
   const joined = commands.join('\n');
   const bogusPortLines = (joined.match(/destination-port 1$/gm) || []).length;
   assert(bogusPortLines === 0, `expected 0 placeholder port-1 lines; got ${bogusPortLines}\n${joined}`);
@@ -104,7 +104,7 @@ test('truly-unknown app emits one INTERVIEW block and exactly one port-1 sentine
       action: 'permit',
     }],
   };
-  const { commands } = convertToSrxSetCommands(cfg, {}, { target_model: 'SRX380' });
+  const { commands } = convertToSrxSetCommands(cfg, {});
   const joined = commands.join('\n');
   const interviewHeaders = (joined.match(/INTERVIEW REQUIRED: Unmapped Applications/g) || []).length;
   assert(interviewHeaders === 1, `expected 1 INTERVIEW header, got ${interviewHeaders}`);

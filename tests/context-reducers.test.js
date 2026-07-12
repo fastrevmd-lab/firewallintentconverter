@@ -2,6 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { conversionReducer, initialState as conversionInitial } from '../public/contexts/ConversionContext.jsx';
 import { mergeReducer, initialState as mergeInitial } from '../public/contexts/MergeContext.jsx';
 
+const IDENTIFIER_MAPPINGS = { version: 1, entries: [] };
+
 describe('conversionReducer RESET', () => {
   it('returns a clean initial state, discarding all output', () => {
     const dirty = {
@@ -24,6 +26,7 @@ describe('conversionReducer canonical output', () => {
       format: 'set',
       commands: ['set system host-name edge-1'],
       warnings: [],
+      identifierMappings: IDENTIFIER_MAPPINGS,
     };
     const next = conversionReducer(conversionInitial, {
       type: 'SET_CONVERSION_RESULT',
@@ -47,6 +50,7 @@ describe('conversionReducer canonical output', () => {
     const output = {
       format: 'set',
       commands: ['set system host-name edge-1'],
+      identifierMappings: IDENTIFIER_MAPPINGS,
     };
     const next = conversionReducer(
       { ...conversionInitial, outputFormat: 'xml' },
@@ -80,6 +84,7 @@ describe('conversionReducer canonical output', () => {
     const output = {
       format: 'set',
       commands: ['set system host-name loaded-edge'],
+      identifierMappings: IDENTIFIER_MAPPINGS,
     };
     const next = conversionReducer(conversionInitial, {
       type: 'LOAD_PROJECT',

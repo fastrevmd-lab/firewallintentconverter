@@ -22,7 +22,7 @@
  *   3. JSON + Gaia clish text separated by "--- GAIA CLISH ---"
  */
 
-import { createWarning, sanitizeJunosName, safeJsonParse, detectIpVersion } from './parser-utils.js';
+import { createWarning, safeJsonParse, detectIpVersion } from './parser-utils.js';
 
 // ---------------------------------------------------------------------------
 // Main Parser Entry Point
@@ -396,13 +396,23 @@ function resolveUid(uidOrObj, uidMap) {
 }
 
 /**
+ * Returns the source name used when referencing an object. Check Point stores
+ * DNS-domain definitions with a leading dot that is not part of the emitted
+ * definition name, so references must apply the same semantic transformation.
+ */
+function formatObjectReferenceName(obj, fallback = '') {
+  const name = obj?.name || fallback;
+  return obj?.type === 'dns-domain' ? name.replace(/^\./, '') : name;
+}
+
+/**
  * Resolves a UID to its object name, or the raw UID if unresolved.
  */
 function resolveUidToName(uidOrObj, uidMap, warnings, context) {
   const obj = resolveUid(uidOrObj, uidMap);
   if (obj) {
     if (obj._special === 'any') return 'any';
-    return obj.name || extractUidString(uidOrObj);
+    return formatObjectReferenceName(obj, extractUidString(uidOrObj));
   }
   const raw = extractUidString(uidOrObj);
   if (raw && raw !== 'any') {
@@ -594,7 +604,7 @@ function parseAddressObjects(uidMap, warnings) {
       const ip = obj['ipv4-address'] || obj['ipv6-address'] || '';
       if (!ip) continue;
       addressObjects.push({
-        name: sanitizeJunosName(name),
+        name,
         type: 'host',
         value: ip.includes(':') ? ip : `${ip}/32`,
         description: obj.comments || '',
@@ -605,7 +615,7 @@ function parseAddressObjects(uidMap, warnings) {
       const maskLen = obj['mask-length4'] || obj['mask-length6'] || obj['mask-length'] || '';
       if (!subnet) continue;
       addressObjects.push({
-        name: sanitizeJunosName(name),
+        name,
         type: 'subnet',
         value: `${subnet}/${maskLen}`,
         description: obj.comments || '',
@@ -616,7 +626,7 @@ function parseAddressObjects(uidMap, warnings) {
       const last = obj['ipv4-address-last'] || obj['ipv6-address-last'] || '';
       if (!first || !last) continue;
       addressObjects.push({
-        name: sanitizeJunosName(name),
+        name,
         type: 'range',
         value: `${first}-${last}`,
         description: obj.comments || '',
@@ -626,7 +636,7 @@ function parseAddressObjects(uidMap, warnings) {
       // DNS domain names in Check Point start with "." (e.g. ".example.com")
       const domain = name.startsWith('.') ? name.substring(1) : name;
       addressObjects.push({
-        name: sanitizeJunosName(name.replace(/^\./, '')),
+        name: name.replace(/^\./, ''),
         type: 'fqdn',
         value: domain,
         description: obj.comments || '',
@@ -684,7 +694,7 @@ function parseAddressGroups(uidMap, warnings) {
         const memberObj = resolveUid(m, uidMap);
         if (memberObj) {
           if (memberObj._special === 'any') return 'any';
-          return memberObj.name || extractUidString(m);
+          return formatObjectReferenceName(memberObj, extractUidString(m));
         }
         return extractUidString(m);
       }).filter(Boolean);
@@ -696,8 +706,8 @@ function parseAddressGroups(uidMap, warnings) {
       if (firstMember && isServiceType(firstMember.type)) continue;
 
       addressGroups.push({
-        name: sanitizeJunosName(name),
-        members: members.map(m => sanitizeJunosName(m)),
+        name,
+        members,
         description: obj.comments || '',
         tags: obj.tags ? resolveTagNames(obj.tags, uidMap) : [],
       });
@@ -711,10 +721,12 @@ function parseAddressGroups(uidMap, warnings) {
       if (includeObj && Array.isArray(includeObj.members)) {
         members = includeObj.members.map(m => {
           const memberObj = resolveUid(m, uidMap);
-          return memberObj ? (memberObj.name || extractUidString(m)) : extractUidString(m);
+          return memberObj
+            ? formatObjectReferenceName(memberObj, extractUidString(m))
+            : extractUidString(m);
         }).filter(Boolean);
       } else if (includeObj) {
-        members = [includeObj.name || extractUidString(includeRef)];
+        members = [formatObjectReferenceName(includeObj, extractUidString(includeRef))];
       }
 
       const exceptName = exceptRef
@@ -722,8 +734,8 @@ function parseAddressGroups(uidMap, warnings) {
         : 'unknown';
 
       addressGroups.push({
-        name: sanitizeJunosName(name),
-        members: members.map(m => sanitizeJunosName(m)),
+        name,
+        members,
         description: obj.comments || `Exclusion group (excludes: ${exceptName})`,
         tags: obj.tags ? resolveTagNames(obj.tags, uidMap) : [],
       });
@@ -764,7 +776,7 @@ function parseServiceObjects(uidMap, warnings) {
 
     if (type === 'service-tcp') {
       serviceObjects.push({
-        name: sanitizeJunosName(name),
+        name,
         protocol: 'tcp',
         port_range: normalizePort(obj.port),
         source_port: normalizePort(obj['source-port']) || '',
@@ -772,7 +784,7 @@ function parseServiceObjects(uidMap, warnings) {
       });
     } else if (type === 'service-udp') {
       serviceObjects.push({
-        name: sanitizeJunosName(name),
+        name,
         protocol: 'udp',
         port_range: normalizePort(obj.port),
         source_port: normalizePort(obj['source-port']) || '',
@@ -787,7 +799,7 @@ function parseServiceObjects(uidMap, warnings) {
         portRange = icmpCode ? `${icmpType}/${icmpCode}` : icmpType;
       }
       serviceObjects.push({
-        name: sanitizeJunosName(name),
+        name,
         protocol: proto,
         port_range: portRange,
         source_port: '',
@@ -798,7 +810,7 @@ function parseServiceObjects(uidMap, warnings) {
       const ipProto = obj['ip-protocol'] !== undefined ? String(obj['ip-protocol']) : '';
       const protoName = mapIpProtocolNumber(ipProto);
       serviceObjects.push({
-        name: sanitizeJunosName(name),
+        name,
         protocol: protoName,
         port_range: 'any',
         source_port: '',
@@ -852,13 +864,13 @@ function parseServiceGroups(uidMap, warnings) {
       const members = (obj.members || []).map(m => {
         const memberObj = resolveUid(m, uidMap);
         if (memberObj) {
-          return sanitizeJunosName(memberObj.name || extractUidString(m));
+          return memberObj.name || extractUidString(m);
         }
-        return sanitizeJunosName(extractUidString(m));
+        return extractUidString(m);
       }).filter(Boolean);
 
       serviceGroups.push({
-        name: sanitizeJunosName(name),
+        name,
         members,
         description: obj.comments || '',
       });
@@ -1057,15 +1069,15 @@ function buildPolicyFromRule(rule, uidMap, ruleIndex, layerName, warnings) {
   const dstZones = [];
 
   return {
-    name: sanitizeJunosName(ruleName),
+    name: ruleName,
     src_zones: srcZones,
     dst_zones: dstZones,
-    src_addresses: srcAddrs.map(a => a === 'any' ? 'any' : sanitizeJunosName(a)),
-    dst_addresses: dstAddrs.map(a => a === 'any' ? 'any' : sanitizeJunosName(a)),
+    src_addresses: srcAddrs,
+    dst_addresses: dstAddrs,
     negate_source: negateSource,
     negate_destination: negateDest,
     applications: [],  // Check Point doesn't have app-id in traditional rules
-    services: serviceNames.map(s => s === 'any' ? 'any' : sanitizeJunosName(s)),
+    services: serviceNames,
     action,
     log_start: false,
     log_end: logEnabled,
@@ -1209,17 +1221,17 @@ function buildNatRule(rule, uidMap, ruleIndex, warnings) {
   }
 
   return {
-    name: sanitizeJunosName(rule.name || `NAT-${ruleIndex}`),
+    name: rule.name || `NAT-${ruleIndex}`,
     type,
     src_zones: [],
     dst_zones: [],
-    src_addresses: [origSrc === 'any' ? 'any' : sanitizeJunosName(origSrc)],
-    dst_addresses: [origDst === 'any' ? 'any' : sanitizeJunosName(origDst)],
+    src_addresses: [origSrc],
+    dst_addresses: [origDst],
     translated_src,
     translated_dst: (transDst && transDst !== 'any' && transDst !== origDst)
-      ? sanitizeJunosName(transDst) : null,
+      ? transDst : null,
     translated_port: (transSvc && transSvc !== 'any' && transSvc !== origSvc)
-      ? sanitizeJunosName(transSvc) : null,
+      ? transSvc : null,
     description: rule.comments || `NAT rule ${ruleIndex}`,
     _rule_index: ruleIndex,
   };
@@ -1273,7 +1285,7 @@ function deriveZones(configJson, uidMap, warnings) {
             } else if (topo.toLowerCase() === 'internal') {
               zoneName = 'trust';
             } else {
-              zoneName = sanitizeJunosName(topo || 'checkpoint');
+              zoneName = topo || 'checkpoint';
             }
           }
 
@@ -1318,7 +1330,7 @@ function deriveZones(configJson, uidMap, warnings) {
           } else if (zoneName.toLowerCase().includes('internal') || zoneName.toLowerCase().includes('inside')) {
             zoneName = 'trust';
           } else {
-            zoneName = sanitizeJunosName(zoneName || 'checkpoint');
+            zoneName = zoneName || 'checkpoint';
           }
         }
 
@@ -1349,7 +1361,7 @@ function deriveZones(configJson, uidMap, warnings) {
   // Convert zoneMap to zones array
   for (const [name, data] of Object.entries(zoneMap)) {
     zones.push({
-      name: sanitizeJunosName(name),
+      name,
       description: data.description || `Check Point topology zone: ${name}`,
       interfaces: data.interfaces,
     });

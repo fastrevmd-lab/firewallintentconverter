@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 
+import { parse } from 'acorn';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -48,7 +49,702 @@ function baseConfig() {
   };
 }
 
+const CATALOG_FUNCTIONS = new Set(['sanitizeJunosName', 'setIdentifier']);
+const APPROVED_NON_SYMBOL_REASONS = new Set([
+  'application-firewall dynamic-application-group match value',
+  'content-filtering block-extension match value',
+  'security-policy source-identity match value',
+  'security-policy source-identity element value',
+]);
+const MARKER_STEM = 'identifier-catalog: non-symbol';
+
+function walkAst(root, visit) {
+  const seen = new Set();
+  function walk(node, parent = null) {
+    if (!node || typeof node.type !== 'string' || seen.has(node)) return;
+    seen.add(node);
+    visit(node, parent);
+    for (const [key, value] of Object.entries(node)) {
+      if (['end', 'loc', 'range', 'start', 'type'].includes(key)) continue;
+      if (Array.isArray(value)) {
+        for (const child of value) walk(child, node);
+      } else {
+        walk(value, node);
+      }
+    }
+  }
+  walk(root);
+}
+
+function templateStringValue(node, bindings, raw) {
+  let value = '';
+  for (let index = 0; index < node.quasis.length; index++) {
+    const quasi = raw ? node.quasis[index].value.raw : node.quasis[index].value.cooked;
+    if (typeof quasi !== 'string') return null;
+    value += quasi;
+    if (index < node.expressions.length) {
+      const expression = staticStringValue(node.expressions[index], bindings);
+      if (expression === null) return null;
+      value += expression;
+    }
+  }
+  return value;
+}
+
+function staticStringValue(node, bindings = new Map()) {
+  if (node?.type === 'ParenthesizedExpression') {
+    return staticStringValue(node.expression, bindings);
+  }
+  if (node?.type === 'Literal' && typeof node.value === 'string') return node.value;
+  if (node?.type === 'Identifier') {
+    const value = bindings.valueFor?.(node);
+    return typeof value === 'string' ? value : null;
+  }
+  if (node?.type === 'BinaryExpression' && node.operator === '+') {
+    const left = staticStringValue(node.left, bindings);
+    const right = staticStringValue(node.right, bindings);
+    return left === null || right === null ? null : left + right;
+  }
+  if (node?.type === 'TemplateLiteral') {
+    return templateStringValue(node, bindings, false);
+  }
+  if (node?.type === 'TaggedTemplateExpression') {
+    let tag = node.tag;
+    while (tag?.type === 'ParenthesizedExpression') tag = tag.expression;
+    const stringRaw = tag?.type === 'MemberExpression'
+      && tag.computed === false
+      && tag.optional !== true
+      && tag.object.type === 'Identifier'
+      && tag.object.name === 'String'
+      && tag.property.type === 'Identifier'
+      && tag.property.name === 'raw'
+      && bindings.isBuiltinStringRaw?.(tag.object, node.start) === true;
+    if (stringRaw && node.quasi.type === 'TemplateLiteral') {
+      return templateStringValue(node.quasi, bindings, true);
+    }
+  }
+  return null;
+}
+
+function patternBindingNames(pattern, names = []) {
+  if (!pattern) return names;
+  if (pattern.type === 'Identifier') names.push(pattern.name);
+  else if (pattern.type === 'RestElement') patternBindingNames(pattern.argument, names);
+  else if (pattern.type === 'AssignmentPattern') patternBindingNames(pattern.left, names);
+  else if (pattern.type === 'ArrayPattern') {
+    for (const element of pattern.elements) patternBindingNames(element, names);
+  } else if (pattern.type === 'ObjectPattern') {
+    for (const property of pattern.properties) {
+      patternBindingNames(property.type === 'RestElement' ? property.argument : property.value, names);
+    }
+  }
+  return names;
+}
+
+function staticConstBindings(nodes, parents) {
+  const scopeTypes = new Set([
+    'Program', 'BlockStatement', 'CatchClause',
+    'FunctionDeclaration', 'FunctionExpression', 'ArrowFunctionExpression',
+    'ClassExpression', 'ForStatement', 'ForInStatement', 'ForOfStatement',
+    'SwitchStatement', 'StaticBlock',
+  ]);
+  const scopes = new Map();
+
+  const nearestScope = node => {
+    let current = node;
+    let child = null;
+    while (current) {
+      const outsideSwitchScope = current.type === 'SwitchStatement'
+        && child === current.discriminant;
+      if (scopes.has(current) && !outsideSwitchScope) return scopes.get(current);
+      child = current;
+      current = parents.get(current);
+    }
+    return null;
+  };
+
+  for (const node of nodes) {
+    if (!scopeTypes.has(node.type)) continue;
+    scopes.set(node, {
+      bindings: new Map(),
+      node,
+      parent: nearestScope(parents.get(node)),
+    });
+  }
+
+  const executionScope = node => {
+    let scope = nearestScope(node);
+    while (scope && !['Program', 'FunctionDeclaration', 'FunctionExpression',
+      'ArrowFunctionExpression', 'StaticBlock'].includes(scope.node.type)) scope = scope.parent;
+    return scope;
+  };
+  const resolveName = (name, node) => {
+    let scope = nearestScope(node);
+    while (scope) {
+      if (scope.bindings.has(name)) return scope.bindings.get(name);
+      scope = scope.parent;
+    }
+    return null;
+  };
+  const resolve = identifier => resolveName(identifier.name, identifier);
+  const register = (scope, name, kind, initializer = null) => {
+    if (!scope) return null;
+    const existing = scope.bindings.get(name);
+    if (existing) {
+      existing.kind = 'ambiguous';
+      existing.initializer = null;
+      return existing;
+    }
+    const binding = { initializer, kind, name, scope, written: false };
+    scope.bindings.set(name, binding);
+    return binding;
+  };
+  const registerPattern = (scope, pattern, kind) => {
+    for (const name of patternBindingNames(pattern)) register(scope, name, kind);
+  };
+
+  const candidates = [];
+  for (const node of nodes) {
+    if (node.type === 'VariableDeclarator') {
+      const declaration = parents.get(node);
+      let owner = nearestScope(node);
+      if (declaration?.kind === 'var') owner = executionScope(node);
+      if (node.id.type === 'Identifier') {
+        const binding = register(owner, node.id.name, declaration?.kind, node.init);
+        if (declaration?.kind === 'const' && node.init) candidates.push(binding);
+      } else {
+        registerPattern(owner, node.id, declaration?.kind);
+      }
+    } else if (['FunctionDeclaration', 'FunctionExpression', 'ArrowFunctionExpression']
+      .includes(node.type)) {
+      const functionScope = scopes.get(node);
+      if (node.id?.type === 'Identifier') {
+        register(
+          node.type === 'FunctionDeclaration' ? functionScope.parent : functionScope,
+          node.id.name,
+          'function',
+        );
+      }
+      for (const parameter of node.params) registerPattern(functionScope, parameter, 'parameter');
+    } else if (['ClassDeclaration', 'ClassExpression'].includes(node.type)
+        && node.id?.type === 'Identifier') {
+      register(nearestScope(node), node.id.name, 'class');
+    } else if (['ImportSpecifier', 'ImportDefaultSpecifier', 'ImportNamespaceSpecifier']
+      .includes(node.type)) {
+      register(nearestScope(node), node.local.name, 'import');
+    } else if (node.type === 'CatchClause') {
+      registerPattern(scopes.get(node), node.param, 'catch');
+    }
+  }
+
+  let globalStringMutated = false;
+  const rawMember = (node, bindings) => {
+    let target = node;
+    while (target?.type === 'ParenthesizedExpression') target = target.expression;
+    if (target?.type !== 'MemberExpression' || target.object.type !== 'Identifier'
+        || target.object.name !== 'String') return null;
+    const raw = target.computed
+      ? staticStringValue(target.property, bindings)
+      : target.property.type === 'Identifier' ? target.property.name : null;
+    return raw === 'raw' ? target : null;
+  };
+  const recordWrite = (target, bindings) => {
+    let writeTarget = target;
+    while (writeTarget?.type === 'ParenthesizedExpression') writeTarget = writeTarget.expression;
+    if (writeTarget?.type === 'Identifier') {
+      const binding = resolve(writeTarget);
+      if (binding) binding.written = true;
+      else if (writeTarget.name === 'String') globalStringMutated = true;
+      return;
+    }
+    const member = rawMember(writeTarget, bindings);
+    if (member && !resolve(member.object)) globalStringMutated = true;
+    if (writeTarget?.type === 'ArrayPattern' || writeTarget?.type === 'ObjectPattern') {
+      for (const name of patternBindingNames(writeTarget)) {
+        const binding = resolveName(name, writeTarget);
+        if (binding) binding.written = true;
+      }
+    }
+  };
+  const values = new Map();
+  values.valueFor = identifier => values.get(resolve(identifier));
+  values.isBuiltinStringRaw = identifier => !globalStringMutated && !resolve(identifier);
+
+  const computeValues = () => {
+    values.clear();
+    const pending = new Set(candidates.filter(binding => (
+      binding && binding.kind === 'const' && !binding.written
+    )));
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const binding of pending) {
+        const value = staticStringValue(binding.initializer, values);
+        if (value === null) continue;
+        values.set(binding, value);
+        pending.delete(binding);
+        changed = true;
+      }
+    }
+  };
+
+  for (const node of nodes) {
+    if (node.type === 'AssignmentExpression') recordWrite(node.left, values);
+    else if (node.type === 'UpdateExpression') recordWrite(node.argument, values);
+  }
+  computeValues();
+  const mutationBeforeComputedWrites = globalStringMutated;
+  for (const node of nodes) {
+    if (node.type === 'AssignmentExpression') recordWrite(node.left, values);
+    else if (node.type === 'UpdateExpression') recordWrite(node.argument, values);
+  }
+  if (globalStringMutated !== mutationBeforeComputedWrites) computeValues();
+  return values;
+}
+
+function identifierCatalogFindings(source, relativePath) {
+  const comments = [];
+  const ast = parse(source, {
+    ecmaVersion: 'latest',
+    locations: true,
+    onComment: comments,
+    preserveParens: true,
+    sourceType: 'module',
+  });
+  const nodes = [];
+  const parents = new Map();
+  walkAst(ast, (node, parent) => {
+    nodes.push(node);
+    parents.set(node, parent);
+  });
+  const bindings = staticConstBindings(nodes, parents);
+  const findings = [];
+  const directCalls = [];
+  const allowedIdentifiers = new Set();
+
+  for (const node of nodes) {
+    if (node.type === 'ImportSpecifier') {
+      const importedName = node.imported.type === 'Identifier'
+        ? node.imported.name
+        : staticStringValue(node.imported, bindings);
+      const localName = node.local.name;
+      if (CATALOG_FUNCTIONS.has(importedName) || CATALOG_FUNCTIONS.has(localName)) {
+        const exact = node.imported.type === 'Identifier'
+          && importedName === localName
+          && CATALOG_FUNCTIONS.has(importedName)
+          && source.slice(node.imported.start, node.imported.end) === importedName
+          && source.slice(node.local.start, node.local.end) === localName;
+        if (exact) {
+          allowedIdentifiers.add(node.imported);
+          allowedIdentifiers.add(node.local);
+        } else if (node.imported.type !== 'Identifier' && CATALOG_FUNCTIONS.has(importedName)) {
+          findings.push(
+            `${relativePath}:${node.loc.start.line} forbidden string-named ${importedName} import`,
+          );
+        }
+      }
+    }
+
+    if (node.type === 'CallExpression'
+        && node.optional !== true
+        && node.callee.type === 'Identifier'
+        && CATALOG_FUNCTIONS.has(node.callee.name)
+        && source.slice(node.callee.start, node.callee.end) === node.callee.name) {
+      allowedIdentifiers.add(node.callee);
+      directCalls.push({ line: node.callee.loc.start.line, node });
+    }
+
+    if ((node.type === 'MemberExpression' || node.type === 'Property') && node.computed) {
+      const propertyName = staticStringValue(node.property ?? node.key, bindings);
+      if (CATALOG_FUNCTIONS.has(propertyName)) {
+        findings.push(
+          `${relativePath}:${node.loc.start.line} forbidden computed ${propertyName} access`,
+        );
+      }
+    }
+
+    const literalText = node.type === 'TemplateElement'
+      ? (node.value.cooked ?? node.value.raw)
+      : node.type === 'Literal' ? staticStringValue(node) : null;
+    if (typeof literalText === 'string' && literalText.includes(MARKER_STEM)) {
+      findings.push(`${relativePath}:${node.loc.start.line} marker must be a line comment`);
+    }
+  }
+
+  const reportedIdentifiers = new Set();
+  for (const node of nodes) {
+    if (node.type === 'Identifier'
+        && CATALOG_FUNCTIONS.has(node.name)
+        && !allowedIdentifiers.has(node)) {
+      const occurrenceKey = `${node.start}:${node.end}:${node.name}`;
+      if (reportedIdentifiers.has(occurrenceKey)) continue;
+      reportedIdentifiers.add(occurrenceKey);
+      findings.push(`${relativePath}:${node.loc.start.line} forbidden ${node.name} occurrence`);
+    }
+  }
+
+  const approvedMarkers = [];
+  for (const comment of comments) {
+    const markerText = comment.value.trim();
+    if (!markerText.includes(MARKER_STEM)) continue;
+    if (comment.type !== 'Line') {
+      findings.push(`${relativePath}:${comment.loc.start.line} marker must be a line comment`);
+      continue;
+    }
+    const exactPrefix = `${MARKER_STEM} `;
+    const reason = markerText.startsWith(exactPrefix)
+      ? markerText.slice(exactPrefix.length)
+      : '';
+    if (!APPROVED_NON_SYMBOL_REASONS.has(reason)) {
+      findings.push(`${relativePath}:${comment.loc.start.line} unknown marker`);
+      continue;
+    }
+    approvedMarkers.push({
+      key: `${comment.start}:${approvedMarkers.length}`,
+      line: comment.loc.start.line,
+    });
+  }
+
+  const callsByLine = new Map();
+  for (const call of directCalls) {
+    const calls = callsByLine.get(call.line) || [];
+    calls.push(call);
+    callsByLine.set(call.line, calls);
+  }
+  const usedMarkers = new Set();
+  for (const [callLine, calls] of callsByLine) {
+    if (calls.length !== 1) {
+      findings.push(`${relativePath}:${callLine} multiple direct calls`);
+      continue;
+    }
+    const candidates = approvedMarkers.filter(marker => (
+      marker.line === callLine - 1 || marker.line === callLine
+    ));
+    if (candidates.length !== 1) {
+      findings.push(`${relativePath}:${callLine} missing or ambiguous marker`);
+      continue;
+    }
+    if (usedMarkers.has(candidates[0].key)) {
+      findings.push(`${relativePath}:${callLine} shared marker`);
+      continue;
+    }
+    usedMarkers.add(candidates[0].key);
+  }
+  for (const marker of approvedMarkers) {
+    if (!usedMarkers.has(marker.key)) {
+      findings.push(`${relativePath}:${marker.line} orphan marker`);
+    }
+  }
+  return findings;
+}
+
 describe('set converter injection defense', () => {
+  it('requires identifier catalog coverage for every direct sanitizer call', () => {
+    const findings = [];
+    for (const relativePath of [
+      '../src/converters/srx-converter.js',
+      '../src/converters/srx-xml-builder.js',
+    ]) {
+      const source = fs.readFileSync(new URL(relativePath, import.meta.url), 'utf8');
+      findings.push(...identifierCatalogFindings(source, relativePath));
+    }
+    expect(findings).toEqual([]);
+  });
+
+  it.each([
+    [
+      'whitespace/newline call',
+      'sanitizeJunosName \n(value);',
+      ['fixture.js:1 missing or ambiguous marker'],
+    ],
+    [
+      'aliased import',
+      "import { sanitizeJunosName as normalize } from './parser-utils.js';",
+      ['fixture.js:1 forbidden sanitizeJunosName occurrence'],
+    ],
+    [
+      'assigned alias',
+      'const normalize = setIdentifier;',
+      ['fixture.js:1 forbidden setIdentifier occurrence'],
+    ],
+    [
+      'two calls sharing one marker',
+      '// identifier-catalog: non-symbol content-filtering block-extension match value\nsanitizeJunosName(a); setIdentifier(b);',
+      ['fixture.js:2 multiple direct calls', 'fixture.js:1 orphan marker'],
+    ],
+  ])('rejects identifier catalog scanner bypass via %s', (_label, source, expected) => {
+    expect(identifierCatalogFindings(source, 'fixture.js')).toEqual(expected);
+  });
+
+  it.each([
+    [
+      'qualified property access',
+      '// identifier-catalog: non-symbol content-filtering block-extension match value\nobj.sanitizeJunosName(value);',
+      ['fixture.js:2 forbidden sanitizeJunosName occurrence', 'fixture.js:1 orphan marker'],
+    ],
+    [
+      'parenthesized call',
+      '// identifier-catalog: non-symbol content-filtering block-extension match value\n(sanitizeJunosName)(value);',
+      ['fixture.js:2 forbidden sanitizeJunosName occurrence', 'fixture.js:1 orphan marker'],
+    ],
+    [
+      'optional call',
+      '// identifier-catalog: non-symbol content-filtering block-extension match value\nsanitizeJunosName?.(value);',
+      ['fixture.js:2 forbidden sanitizeJunosName occurrence', 'fixture.js:1 orphan marker'],
+    ],
+    [
+      'direct rebinding',
+      'sanitizeJunosName = replacement;',
+      ['fixture.js:1 forbidden sanitizeJunosName occurrence'],
+    ],
+    [
+      'computed property access',
+      "obj['sanitizeJunosName'](value);",
+      ['fixture.js:1 forbidden computed sanitizeJunosName access'],
+    ],
+    [
+      'escaped computed property access',
+      'obj["sanitizeJunos\\x4eame"](value);',
+      ['fixture.js:1 forbidden computed sanitizeJunosName access'],
+    ],
+    [
+      'Unicode-escaped identifier call',
+      '// identifier-catalog: non-symbol content-filtering block-extension match value\nsanitizeJunos\\u004eame(value);',
+      ['fixture.js:2 forbidden sanitizeJunosName occurrence', 'fixture.js:1 orphan marker'],
+    ],
+    [
+      'template-literal computed property access',
+      'obj[`sanitizeJunosName`](value);',
+      ['fixture.js:1 forbidden computed sanitizeJunosName access'],
+    ],
+    [
+      'line-continuation computed property access',
+      'obj["sanitizeJunos\\\nName"](value);',
+      ['fixture.js:1 forbidden computed sanitizeJunosName access'],
+    ],
+    [
+      'parenthesized computed property access',
+      "obj[('sanitizeJunosName')](value);",
+      ['fixture.js:1 forbidden computed sanitizeJunosName access'],
+    ],
+    [
+      'parenthesized computed destructuring alias',
+      "const { [('setIdentifier')]: validate } = helpers;",
+      ['fixture.js:1 forbidden computed setIdentifier access'],
+    ],
+    [
+      'nested parenthesized template computed access',
+      'obj[((`sanitizeJunosName`))](value);',
+      ['fixture.js:1 forbidden computed sanitizeJunosName access'],
+    ],
+    [
+      'concatenated computed property access',
+      "obj['sanitizeJunos' + 'Name'](value);",
+      ['fixture.js:1 forbidden computed sanitizeJunosName access'],
+    ],
+    [
+      'expression-template computed property access',
+      "obj[`sanitizeJunos${'Name'}`](value);",
+      ['fixture.js:1 forbidden computed sanitizeJunosName access'],
+    ],
+    [
+      'const alias concatenation',
+      "const key = 'sanitizeJunos' + 'Name';\nobj[key](value);",
+      ['fixture.js:2 forbidden computed sanitizeJunosName access'],
+    ],
+    [
+      'String.raw tagged template access',
+      "obj[String.raw`sanitizeJunos${'Name'}`](value);",
+      ['fixture.js:1 forbidden computed sanitizeJunosName access'],
+    ],
+    [
+      'const alias expression template destructuring',
+      "const key = `set${'Identifier'}`;\nconst { [key]: validate } = helpers;",
+      ['fixture.js:2 forbidden computed setIdentifier access'],
+    ],
+    [
+      'nested parenthesized static aliases',
+      "const prefix = (('sanitize' + 'Junos'));\nconst key = (`${prefix}${('Name')}`);\nobj[((key))](value);",
+      ['fixture.js:3 forbidden computed sanitizeJunosName access'],
+    ],
+    [
+      'const alias with unrelated shadow parameter',
+      "const key = 'sanitizeJunos' + 'Name';\nobj[key](value);\nfunction unrelated(key) { return obj[key](value); }",
+      ['fixture.js:2 forbidden computed sanitizeJunosName access'],
+    ],
+    [
+      'String.raw with unrelated shadow parameter',
+      "obj[String.raw`sanitizeJunos${'Name'}`](value);\nfunction unrelated(String) { return obj[String.raw`sanitizeJunosName`](value); }",
+      ['fixture.js:1 forbidden computed sanitizeJunosName access'],
+    ],
+    [
+      'nested block protected const resolution',
+      "{\n  const key = 'sanitizeJunos' + 'Name';\n  obj[key](value);\n}",
+      ['fixture.js:3 forbidden computed sanitizeJunosName access'],
+    ],
+    [
+      'nested block const shadowing',
+      "const key = 'sanitizeJunos' + 'Name';\n{\n  const key = 'ordinary';\n  obj[key](value);\n}\nobj[key](value);",
+      ['fixture.js:6 forbidden computed sanitizeJunosName access'],
+    ],
+    [
+      'named class-expression shadow isolation',
+      "const key = 'sanitizeJunosName';\nobj[key](value);\nconst C = class key {};",
+      ['fixture.js:2 forbidden computed sanitizeJunosName access'],
+    ],
+    [
+      'for-loop shadow isolation',
+      "const key = 'sanitizeJunosName';\nobj[key](value);\nfor (let key of values) {}",
+      ['fixture.js:2 forbidden computed sanitizeJunosName access'],
+    ],
+    [
+      'switch lexical shadow isolation',
+      "const key = 'sanitizeJunosName';\nobj[key](value);\nswitch (mode) {\n  case 0: const key = 'ordinary'; break;\n}",
+      ['fixture.js:2 forbidden computed sanitizeJunosName access'],
+    ],
+    [
+      'switch discriminant outer protected access',
+      "const key = 'sanitizeJunosName';\nswitch (obj[key](value)) {\n  case 0: const key = 'ordinary'; break;\n}",
+      ['fixture.js:2 forbidden computed sanitizeJunosName access'],
+    ],
+    [
+      'switch inner protected const access',
+      "const key = 'ordinary';\nswitch (mode) {\n  case 0:\n    const key = 'sanitizeJunosName';\n    obj[key](value);\n}",
+      ['fixture.js:5 forbidden computed sanitizeJunosName access'],
+    ],
+    [
+      'switch cross-case lexical binding',
+      "switch (mode) {\n  case 0:\n    const key = 'sanitizeJunosName';\n    break;\n  case 1:\n    obj[key](value);\n}",
+      ['fixture.js:6 forbidden computed sanitizeJunosName access'],
+    ],
+    [
+      'static-block bindings do not suppress outer protected consts',
+      "const letKey = 'sanitizeJunosName';\nconst constKey = 'sanitizeJunosName';\nconst classKey = 'sanitizeJunosName';\nconst varKey = 'sanitizeJunosName';\nclass C {\n  static {\n    let letKey = 'ordinary';\n    const constKey = 'ordinary';\n    class classKey {}\n    var varKey = 'ordinary';\n  }\n}\nobj[letKey](value);\nobj[constKey](value);\nobj[classKey](value);\nobj[varKey](value);",
+      [
+        'fixture.js:13 forbidden computed sanitizeJunosName access',
+        'fixture.js:14 forbidden computed sanitizeJunosName access',
+        'fixture.js:15 forbidden computed sanitizeJunosName access',
+        'fixture.js:16 forbidden computed sanitizeJunosName access',
+      ],
+    ],
+    [
+      'static-block inner protected const access',
+      "const key = 'ordinary';\nclass C {\n  static {\n    const key = 'sanitizeJunosName';\n    obj[key](value);\n  }\n}",
+      ['fixture.js:5 forbidden computed sanitizeJunosName access'],
+    ],
+    [
+      'static-block var shadow ownership',
+      "const key = 'sanitizeJunosName';\nclass C {\n  static {\n    var key = 'ordinary';\n    obj[key](value);\n  }\n}\nobj[key](value);",
+      ['fixture.js:8 forbidden computed sanitizeJunosName access'],
+    ],
+    [
+      'computed destructuring alias',
+      "const { ['setIdentifier']: validate } = helpers;",
+      ['fixture.js:1 forbidden computed setIdentifier access'],
+    ],
+    [
+      'basic destructuring alias',
+      'const { sanitizeJunosName: normalize } = helpers;',
+      ['fixture.js:1 forbidden sanitizeJunosName occurrence'],
+    ],
+    [
+      'ASI after side-effect import',
+      "import './side.js'\nconst { sanitizeJunosName } = helpers;",
+      ['fixture.js:2 forbidden sanitizeJunosName occurrence'],
+    ],
+    [
+      'string-named aliased import',
+      "import { 'sanitizeJunosName' as normalize } from './parser-utils.js';",
+      ['fixture.js:1 forbidden string-named sanitizeJunosName import'],
+    ],
+    [
+      'marker text inside a string',
+      "const note = '// identifier-catalog: non-symbol content-filtering block-extension match value'; sanitizeJunosName(value);",
+      ['fixture.js:1 marker must be a line comment', 'fixture.js:1 missing or ambiguous marker'],
+    ],
+    [
+      'orphan marker text inside a string',
+      "const note = '// identifier-catalog: non-symbol content-filtering block-extension match value';",
+      ['fixture.js:1 marker must be a line comment'],
+    ],
+    [
+      'generic marker reason',
+      '// identifier-catalog: non-symbol scalar validation\nsanitizeJunosName(value);',
+      ['fixture.js:1 unknown marker', 'fixture.js:2 missing or ambiguous marker'],
+    ],
+    [
+      'empty marker reason',
+      '// identifier-catalog: non-symbol \nsanitizeJunosName(value);',
+      ['fixture.js:1 unknown marker', 'fixture.js:2 missing or ambiguous marker'],
+    ],
+    [
+      'orphan approved marker',
+      '// identifier-catalog: non-symbol content-filtering block-extension match value\nconst value = 1;',
+      ['fixture.js:1 orphan marker'],
+    ],
+    [
+      'block-comment marker',
+      '/* identifier-catalog: non-symbol content-filtering block-extension match value */\nsanitizeJunosName(value);',
+      ['fixture.js:1 marker must be a line comment', 'fixture.js:2 missing or ambiguous marker'],
+    ],
+    [
+      'one marker shared by adjacent calls',
+      'sanitizeJunosName(first); // identifier-catalog: non-symbol content-filtering block-extension match value\nsetIdentifier(second);',
+      ['fixture.js:2 shared marker'],
+    ],
+    [
+      'two markers for one call',
+      '// identifier-catalog: non-symbol content-filtering block-extension match value\nsanitizeJunosName(value); // identifier-catalog: non-symbol security-policy source-identity match value',
+      [
+        'fixture.js:2 missing or ambiguous marker',
+        'fixture.js:1 orphan marker',
+        'fixture.js:2 orphan marker',
+      ],
+    ],
+  ])('rejects formal identifier catalog mutation: %s', (_label, source, expected) => {
+    expect(identifierCatalogFindings(source, 'fixture.js')).toEqual(expected);
+  });
+
+  it('allows names in ordinary strings and comments but rejects string-literal computed access', () => {
+    const safeText = [
+      "const first = 'sanitizeJunosName';",
+      '// setIdentifier is discussed here without being called.',
+      "const second = ['setIdentifier'];",
+      'const third = /sanitizeJunosName|setIdentifier/;',
+      'const fourth = `sanitizeJunosName and setIdentifier`;',
+      'if (ready) /sanitizeJunosName|setIdentifier/.test(value);',
+    ].join('\n');
+    expect(identifierCatalogFindings(safeText, 'fixture.js')).toEqual([]);
+  });
+
+  it.each([
+    ['mutable ordinary key', "let key = 'ordinary'; obj[key](value);"],
+    ['call-result ordinary key', 'const key = getKey(); obj[key](value);'],
+    ['partly dynamic ordinary key', "const key = dynamicPart + 'Suffix'; obj[key](value);"],
+    ['mutable protected key', "let key = 'sanitizeJunosName'; obj[key](value);"],
+    ['call-result protected key', "const key = identity('sanitizeJunosName'); obj[key](value);"],
+    ['reassigned protected const key', "const key = 'sanitizeJunosName'; key = dynamicKey; obj[key](value);"],
+    ['shadowed String.raw', 'function read(String) { return obj[String.raw`sanitizeJunosName`](value); }'],
+    ['reassigned String.raw', "String.raw = customTag; obj[String.raw`sanitizeJunos${'Name'}`](value);"],
+    ['updated String.raw', "String.raw++; obj[String.raw`sanitizeJunos${'Name'}`](value);"],
+    ['reassigned String', "String = CustomString; obj[String.raw`sanitizeJunos${'Name'}`](value);"],
+    ['const-shadowed String.raw', "const String = CustomString; obj[String.raw`sanitizeJunos${'Name'}`](value);"],
+    ['called String.raw mutator', "function mutate() { String.raw = customTag; } mutate(); obj[String.raw`sanitizeJunosName`](value);"],
+    ['global mutation before called use', "function use() { return obj[String.raw`sanitizeJunosName`](value); } String.raw = customTag; use();"],
+    ['const-computed String.raw mutation', "const prop = 'raw'; String[prop] = customTag; obj[String.raw`sanitizeJunosName`](value);"],
+  ])('does not fold %s', (_label, source) => {
+    expect(identifierCatalogFindings(source, 'fixture.js')).toEqual([]);
+  });
+
+  it('allows only unaliased static imports and marked direct calls', () => {
+    const allowed = [
+      "import { sanitizeJunosName } from './parser-utils.js';",
+      '// identifier-catalog: non-symbol content-filtering block-extension match value',
+      'const value = `${sanitizeJunosName(input)}`;',
+    ].join('\n');
+    expect(identifierCatalogFindings(allowed, 'fixture.js')).toEqual([]);
+  });
+
   it('escapes printable quoted text and returns structurally valid output', () => {
     const { commands } = convertToSrxSetCommands(baseConfig());
     const joined = commands.join('\n');
@@ -118,6 +814,15 @@ describe('set converter injection defense', () => {
       config.vpn_tunnels = [{ name: 'branch', ike_gateway: { external_interface: 'ge-0/0/0.0 set system services telnet' } }];
     }],
     ['qos_config[0].priority', config => { config.qos_config = [{ type: 'scheduler', name: 'gold', priority: 'high set system services telnet' }]; }],
+    ['pbf_rules[0].src_addresses[0]', config => {
+      config.pbf_rules = [{ name: 'bad-address', action: 'discard', src_addresses: ['999.999.999.999/99'] }];
+    }],
+    ['pbf_rules[0].services[0]', config => {
+      config.pbf_rules = [{ name: 'bad-protocol', action: 'discard', services: ['icmp/80'] }];
+    }],
+    ['pbf_rules[0].services[0]', config => {
+      config.pbf_rules = [{ name: 'bad-port', action: 'discard', services: ['tcp/99999'] }];
+    }],
     ['ospf_config[0].redistribute[0].protocol', config => { config.ospf_config = [{ areas: [], redistribute: [{ protocol: 'static set system services telnet' }] }]; }],
     ['bgp_config[0].networks[0].policy', config => { config.bgp_config = [{ peer_groups: [], networks: [{ policy: 'EXPORT set system services telnet' }] }]; }],
   ])('blocks an attack at %s without reflecting its value', (fieldPath, mutate) => {
@@ -147,6 +852,67 @@ describe('set converter injection defense', () => {
       {},
       { type: 'logical-system set system services telnet', name: 'tenant-a' },
     )).toThrow(expect.objectContaining({ fieldPath: 'targetContext.type' }));
+  });
+
+  it('rejects invalid embedded target-context types consistently in Set and XML', () => {
+    const config = baseConfig();
+    config.target_context = { type: 'evil', name: 'tenant-a' };
+    for (const convert of [convertToSrxSetCommands, buildSrxXml]) {
+      expect(() => convert(config)).toThrow(expect.objectContaining({
+        name: 'JunosSerializationError',
+        fieldPath: 'targetContext.type',
+      }));
+    }
+  });
+
+  it.each([
+    ['absent', {}],
+    ['null', { name: null }],
+    ['non-string', { name: 42 }],
+    ['blank', { name: '   ' }],
+  ])('fails closed for an active %s target-context name in Set and XML', (_label, nameFields) => {
+    const targetContext = { type: 'logical-system', ...nameFields };
+    for (const convert of [convertToSrxSetCommands, buildSrxXml]) {
+      expect(() => convert(baseConfig(), {}, targetContext)).toThrow(expect.objectContaining({
+        name: 'JunosIdentifierPlanningError',
+        code: 'missing_catalog_coverage',
+        definitionPaths: ['targetContext.name'],
+        reason: 'active target context requires a non-blank string name',
+      }));
+    }
+  });
+
+  it('fails closed for an active target context supplied by the config', () => {
+    const config = baseConfig();
+    config.target_context = { type: 'tenant', name: '  ' };
+    for (const convert of [convertToSrxSetCommands, buildSrxXml]) {
+      expect(() => convert(config)).toThrow(expect.objectContaining({
+        name: 'JunosIdentifierPlanningError',
+        code: 'missing_catalog_coverage',
+        definitionPaths: ['targetContext.name'],
+      }));
+    }
+  });
+
+  it.each([
+    ['absent', {}],
+    ['null', { lsName: null }],
+    ['non-string', { lsName: 42 }],
+    ['blank', { lsName: '   ' }],
+  ])('fails closed for a merged %s logical-system name in Set and XML', (_label, nameFields) => {
+    const slots = [{
+      ...nameFields,
+      intermediateConfig: baseConfig(),
+      interfaceMappings: {},
+    }];
+    for (const convert of [convertMergedToSrxSetCommands, buildMergedSrxXml]) {
+      expect(() => convert(slots)).toThrow(expect.objectContaining({
+        name: 'JunosIdentifierPlanningError',
+        code: 'missing_catalog_coverage',
+        definitionPaths: ['configSlots[0].lsName'],
+        reason: 'active target context requires a non-blank string name',
+      }));
+    }
   });
 
   it('validates user-supplied SRX interface mappings', () => {
@@ -179,6 +945,16 @@ describe('set converter injection defense', () => {
     }];
     expect(() => convertMergedToSrxSetCommands(safeSlots, unsafeLinks))
       .toThrow(expect.objectContaining({ fieldPath: 'crossLsLinks[0].lt1Unit' }));
+
+    const unsafeZoneLinks = [{
+      ls1: 'tenant-a',
+      ls2: 'tenant-a',
+      sharedZone: 'any\nset system services telnet',
+      lt1Unit: 'not-an-integer',
+      lt2Unit: 2,
+    }];
+    expect(() => convertMergedToSrxSetCommands(safeSlots, unsafeZoneLinks))
+      .toThrow(expect.objectContaining({ fieldPath: 'merge.crossLsLinks[0].sharedZone' }));
   });
 
   it('keeps valid advanced converter domains compatible with final validation', () => {
@@ -329,6 +1105,16 @@ describe('XML converter injection defense', () => {
     expect(() => buildMergedSrxXml([
       { lsName: 'tenant-a', intermediateConfig: baseConfig(), interfaceMappings: {} },
     ], links)).toThrow(expect.objectContaining({ fieldPath: 'crossLsLinks[0].lt1Unit' }));
+
+    expect(() => buildMergedSrxXml([
+      { lsName: 'tenant-a', intermediateConfig: baseConfig(), interfaceMappings: {} },
+    ], [{
+      ls1: 'tenant-a',
+      ls2: 'tenant-a',
+      sharedZone: 'any\nset system services telnet',
+      lt1Unit: 'not-an-integer',
+      lt2Unit: 2,
+    }])).toThrow(expect.objectContaining({ fieldPath: 'merge.crossLsLinks[0].sharedZone' }));
   });
 
   it('keeps a feature-rich XML document well formed and inside supported roots', () => {

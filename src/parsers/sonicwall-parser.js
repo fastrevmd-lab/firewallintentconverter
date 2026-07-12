@@ -23,7 +23,7 @@
  *   - Route policies (static routes)
  */
 
-import { createWarning, mapAppToJunos, sanitizeJunosName, safeJsonParse, detectIpVersion } from './parser-utils.js';
+import { createWarning, mapAppToJunos, safeJsonParse, detectIpVersion } from './parser-utils.js';
 
 
 // ---------------------------------------------------------------------------
@@ -615,7 +615,7 @@ function parseJsonAccessRules(config, warnings) {
     if (groupRef && groupRef !== 'all' && groupRef !== 'All') srcUsers.push(`group:${typeof groupRef === 'string' ? groupRef : String(groupRef)}`);
 
     const policy = {
-      name: sanitizeJunosName(ruleName),
+      name: ruleName,
       src_zones: fromZone ? [fromZone] : [],
       dst_zones: toZone ? [toZone] : [],
       src_addresses: srcAddrs,
@@ -737,7 +737,7 @@ function parseJsonNatPolicies(config, warnings) {
     }
 
     natRules.push({
-      name: sanitizeJunosName(name),
+      name,
       type: natType,
       src_zones: srcZone ? [srcZone] : [],
       dst_zones: dstZone ? [dstZone] : [],

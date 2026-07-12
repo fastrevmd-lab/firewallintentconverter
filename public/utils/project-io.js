@@ -8,7 +8,8 @@ import {
   normalizeConversionOutput,
 } from '../../src/conversion/conversion-output.js';
 
-const CURRENT_VERSION = 3;
+const CURRENT_VERSION = 4;
+const RECONVERT_WARNING = 'Generated output from this older project was cleared because it has no validated identifier mapping. Reconvert before export or device push.';
 
 const VENDOR_NAMES = {
   panos: 'PAN-OS', srx: 'SRX', fortigate: 'FortiGate',
@@ -114,7 +115,9 @@ export function validateProjectFile(json) {
 
   let project;
   try {
-    project = migrateProject(json);
+    const migration = migrateProject(json);
+    project = migration.project;
+    if (migration.staleOutputCleared) warnings.push(RECONVERT_WARNING);
   } catch (error) {
     if (error instanceof ConversionOutputError) {
       return { valid: false, error: `Project conversion output is invalid: ${error.reason}` };
@@ -131,6 +134,7 @@ export function validateProjectFile(json) {
  */
 function migrateProject(project) {
   const p = { ...project, state: { ...project.state } };
+  let staleOutputCleared = false;
 
   // Fill missing keys with defaults
   for (const key of STATE_KEYS) {
@@ -148,7 +152,16 @@ function migrateProject(project) {
     p.fpic_version = 2;
   }
 
-  if (p.state.srxOutput !== null) {
+  if (p.state.srxOutput !== null
+      && p.fpic_version < 4
+      && (!p.state.srxOutput
+        || typeof p.state.srxOutput !== 'object'
+        || !Object.hasOwn(p.state.srxOutput, 'identifierMappings'))) {
+    p.state.srxOutput = null;
+    p.state.convertWarnings = [];
+    p.state.conversionSummary = null;
+    staleOutputCleared = true;
+  } else if (p.state.srxOutput !== null) {
     p.state.srxOutput = normalizeConversionOutput(
       p.state.srxOutput,
       p.state.outputFormat,
@@ -160,7 +173,11 @@ function migrateProject(project) {
     p.fpic_version = 3;
   }
 
-  return p;
+  if (p.fpic_version < 4) {
+    p.fpic_version = 4;
+  }
+
+  return { project: p, staleOutputCleared };
 }
 
 /**

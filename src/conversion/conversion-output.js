@@ -2,17 +2,20 @@ import {
   validateSetOutput,
   validateXmlOutput,
 } from '../security/junos-output-validation.js';
+import { validateIdentifierMappings } from '../security/junos-identifiers.js';
 
 /**
  * @typedef {Object} SetConversionOutput
  * @property {'set'} format
  * @property {string[]} commands
+ * @property {Object} identifierMappings
  */
 
 /**
  * @typedef {Object} XmlConversionOutput
  * @property {'xml'} format
  * @property {string} xml
+ * @property {Object} identifierMappings
  */
 
 /** @typedef {SetConversionOutput | XmlConversionOutput} ConversionOutput */
@@ -35,6 +38,17 @@ function validateArtifact(output) {
     else validateXmlOutput(output.xml);
   } catch {
     fail(`Generated ${output.format === 'set' ? 'Set Commands' : 'XML'} output failed Junos artifact validation.`);
+  }
+}
+
+function validatedIdentifierMappings(rawOutput) {
+  if (!Object.hasOwn(rawOutput, 'identifierMappings')) {
+    fail('Conversion output requires an identifier mapping.');
+  }
+  try {
+    return validateIdentifierMappings(rawOutput.identifierMappings);
+  } catch {
+    fail('Conversion output identifier mapping is invalid.');
   }
 }
 
@@ -75,7 +89,12 @@ export function normalizeConversionOutput(rawOutput, formatHint) {
     if (rawOutput.commands.some(command => typeof command !== 'string' || !command.trim())) {
       fail('Set Commands output must contain only non-empty strings.');
     }
-    const output = { ...rawOutput, format: 'set', commands: [...rawOutput.commands] };
+    const output = {
+      ...rawOutput,
+      format: 'set',
+      commands: [...rawOutput.commands],
+      identifierMappings: validatedIdentifierMappings(rawOutput),
+    };
     validateArtifact(output);
     return output;
   }
@@ -84,7 +103,12 @@ export function normalizeConversionOutput(rawOutput, formatHint) {
   if (typeof rawOutput.xml !== 'string' || !rawOutput.xml.trim()) {
     fail('XML output must contain non-empty XML text.');
   }
-  const output = { ...rawOutput, format: 'xml', xml: rawOutput.xml };
+  const output = {
+    ...rawOutput,
+    format: 'xml',
+    xml: rawOutput.xml,
+    identifierMappings: validatedIdentifierMappings(rawOutput),
+  };
   validateArtifact(output);
   return output;
 }

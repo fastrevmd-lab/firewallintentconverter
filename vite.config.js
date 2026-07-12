@@ -1,5 +1,15 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import { configDefaults } from 'vitest/config';
+
+const SELF_RUNNING_NODE_TESTS = [
+  'tests/app-mappings.test.js',
+  'tests/bridge-client.test.js',
+  'tests/day2-ops.test.js',
+  'tests/llm-translate.test.js',
+  'tests/srx-converter-apps.test.js',
+  'tests/validation-engine.test.js',
+];
 
 /** Inject strict Content-Security-Policy meta tag in production builds only. */
 function cspPlugin() {
@@ -28,6 +38,9 @@ function cspPlugin() {
 
 export default defineConfig({
   plugins: [react(), cspPlugin()],
+  test: {
+    exclude: [...configDefaults.exclude, ...SELF_RUNNING_NODE_TESTS],
+  },
   // Rename Vite's static asset directory so 'public/' can hold React source
   publicDir: 'static',
   // Relative base so the built SPA works from file:// URLs or subdirectories

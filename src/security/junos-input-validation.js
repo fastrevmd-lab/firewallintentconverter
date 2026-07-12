@@ -482,12 +482,75 @@ function validateQos(entries, basePath) {
   });
 }
 
-function validatePbf(rules, basePath) {
+function pbfAddressFamily(value, fieldPath) {
+  const address = setAddressOrPrefix(value, fieldPath);
+  return address.includes(':') ? 6 : 4;
+}
+
+function validatePbfService(value, fieldPath) {
+  const text = assertSafeScalar(value, fieldPath);
+  if (text === 'any' || text === 'application-default') return;
+  if (!text.includes('/')) return;
+
+  const pieces = text.split('/');
+  if (pieces.length !== 2) {
+    throw new JunosSerializationError(fieldPath, 'service', 'expected protocol/port or protocol/port-range');
+  }
+  setEnum(pieces[0].toLowerCase(), ['tcp', 'udp'], fieldPath);
+  validatePortExpression(pieces[1], fieldPath);
+}
+
+function validatePbf(rules, basePath, addressObjects = []) {
   if (!Array.isArray(rules)) return;
+  const addressesByName = new Map();
+  for (const object of addressObjects || []) {
+    const located = object && typeof object === 'object' ? addressValue(object) : null;
+    if (object?.name && located && ['host', 'subnet', 'network', 'ip-netmask', 'ip-prefix'].includes(object.type)) {
+      addressesByName.set(object.name, located.value);
+    }
+  }
+
   rules.forEach((rule, index) => {
     const rulePath = `${basePath}[${index}]`;
     if (rule.action) setEnum(rule.action, ['forward', 'discard', 'no-pbf', 'forward-to-vsys'], `${rulePath}.action`);
-    if (rule.next_hop_value) setAddressOrPrefix(rule.next_hop_value, `${rulePath}.next_hop_value`);
+    const nextHopPath = `${rulePath}.next_hop_value`;
+    let nextHopFamily;
+    if (rule.next_hop_value) {
+      const validatedFamily = pbfAddressFamily(rule.next_hop_value, nextHopPath);
+      if (rule.action === 'forward') nextHopFamily = validatedFamily;
+    }
+
+    let family;
+    for (const field of ['src_addresses', 'dst_addresses']) {
+      (rule[field] || []).forEach((value, addressIndex) => {
+        if (value === 'any') return;
+        const fieldPath = `${rulePath}.${field}[${addressIndex}]`;
+        const resolved = addressesByName.get(value);
+        const looksLikeAddress = typeof value === 'string' && (
+          value.includes(':') || value.includes('/') || /^\d+(?:\.\d+){3}$/.test(value)
+        );
+        if (resolved === undefined && !looksLikeAddress) return;
+        const currentFamily = pbfAddressFamily(resolved ?? value, fieldPath);
+        if (family !== undefined && family !== currentFamily) {
+          throw new JunosSerializationError(
+            fieldPath,
+            'address-family',
+            'mixed IPv4 and IPv6 address matches are not supported',
+          );
+        }
+        family = currentFamily;
+      });
+    }
+    if (family !== undefined && nextHopFamily !== undefined && family !== nextHopFamily) {
+      throw new JunosSerializationError(
+        nextHopPath,
+        'address-family',
+        'PBF matches and next hop must use the same address family',
+      );
+    }
+    (rule.services || []).forEach((service, serviceIndex) => (
+      validatePbfService(service, `${rulePath}.services[${serviceIndex}]`)
+    ));
   });
 }
 
@@ -641,7 +704,7 @@ export function validateJunosInput(config, rootPath = 'config') {
   validateSnmp(config.snmp_config, joinPath(prefix, 'snmp_config'));
   validateDhcp(config.dhcp_config, joinPath(prefix, 'dhcp_config'));
   validateQos(config.qos_config, joinPath(prefix, 'qos_config'));
-  validatePbf(config.pbf_rules, joinPath(prefix, 'pbf_rules'));
+  validatePbf(config.pbf_rules, joinPath(prefix, 'pbf_rules'), config.address_objects);
   validateL2(config, prefix);
   validateSecurityProfileDefinitions(
     config.security_profile_definitions,

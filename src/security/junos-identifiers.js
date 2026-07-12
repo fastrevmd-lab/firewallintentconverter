@@ -334,6 +334,7 @@ export function createJunosIdentifierPlan({ definitions, references } = {}, opti
   const definitionPaths = new Set();
   const generatedKeys = new Set();
   const semanticDefinitions = new Map();
+  const generatedStableDefinitions = new Map();
   const definitionIndex = new Map();
   const symbols = [];
 
@@ -349,7 +350,7 @@ export function createJunosIdentifierPlan({ definitions, references } = {}, opti
     else definitionPaths.add(item.definitionPath);
 
     const duplicateKey = semanticKey(
-      item.context, item.namespace, item.kind, item.stableKey,
+      item.context, item.namespace, item.kind, item.sourceName,
     );
     const duplicate = semanticDefinitions.get(duplicateKey);
     if (duplicate) {
@@ -358,10 +359,30 @@ export function createJunosIdentifierPlan({ definitions, references } = {}, opti
         namespace: item.namespace,
         sourceName: item.sourceName,
         definitionPaths: sortedUnique([duplicate.auditablePath, item.auditablePath]),
-        reason: 'multiple definitions have the same stable identity',
+        reason: 'multiple definitions have the same exact source identity',
       });
     }
     semanticDefinitions.set(duplicateKey, item);
+
+    if (item.generated) {
+      const stableDuplicateKey = semanticKey(
+        item.context, item.namespace, item.kind, item.stableKey,
+      );
+      const stableDuplicate = generatedStableDefinitions.get(stableDuplicateKey);
+      if (stableDuplicate) {
+        fail('duplicate_definition', {
+          context: item.context,
+          namespace: item.namespace,
+          sourceName: item.sourceName,
+          definitionPaths: sortedUnique([
+            stableDuplicate.auditablePath,
+            item.auditablePath,
+          ]),
+          reason: 'multiple generated definitions have the same stable identity',
+        });
+      }
+      generatedStableDefinitions.set(stableDuplicateKey, item);
+    }
 
     const sourceKey = semanticKey(item.context, item.namespace, item.sourceName);
     const sourceMatches = definitionIndex.get(sourceKey) || [];

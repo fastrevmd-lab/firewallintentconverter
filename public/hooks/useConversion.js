@@ -20,9 +20,18 @@ import {
   replaceSetCommands,
 } from '../../src/conversion/conversion-output.js';
 
+const SAFE_STRUCTURAL_PATH = /^[A-Za-z_][A-Za-z0-9_]*(?:\[\d+\]|\.[A-Za-z_][A-Za-z0-9_]*)*$/u;
+
+function safeJunosPlanningPath(candidate) {
+  if (typeof candidate !== 'string') return undefined;
+  const structuralPath = candidate.split('#', 1)[0];
+  return SAFE_STRUCTURAL_PATH.test(structuralPath) ? structuralPath : undefined;
+}
+
 export function formatJunosSerializationError(error, prefix) {
   if (error instanceof JunosIdentifierPlanningError) {
-    const location = error.referencePaths?.[0] || error.definitionPaths?.[0];
+    const location = safeJunosPlanningPath(error.referencePaths?.[0])
+      || safeJunosPlanningPath(error.definitionPaths?.[0]);
     return `${prefix} blocked: ${error.code}${location ? ` at ${location}` : ''} — ${error.reason}`;
   }
   if (error instanceof JunosSerializationError) {

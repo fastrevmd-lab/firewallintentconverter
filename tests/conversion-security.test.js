@@ -128,6 +128,34 @@ describe('conversion fail-closed behavior', () => {
     expect(message).not.toContain('security-policy');
   });
 
+  it('strips source-derived synthetic suffixes from definition paths', () => {
+    const error = new JunosIdentifierPlanningError('allocation_failed', {
+      definitionPaths: [
+        'security_policies[0].name#zone-pair:CUSTOMER-SECRET-SRC->CUSTOMER-SECRET-DST',
+      ],
+      reason: 'could not allocate a unique Junos identifier',
+    });
+
+    expect(formatJunosSerializationError(error, 'Conversion')).toBe(
+      'Conversion blocked: allocation_failed at security_policies[0].name — could not allocate a unique Junos identifier',
+    );
+  });
+
+  it('omits non-structural reference paths with source-derived keys', () => {
+    const unsafePath = 'address_objects.CUSTOMER-SECRET:DMZ.name';
+    const error = new JunosIdentifierPlanningError('ambiguous_reference', {
+      referencePaths: [unsafePath],
+      reason: 'reference matches more than one definition',
+    });
+    const message = formatJunosSerializationError(error, 'Conversion');
+
+    expect(message).toBe(
+      'Conversion blocked: ambiguous_reference — reference matches more than one definition',
+    );
+    expect(message).not.toContain(unsafePath);
+    expect(message).not.toContain('CUSTOMER-SECRET');
+  });
+
   it('blocks unsafe data through both public engine paths', async () => {
     await expect(convertConfig(
       { metadata: { siteName: 'x\nset system services telnet' } },

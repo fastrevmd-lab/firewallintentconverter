@@ -5,14 +5,165 @@
  * and restoring all application state from a loaded project.
  * Uses ConfigContext, UIContext, ConversionContext, MergeContext, and UndoContext.
  */
-import { useCallback } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { useConfigContext } from '../contexts/ConfigContext.jsx';
 import { useUIContext } from '../contexts/UIContext.jsx';
 import { useConversionContext } from '../contexts/ConversionContext.jsx';
 import { useMergeContext } from '../contexts/MergeContext.jsx';
 import { useUndoContext } from '../contexts/UndoContext.jsx';
-import { buildProjectPayload, validateProjectFile, generateProjectName } from '../utils/project-io.js';
-import { safeJsonParse } from '../utils/safe-json.js';
+import { generateProjectName } from '../utils/project-io.js';
+import {
+  MAX_PROJECT_FILE_BYTES,
+  PROJECT_SECURITY_MODES,
+  ProjectSecurityError,
+  classifyProjectSecurity,
+  inspectProjectImport,
+  openProjectImport,
+  serializeProjectExport,
+} from '../utils/project-security.js';
+
+const PROJECT_ERROR_MESSAGES = Object.freeze({
+  unsafe_state: 'Project state contains an unsupported value.',
+  invalid_restoration: 'Project restoration data is invalid.',
+  unsanitized_source: 'Sanitized export requires every populated source to be sanitized.',
+  original_leak: 'Sanitized export was blocked because an original value remains.',
+  secret_leak: 'Sanitized export was blocked because secret-bearing content remains.',
+  oversized_project: 'Project data exceeds the supported size limit.',
+  invalid_confirmation: 'Project export confirmation is invalid.',
+  unsupported_mode: 'Project security mode is not supported.',
+  unsupported_version: 'Project file version is not supported.',
+  invalid_project: 'Project file is invalid.',
+  invalid_passphrase: 'Passphrase must contain at least 16 characters.',
+  unsupported_crypto: 'Encrypted project export is unavailable in this browser.',
+  invalid_envelope: 'Encrypted project file is invalid.',
+  decryption_failed: 'Encrypted project could not be opened.',
+});
+
+const RETRYABLE_IMPORT_CODES = new Set([
+  'invalid_confirmation',
+  'invalid_passphrase',
+  'decryption_failed',
+]);
+
+export function assembleProjectStateBag(configState, conversionState, uiState, mergeState) {
+  return {
+    configText: configState.configText,
+    intermediateConfig: configState.intermediateConfig,
+    sourceVendor: configState.sourceVendor,
+    sourceModel: configState.sourceModel,
+    targetModel: configState.targetModel,
+    srxLicense: configState.srxLicense,
+    portProfile: configState.portProfile,
+    siteName: configState.siteName,
+    siteGroup: configState.siteGroup,
+    interfaceMappings: configState.interfaceMappings,
+    isSanitized: configState.isSanitized,
+    sanitizationTable: configState.sanitizationTable,
+    parseWarnings: configState.parseWarnings,
+    parseStats: configState.parseStats,
+    warningStatuses: configState.warningStatuses,
+    srxTranslatedPolicies: configState.srxTranslatedPolicies,
+    ruleGroups: configState.ruleGroups,
+    sectionAcceptance: configState.sectionAcceptance,
+    greenfieldMode: configState.greenfieldMode,
+    greenfieldTemplate: configState.greenfieldTemplate,
+    srxOutput: conversionState.srxOutput,
+    convertWarnings: conversionState.convertWarnings,
+    conversionSummary: conversionState.conversionSummary,
+    outputFormat: conversionState.outputFormat,
+    targetContext: conversionState.targetContext,
+    editTab: uiState.editTab,
+    platformView: uiState.platformView,
+    bottomTab: uiState.bottomTab,
+    mergeMode: mergeState.mergeMode,
+    configSlots: mergeState.configSlots,
+    activeSlotIndex: mergeState.activeSlotIndex,
+    crossLsLinks: mergeState.crossLsLinks,
+  };
+}
+
+function ownDataValue(value, key) {
+  try {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (!descriptor || descriptor.get || descriptor.set || !descriptor.enumerable) return undefined;
+    return descriptor.value;
+  } catch {
+    return undefined;
+  }
+}
+
+export function downloadValidatedProject(result, environment = globalThis) {
+  const serialized = result && typeof result === 'object'
+    ? ownDataValue(result, 'serialized')
+    : undefined;
+  const filename = result && typeof result === 'object'
+    ? ownDataValue(result, 'filename')
+    : undefined;
+  const security = result && typeof result === 'object'
+    ? ownDataValue(result, 'security')
+    : undefined;
+  const BlobImpl = environment?.Blob;
+  const urlApi = environment?.URL;
+  const documentApi = environment?.document;
+
+  if (typeof serialized !== 'string'
+      || serialized.length > MAX_PROJECT_FILE_BYTES
+      || typeof filename !== 'string'
+      || filename.length === 0
+      || !/^[A-Za-z0-9._-]+\.fpic(?:\.enc)?\.json$/.test(filename)
+      || !security
+      || typeof security !== 'object'
+      || !Object.values(PROJECT_SECURITY_MODES).includes(ownDataValue(security, 'mode'))) {
+    throw new ProjectSecurityError('invalid_project');
+  }
+
+  const inspected = inspectProjectImport(serialized);
+  if (inspected.kind !== ownDataValue(security, 'mode')
+      || typeof BlobImpl !== 'function'
+      || typeof urlApi?.createObjectURL !== 'function'
+      || typeof urlApi?.revokeObjectURL !== 'function'
+      || typeof documentApi?.createElement !== 'function') {
+    throw new ProjectSecurityError('invalid_project');
+  }
+
+  const blob = new BlobImpl([serialized], { type: 'application/json' });
+  const url = urlApi.createObjectURL(blob);
+  try {
+    const anchor = documentApi.createElement('a');
+    if (!anchor || typeof anchor.click !== 'function') {
+      throw new ProjectSecurityError('invalid_project');
+    }
+    anchor.href = url;
+    anchor.download = filename;
+    anchor.click();
+  } finally {
+    urlApi.revokeObjectURL(url);
+  }
+}
+
+export function projectSecurityMessage(error) {
+  const code = error && typeof error === 'object'
+    ? ownDataValue(error, 'code')
+    : undefined;
+  return typeof code === 'string' && Object.hasOwn(PROJECT_ERROR_MESSAGES, code)
+    ? PROJECT_ERROR_MESSAGES[code]
+    : 'Project security operation failed.';
+}
+
+function safeImportDescriptor(inspected) {
+  const security = inspected.security;
+  return {
+    kind: inspected.kind,
+    requiresConfirmation: inspected.requiresConfirmation === true,
+    security: {
+      schema: security?.schema,
+      mode: inspected.kind,
+      containsOriginals: security?.containsOriginals === true,
+      reversible: security?.reversible === true,
+      restorationAvailable: security?.restorationAvailable === true,
+    },
+  };
+}
 
 export default function useProject() {
   const { state: configState, dispatch: configDispatch } = useConfigContext();
@@ -20,101 +171,226 @@ export default function useProject() {
   const { state: conversionState, dispatch: conversionDispatch } = useConversionContext();
   const { state: mergeState, dispatch: mergeDispatch } = useMergeContext();
   const { dispatch: undoDispatch } = useUndoContext();
+  const pendingImportRef = useRef(null);
+  const validatedImportRef = useRef(null);
+  const readGenerationRef = useRef(0);
 
   // -----------------------------------------------------------------------
-  // handleSaveProject — build payload from all state, download as .fpic.json
+  // Secure export — serialize through the project security boundary first.
   // -----------------------------------------------------------------------
-  const handleSaveProject = useCallback((projectName) => {
-    // Assemble the full state bag from all contexts
-    const stateBag = {
-      // ConfigContext
-      configText: configState.configText,
-      intermediateConfig: configState.intermediateConfig,
-      sourceVendor: configState.sourceVendor,
-      sourceModel: configState.sourceModel,
-      targetModel: configState.targetModel,
-      srxLicense: configState.srxLicense,
-      portProfile: configState.portProfile,
-      siteName: configState.siteName,
-      siteGroup: configState.siteGroup,
-      interfaceMappings: configState.interfaceMappings,
-      isSanitized: configState.isSanitized,
-      sanitizationTable: configState.sanitizationTable,
-      parseWarnings: configState.parseWarnings,
-      parseStats: configState.parseStats,
-      warningStatuses: configState.warningStatuses,
-      srxTranslatedPolicies: configState.srxTranslatedPolicies,
-      ruleGroups: configState.ruleGroups,
-      sectionAcceptance: configState.sectionAcceptance,
-      greenfieldMode: configState.greenfieldMode,
-      greenfieldTemplate: configState.greenfieldTemplate,
+  const getExportDescriptor = useCallback(() => classifyProjectSecurity(
+    assembleProjectStateBag(configState, conversionState, uiState, mergeState),
+  ), [configState, conversionState, uiState, mergeState]);
 
-      // ConversionContext
-      srxOutput: conversionState.srxOutput,
-      convertWarnings: conversionState.convertWarnings,
-      conversionSummary: conversionState.conversionSummary,
-      outputFormat: conversionState.outputFormat,
-      targetContext: conversionState.targetContext,
-
-      // UIContext
-      editTab: uiState.editTab,
-      platformView: uiState.platformView,
-      bottomTab: uiState.bottomTab,
-
-      // MergeContext
-      mergeMode: mergeState.mergeMode,
-      configSlots: mergeState.configSlots,
-      activeSlotIndex: mergeState.activeSlotIndex,
-      crossLsLinks: mergeState.crossLsLinks,
-    };
-
-    const payload = buildProjectPayload(stateBag, projectName);
-    const jsonStr = JSON.stringify(payload, null, 2);
-    const blob = new Blob([jsonStr], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${projectName}.fpic.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-
-    uiDispatch({ type: 'HIDE_MODAL', name: 'saveModal' });
+  const handleExportProject = useCallback(async request => {
+    uiDispatch({ type: 'SET_LOADING', isLoading: true, message: 'Preparing project export...' });
+    uiDispatch({ type: 'CLEAR_ERROR' });
+    try {
+      const stateBag = assembleProjectStateBag(
+        configState, conversionState, uiState, mergeState,
+      );
+      const result = await serializeProjectExport(stateBag, request.name, request);
+      downloadValidatedProject(result);
+      uiDispatch({ type: 'HIDE_MODAL', name: 'saveModal' });
+    } catch (error) {
+      uiDispatch({
+        type: 'SET_FIELD',
+        field: 'error',
+        value: projectSecurityMessage(error),
+      });
+    } finally {
+      uiDispatch({ type: 'SET_LOADING', isLoading: false });
+    }
   }, [configState, conversionState, uiState, mergeState, uiDispatch]);
 
   // -----------------------------------------------------------------------
-  // handleLoadProjectFile — read file, validate, show load confirm dialog
+  // Transactional import — inspect before prompting, open before application.
   // -----------------------------------------------------------------------
+  const clearPendingImport = useCallback(() => {
+    pendingImportRef.current = null;
+  }, []);
+
+  const invalidatePendingImport = useCallback(() => {
+    readGenerationRef.current += 1;
+    clearPendingImport();
+    validatedImportRef.current = null;
+  }, [clearPendingImport]);
+
+  useEffect(() => () => {
+    readGenerationRef.current += 1;
+    pendingImportRef.current = null;
+    validatedImportRef.current = null;
+  }, []);
+
   const handleLoadProjectFile = useCallback((e) => {
     const file = e.target.files?.[0];
     if (!file) return;
     e.target.value = '';
 
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      try {
-        const json = safeJsonParse(event.target.result);
-        const result = validateProjectFile(json);
-        if (!result.valid) {
-          uiDispatch({ type: 'SET_FIELD', field: 'error', value: `Load project failed: ${result.error}` });
-          return;
-        }
-        uiDispatch({
-          type: 'SHOW_MODAL',
-          name: 'loadConfirm',
-          value: { project: result.project, warnings: result.warnings },
-        });
-      } catch (err) {
-        uiDispatch({ type: 'SET_FIELD', field: 'error', value: `Load project failed: Invalid JSON file. ${err.message}` });
-      }
+    invalidatePendingImport();
+    const generation = readGenerationRef.current;
+    uiDispatch({ type: 'SET_LOADING', isLoading: false });
+    uiDispatch({ type: 'HIDE_MODAL', name: 'projectSecurityImport' });
+    uiDispatch({ type: 'HIDE_MODAL', name: 'loadConfirm' });
+    uiDispatch({ type: 'CLEAR_ERROR' });
+
+    if (file.size > MAX_PROJECT_FILE_BYTES) {
+      uiDispatch({
+        type: 'SET_FIELD',
+        field: 'error',
+        value: projectSecurityMessage({ code: 'oversized_project' }),
+      });
+      return;
+    }
+
+    const failImport = error => {
+      if (generation !== readGenerationRef.current) return;
+      invalidatePendingImport();
+      uiDispatch({
+        type: 'SET_FIELD',
+        field: 'error',
+        value: projectSecurityMessage(error),
+      });
     };
-    reader.readAsText(file);
-  }, [uiDispatch]);
+
+    try {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        if (generation !== readGenerationRef.current) return;
+        try {
+          const serialized = event.target.result;
+          const inspected = inspectProjectImport(serialized);
+          if (inspected.kind === PROJECT_SECURITY_MODES.SANITIZED
+              && inspected.requiresConfirmation !== true) {
+            clearPendingImport();
+            validatedImportRef.current = {
+              project: inspected.envelope,
+              security: inspected.security,
+            };
+            uiDispatch({
+              type: 'SHOW_MODAL',
+              name: 'loadConfirm',
+              value: {
+                project: inspected.envelope,
+                security: inspected.security,
+                warnings: inspected.warnings,
+              },
+            });
+          } else {
+            pendingImportRef.current = {
+              serialized,
+              kind: inspected.kind,
+              requiresConfirmation: inspected.requiresConfirmation === true,
+            };
+            uiDispatch({
+              type: 'SHOW_MODAL',
+              name: 'projectSecurityImport',
+              value: safeImportDescriptor(inspected),
+            });
+          }
+        } catch (error) {
+          failImport(error);
+        }
+      };
+      reader.onerror = () => {
+        failImport({ code: 'invalid_project' });
+      };
+      reader.readAsText(file);
+    } catch {
+      failImport({ code: 'invalid_project' });
+    }
+  }, [clearPendingImport, invalidatePendingImport, uiDispatch]);
+
+  const confirmPendingImport = useCallback(async ({ passphrase, acknowledgement } = {}) => {
+    const pending = pendingImportRef.current;
+    if (!pending) {
+      uiDispatch({
+        type: 'SET_FIELD',
+        field: 'error',
+        value: projectSecurityMessage({ code: 'invalid_project' }),
+      });
+      return;
+    }
+    if (pending.requiresConfirmation && acknowledgement !== true) {
+      uiDispatch({
+        type: 'SET_FIELD',
+        field: 'error',
+        value: projectSecurityMessage({ code: 'invalid_confirmation' }),
+      });
+      return;
+    }
+    const generation = readGenerationRef.current;
+
+    uiDispatch({ type: 'SET_LOADING', isLoading: true, message: 'Opening project...' });
+    uiDispatch({ type: 'CLEAR_ERROR' });
+    try {
+      const options = pending.kind === PROJECT_SECURITY_MODES.REVERSIBLE
+        ? { passphrase }
+        : {};
+      const opened = await openProjectImport(pending.serialized, options);
+      if (generation !== readGenerationRef.current) return;
+      uiDispatch({ type: 'SET_LOADING', isLoading: false });
+      invalidatePendingImport();
+      validatedImportRef.current = {
+        project: opened.project,
+        security: opened.security,
+      };
+      uiDispatch({ type: 'HIDE_MODAL', name: 'projectSecurityImport' });
+      uiDispatch({
+        type: 'SHOW_MODAL',
+        name: 'loadConfirm',
+        value: {
+          project: opened.project,
+          security: opened.security,
+          warnings: opened.warnings,
+        },
+      });
+    } catch (error) {
+      if (generation !== readGenerationRef.current) return;
+      const errorCode = error && typeof error === 'object'
+        ? ownDataValue(error, 'code')
+        : undefined;
+      if (!RETRYABLE_IMPORT_CODES.has(errorCode)) {
+        uiDispatch({ type: 'SET_LOADING', isLoading: false });
+        invalidatePendingImport();
+        uiDispatch({ type: 'HIDE_MODAL', name: 'projectSecurityImport' });
+      }
+      uiDispatch({
+        type: 'SET_FIELD',
+        field: 'error',
+        value: projectSecurityMessage(error),
+      });
+    } finally {
+      if (generation === readGenerationRef.current) {
+        uiDispatch({ type: 'SET_LOADING', isLoading: false });
+      }
+    }
+  }, [invalidatePendingImport, uiDispatch]);
+
+  const cancelPendingImport = useCallback(() => {
+    invalidatePendingImport();
+    uiDispatch({ type: 'SET_LOADING', isLoading: false });
+    uiDispatch({ type: 'HIDE_MODAL', name: 'projectSecurityImport' });
+  }, [invalidatePendingImport, uiDispatch]);
 
   // -----------------------------------------------------------------------
   // applyLoadedProject — restore all state from a project, dispatch
   //                       LOAD_PROJECT to all contexts
   // -----------------------------------------------------------------------
-  const applyLoadedProject = useCallback((project) => {
+  const applyLoadedProject = useCallback((project, security) => {
+    const validated = validatedImportRef.current;
+    if (!validated
+        || validated.project !== project
+        || security !== undefined && validated.security !== security) {
+      invalidatePendingImport();
+      uiDispatch({
+        type: 'SET_FIELD',
+        field: 'error',
+        value: projectSecurityMessage({ code: 'invalid_project' }),
+      });
+      return;
+    }
+    invalidatePendingImport();
     const s = project.state;
 
     // Dispatch LOAD_PROJECT to each context with its relevant state subset
@@ -178,18 +454,21 @@ export default function useProject() {
     uiDispatch({ type: 'HIDE_MODAL', name: 'interfaceMapper' });
     uiDispatch({ type: 'HIDE_MODAL', name: 'llmWarning' });
     uiDispatch({ type: 'HIDE_MODAL', name: 'loadConfirm' });
+    uiDispatch({ type: 'HIDE_MODAL', name: 'projectSecurityImport' });
     uiDispatch({
       type: 'SET_FIELD',
       field: 'llmWarningDismissed',
       value: s.isSanitized || s.greenfieldMode || false,
     });
-  }, [configDispatch, conversionDispatch, mergeDispatch, uiDispatch]);
+  }, [configDispatch, conversionDispatch, invalidatePendingImport, mergeDispatch, uiDispatch]);
 
   // -----------------------------------------------------------------------
   // resetWorkspace — clear all working-data contexts and transient UI state,
   //                  preserving localStorage-backed preferences
   // -----------------------------------------------------------------------
   const resetWorkspace = useCallback(() => {
+    invalidatePendingImport();
+
     // Working-data contexts -> back to their initial states
     configDispatch({ type: 'RESET' });
     conversionDispatch({ type: 'RESET' });
@@ -212,8 +491,10 @@ export default function useProject() {
     uiDispatch({ type: 'HIDE_MODAL', name: 'modelSelector' });
     uiDispatch({ type: 'HIDE_MODAL', name: 'interfaceMapper' });
     uiDispatch({ type: 'HIDE_MODAL', name: 'llmWarning' });
+    uiDispatch({ type: 'HIDE_MODAL', name: 'loadConfirm' });
+    uiDispatch({ type: 'HIDE_MODAL', name: 'projectSecurityImport' });
     uiDispatch({ type: 'HIDE_MODAL', name: 'resetConfirm' });
-  }, [configDispatch, conversionDispatch, mergeDispatch, undoDispatch, uiDispatch]);
+  }, [configDispatch, conversionDispatch, invalidatePendingImport, mergeDispatch, undoDispatch, uiDispatch]);
 
   // -----------------------------------------------------------------------
   // generateName — convenience wrapper around generateProjectName
@@ -230,9 +511,12 @@ export default function useProject() {
   // Return public API
   // -----------------------------------------------------------------------
   return {
-    handleSaveProject,
+    getExportDescriptor,
+    handleExportProject,
     handleLoadProjectFile,
+    confirmPendingImport,
     applyLoadedProject,
+    cancelPendingImport,
     resetWorkspace,
     generateName,
   };

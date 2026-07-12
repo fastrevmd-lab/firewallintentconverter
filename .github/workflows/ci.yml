@@ -43,6 +43,7 @@ jobs:
           tests/conversion-output.test.js
           tests/conversion-enforcement.test.js
           tests/project-io.test.js
+          tests/project-workflow.test.js
           tests/conversion-consumers.test.js
           tests/llm-settings.test.js
           tests/credential-security.test.js

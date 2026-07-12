@@ -22,7 +22,7 @@ import {
 
 export function formatJunosSerializationError(error, prefix) {
   if (error instanceof JunosIdentifierPlanningError) {
-    const location = error.referencePaths?.[0] || error.definitionPaths?.[0] || error.context;
+    const location = error.referencePaths?.[0] || error.definitionPaths?.[0];
     return `${prefix} blocked: ${error.code}${location ? ` at ${location}` : ''} — ${error.reason}`;
   }
   if (error instanceof JunosSerializationError) {

@@ -108,6 +108,26 @@ describe('conversion fail-closed behavior', () => {
     expect(message).not.toContain('set security');
   });
 
+  it('does not reflect context-only identifier planning metadata', () => {
+    const secretContext = 'logical-system:Secret Branch/zone:Private Servers';
+    const error = new JunosIdentifierPlanningError('allocation_failed', {
+      namespace: 'security-policy',
+      context: secretContext,
+      sourceName: 'Secret Allow Rule',
+      reason: 'could not allocate a unique Junos identifier',
+    });
+    const message = formatJunosSerializationError(error, 'Conversion');
+
+    expect(message).toContain('Conversion blocked');
+    expect(message).toContain('allocation_failed');
+    expect(message).toContain('could not allocate a unique Junos identifier');
+    expect(message).not.toContain(secretContext);
+    expect(message).not.toContain('Secret Branch');
+    expect(message).not.toContain('Private Servers');
+    expect(message).not.toContain('Secret Allow Rule');
+    expect(message).not.toContain('security-policy');
+  });
+
   it('blocks unsafe data through both public engine paths', async () => {
     await expect(convertConfig(
       { metadata: { siteName: 'x\nset system services telnet' } },

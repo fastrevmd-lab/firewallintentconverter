@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   CURRENT_VERSION,
@@ -9,6 +9,7 @@ import {
 } from '../public/utils/project-io.js';
 import {
   PROJECT_SECURITY_MODES,
+  classifyProjectSecurity,
   inspectProjectImport,
   openProjectImport,
   serializeProjectExport,
@@ -90,7 +91,7 @@ describe('version 5 project security formats', () => {
     expect(error.message).not.toContain('UNIQUE-PROJECT-NAME');
   });
 
-  it('writes an irreversible sanitized v5 file by default', async () => {
+  it('acceptance: default sanitized export contains no originals or restoration table', async () => {
     const state = {
       ...baseState,
       isSanitized: true,
@@ -112,7 +113,7 @@ describe('version 5 project security formats', () => {
     expect(result.serialized).not.toContain('sanitizationTable');
   });
 
-  it('requires exact confirmation for unsanitized v5 export', async () => {
+  it('acceptance: unsanitized export requires exact typed confirmation', async () => {
     await expect(serializeProjectExport(baseState, 'unsafe', {
       mode: 'unsanitized',
       confirmation: '',
@@ -167,12 +168,15 @@ describe('version 5 project security formats', () => {
   });
 
   it.each([
-    ['missing acknowledgement', { confirmationPassphrase: PASSPHRASE }],
-    ['missing confirmation', { acknowledgement: true }],
+    ['missing acknowledgement', { confirmationPassphrase: PASSPHRASE }, 'invalid_confirmation'],
+    ['missing confirmation', { acknowledgement: true }, 'invalid_confirmation'],
     ['mismatched confirmation', {
       acknowledgement: true, confirmationPassphrase: 'correct horse battery stapler',
-    }],
-  ])('enforces reversible confirmation at the boundary: %s', async (_label, options) => {
+    }, 'invalid_confirmation'],
+    ['missing encryption passphrase', {
+      acknowledgement: true, passphrase: undefined, confirmationPassphrase: undefined,
+    }, 'invalid_passphrase'],
+  ])('acceptance: reversible export requires passphrase confirmation and acknowledgement: %s', async (_label, options, code) => {
     const state = {
       ...baseState,
       isSanitized: true,
@@ -182,10 +186,10 @@ describe('version 5 project security formats', () => {
       mode: 'reversible-encrypted',
       passphrase: PASSPHRASE,
       ...options,
-    })).rejects.toMatchObject({ code: 'invalid_confirmation' });
+    })).rejects.toMatchObject({ code });
   });
 
-  it('round-trips an authenticated encrypted export without plaintext originals', async () => {
+  it('acceptance: reversible export is encrypted and authenticated', async () => {
     const exported = await serializeProjectExport({
       ...baseState,
       isSanitized: true,
@@ -214,7 +218,7 @@ describe('version 5 project security formats', () => {
     );
   });
 
-  it('imports sanitized files with no restoration capability', async () => {
+  it('acceptance: sanitized import cannot restore originals', async () => {
     const exported = await serializeProjectExport({
       ...baseState,
       isSanitized: true,
@@ -300,7 +304,7 @@ describe('version 5 project security formats', () => {
     }));
   });
 
-  it('classifies legacy v1-v4 sanitized projects with tables as secret-bearing', async () => {
+  it('acceptance: legacy plaintext restoration tables are warned as secret-bearing', async () => {
     for (const version of [1, 2, 3, 4]) {
       const serialized = JSON.stringify(project(version, null, 'set', {
         isSanitized: true,
@@ -339,6 +343,76 @@ describe('version 5 project security formats', () => {
     expect(() => inspectProjectImport(unsafe)).toThrow(expect.objectContaining({
       code: 'invalid_project',
     }));
+  });
+
+  it('acceptance: keeps passphrases and secrets out of descriptors, errors, storage, and logs', async () => {
+    const original = 'RETURNED-DESCRIPTOR-ORIGINAL';
+    const passphrase = 'RETURNED-DESCRIPTOR-PASSPHRASE';
+    const storage = {
+      getItem: vi.fn(),
+      removeItem: vi.fn(),
+      setItem: vi.fn(),
+    };
+    const storageDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+    const logSpies = ['debug', 'error', 'info', 'log', 'warn']
+      .map(method => vi.spyOn(console, method).mockImplementation(() => {}));
+    let logCallCounts;
+    let descriptor;
+    let inspected;
+    let exported;
+    let wrongPassphraseError;
+    try {
+      Object.defineProperty(globalThis, 'localStorage', {
+        configurable: true,
+        value: storage,
+      });
+      const state = {
+        ...baseState,
+        isSanitized: true,
+        sanitizationTable: restorationTable(original),
+      };
+      descriptor = classifyProjectSecurity(state);
+      exported = await serializeProjectExport(state, 'private', {
+        mode: PROJECT_SECURITY_MODES.REVERSIBLE,
+        passphrase,
+        confirmationPassphrase: passphrase,
+        acknowledgement: true,
+      });
+      inspected = inspectProjectImport(exported.serialized);
+      try {
+        await openProjectImport(exported.serialized, { passphrase: 'wrong passphrase value' });
+      } catch (error) {
+        wrongPassphraseError = error;
+      }
+    } finally {
+      logCallCounts = logSpies.map(spy => spy.mock.calls.length);
+      for (const spy of logSpies) spy.mockRestore();
+      if (storageDescriptor) {
+        Object.defineProperty(globalThis, 'localStorage', storageDescriptor);
+      } else {
+        delete globalThis.localStorage;
+      }
+    }
+
+    const observable = JSON.stringify({
+      descriptor,
+      inspected,
+      exported,
+      error: {
+        code: wrongPassphraseError?.code,
+        message: wrongPassphraseError?.message,
+      },
+    });
+    expect(observable).not.toContain(original);
+    expect(observable).not.toContain(passphrase);
+    expect(wrongPassphraseError).toMatchObject({
+      code: 'decryption_failed',
+      message: 'Encrypted project could not be opened.',
+    });
+    expect(storage.getItem).not.toHaveBeenCalled();
+    expect(storage.setItem).not.toHaveBeenCalled();
+    expect(storage.removeItem).not.toHaveBeenCalled();
+    expect(logCallCounts).toEqual([0, 0, 0, 0, 0]);
   });
 
   it('rejects unsupported versions with a fixed failure', () => {

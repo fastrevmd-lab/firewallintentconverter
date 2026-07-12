@@ -108,7 +108,30 @@ const CASES = [
   ['generic OpenSSH private key', '-----BEGIN OPENSSH PRIVATE KEY-----\nOPENSSH-PRIVATE-KEY-ORIGINAL\n-----END OPENSSH PRIVATE KEY-----', 'OPENSSH-PRIVATE-KEY-ORIGINAL', 'certificate'],
 ];
 
+const ACCEPTANCE_SECRET_MATRIX = [
+  ['PSK', 'set psksecret "ACCEPTANCE-PSK-ORIGINAL"', 'ACCEPTANCE-PSK-ORIGINAL'],
+  ['SNMP', 'snmp-server community ACCEPTANCE-SNMP-ORIGINAL', 'ACCEPTANCE-SNMP-ORIGINAL'],
+  ['password', 'set password "ACCEPTANCE-PASSWORD-ORIGINAL"', 'ACCEPTANCE-PASSWORD-ORIGINAL'],
+  ['hash', 'enable secret ACCEPTANCE-HASH-ORIGINAL', 'ACCEPTANCE-HASH-ORIGINAL'],
+  ['RADIUS', 'radius-server host 192.0.2.2 key ACCEPTANCE-RADIUS-ORIGINAL', 'ACCEPTANCE-RADIUS-ORIGINAL'],
+  ['TACACS', 'set tacacs-secret "ACCEPTANCE-TACACS-ORIGINAL"', 'ACCEPTANCE-TACACS-ORIGINAL'],
+  ['private key', '-----BEGIN PRIVATE KEY-----\nACCEPTANCE-PRIVATE-ORIGINAL\n-----END PRIVATE KEY-----', 'ACCEPTANCE-PRIVATE-ORIGINAL'],
+  ['certificate secret', 'Certificate Secret: ACCEPTANCE-CERTIFICATE-ORIGINAL', 'ACCEPTANCE-CERTIFICATE-ORIGINAL'],
+];
+
 describe('firewall secret registry', () => {
+  it.each(ACCEPTANCE_SECRET_MATRIX)(
+    'acceptance: redacts the %s secret matrix',
+    (_label, text, original) => {
+      const findings = findSecretsInText(text);
+      const redacted = redactConfigSecrets(text);
+      expect(findings).toHaveLength(1);
+      expect(redacted.text).not.toContain(original);
+      expect(redacted.replacements).toHaveLength(1);
+      expect(findSecretsInText(redacted.text)).toEqual([]);
+    },
+  );
+
   it.each(CASES)('detects and redacts %s', (_label, text, original, type) => {
     const findings = findSecretsInText(text);
     const redacted = redactConfigSecrets(text);

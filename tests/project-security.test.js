@@ -62,8 +62,71 @@ function expectSecurityError(operation, code, message) {
   expect(thrown).toMatchObject({ code, message });
 }
 
+function seededRandom(seed) {
+  let value = seed >>> 0;
+  return () => {
+    value = (value + 0x6D2B79F5) >>> 0;
+    let mixed = value;
+    mixed = Math.imul(mixed ^ (mixed >>> 15), mixed | 1);
+    mixed ^= mixed + Math.imul(mixed ^ (mixed >>> 7), mixed | 61);
+    return ((mixed ^ (mixed >>> 14)) >>> 0) / 0x1_0000_0000;
+  };
+}
+
+function nestedLeak(seed, marker) {
+  const random = seededRandom(seed);
+  let value = seed % 2 === 0
+    ? { credentials: { radius_secret: marker } }
+    : marker;
+  const depth = 1 + Math.floor(random() * 5);
+  for (let level = 0; level < depth; level += 1) {
+    value = random() < 0.5
+      ? [{ slot: level }, value]
+      : { [`level_${level}_${Math.floor(random() * 10_000)}`]: value };
+  }
+  return value;
+}
+
+function randomizedNestedState(seed, marker) {
+  const state = structuredClone(sanitizedState);
+  state.sanitizationTable = table(marker);
+  return { seed, state };
+}
+
+function injectFinalCandidateLeak(project, seed, marker) {
+  const leak = nestedLeak(seed, marker);
+  switch (seed % 6) {
+    case 0:
+      project.state.futureObjects = { [`seed_${seed}`]: leak };
+      break;
+    case 1:
+      project.state.parseWarnings = [{ code: `seed-${seed}`, details: leak }];
+      break;
+    case 2:
+      project.state.configSlots[0].future = { leak };
+      break;
+    case 3:
+      project.state.interfaceMappings = { [`mapping_${seed}`]: { history: leak } };
+      break;
+    case 4:
+      project.state.warningStatuses = { [`warning_${seed}`]: [leak] };
+      break;
+    default:
+      project.state.intermediateConfig.metadata[`seed_${seed}`] = leak;
+      break;
+  }
+}
+
+function exportSanitizedFixture(fixture, marker) {
+  const prepared = prepareSanitizedProjectState(fixture.state);
+  const project = projectFrom(prepared.state);
+  expect(JSON.stringify(project)).not.toContain('sanitizationTable');
+  injectFinalCandidateLeak(project, fixture.seed, marker);
+  return assertSanitizedProjectSafe(project, prepared.originals);
+}
+
 describe('project security boundary', () => {
-  it('classifies every populated source, including merge slots', () => {
+  it('acceptance: merge slots cannot bypass sanitized eligibility', () => {
     expect(classifyProjectSecurity(sanitizedState)).toMatchObject({
       mode: 'sanitized',
       sanitizedEligible: true,
@@ -112,6 +175,53 @@ describe('project security boundary', () => {
     mutate(project);
     expect(() => assertSanitizedProjectSafe(project, prepared.originals))
       .toThrow(ProjectSecurityError);
+  });
+
+  it('rejects originals and secret-bearing objects at deterministic nested paths for 200 seeds', () => {
+    for (let seed = 1; seed <= 200; seed += 1) {
+      const marker = 'ORIGINAL-MARKER-' + seed;
+      const state = randomizedNestedState(seed, marker);
+      expect(() => exportSanitizedFixture(state, marker), 'seed ' + seed)
+        .toThrow(ProjectSecurityError);
+    }
+  });
+
+  it.each([
+    ['quote', 'ORIGINAL-"QUOTE"-MARKER'],
+    ['forward slash', 'ORIGINAL/SLASH/MARKER'],
+    ['backslash', 'ORIGINAL\\SLASH\\MARKER'],
+    ['newline', 'ORIGINAL\nNEWLINE\nMARKER'],
+    ['tab', 'ORIGINAL\tTAB\tMARKER'],
+    ['Unicode', 'ORIGINAL-秘密-🔐-MARKER'],
+  ])('rejects raw and JSON-escaped %s originals', (_label, marker) => {
+    const prepared = prepareSanitizedProjectState({
+      ...structuredClone(sanitizedState),
+      sanitizationTable: table(marker),
+    });
+    const rawCandidate = projectFrom(prepared.state);
+    rawCandidate.state.intermediateConfig.metadata.raw = `prefix:${marker}:suffix`;
+    expect(() => assertSanitizedProjectSafe(rawCandidate, prepared.originals))
+      .toThrow(ProjectSecurityError);
+
+    const escapedCandidate = projectFrom(prepared.state);
+    escapedCandidate.state.intermediateConfig.metadata[`prefix:${marker}:suffix`] = 'safe';
+    const escaped = JSON.stringify(marker).slice(1, -1);
+    expect(JSON.stringify(escapedCandidate)).toContain(escaped);
+    expect(() => assertSanitizedProjectSafe(escapedCandidate, prepared.originals))
+      .toThrow(ProjectSecurityError);
+  });
+
+  it('acceptance: searches the complete file including outer metadata and nested objects', () => {
+    const marker = 'COMPLETE-FILE-ORIGINAL';
+    const prepared = prepareSanitizedProjectState({
+      ...structuredClone(sanitizedState),
+      sanitizationTable: table(marker),
+    });
+    const candidate = projectFrom(prepared.state, {
+      metadata: { audit: [{ nested: { original: marker } }] },
+    });
+    expect(() => assertSanitizedProjectSafe(candidate, prepared.originals))
+      .toThrow(expect.objectContaining({ code: 'original_leak' }));
   });
 
   it('exports the fixed modes and resource limits', () => {
@@ -556,7 +666,7 @@ describe('project security boundary', () => {
     expect(getterCalls).toBe(0);
   });
 
-  it('preserves the fixed decryption failure for a wrong import passphrase', async () => {
+  it('acceptance: wrong passphrases fail with the uniform decryption error', async () => {
     const passphrase = 'correct horse battery staple';
     const exported = await serializeProjectExport(sanitizedState, 'backup', {
       mode: PROJECT_SECURITY_MODES.REVERSIBLE,

@@ -116,6 +116,63 @@ function stableMappingAssociations(mapping) {
   })).sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)));
 }
 
+function genericPolicyOrderConfig() {
+  const policies = [
+    policy('Rule-1', 'trust', 'dmz', 'any', {
+      src_zones: ['trust', 'guest'],
+      dst_zones: ['dmz', 'untrust'],
+      description: 'alpha semantic policy',
+      applications: ['junos-https'],
+    }),
+    policy('', 'trust', 'dmz', 'any', {
+      src_zones: ['trust', 'guest'],
+      dst_zones: ['dmz', 'untrust'],
+      description: 'beta semantic policy',
+      applications: ['junos-ssh'],
+    }),
+  ];
+  return baseConfig({ security_policies: policies });
+}
+
+function reversedGenericPolicyOrderConfig() {
+  const config = genericPolicyOrderConfig();
+  return {
+    ...config,
+    security_policies: [...config.security_policies].reverse().map(policyItem => ({
+      ...policyItem,
+      src_zones: [...policyItem.src_zones].reverse(),
+      dst_zones: [...policyItem.dst_zones].reverse(),
+    })),
+  };
+}
+
+function sortedPolicyAssociations(associations) {
+  return [...associations].sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)));
+}
+
+function setPolicyAssociations(result) {
+  return sortedPolicyAssociations(result.commands.flatMap(command => {
+    const match = command.match(
+      /^set security policies from-zone (\S+) to-zone (\S+) policy (\S+) description "([^"]+)"$/,
+    );
+    return match ? [{ semantic: match[4], fromZone: match[1], toZone: match[2], outputName: match[3] }] : [];
+  }));
+}
+
+function xmlPolicyAssociations(result) {
+  const associations = [];
+  const pairPattern = /<policy>\s*<from-zone-name>([^<]+)<\/from-zone-name>\s*<to-zone-name>([^<]+)<\/to-zone-name>([\s\S]*?)\n      <\/policy>/g;
+  for (const pair of result.xml.matchAll(pairPattern)) {
+    const policyPattern = /<policy>\s*<name>([^<]+)<\/name>\s*<description>([^<]+)<\/description>/g;
+    for (const item of pair[3].matchAll(policyPattern)) {
+      associations.push({
+        semantic: item[2], fromZone: pair[1], toZone: pair[2], outputName: item[1],
+      });
+    }
+  }
+  return sortedPolicyAssociations(associations);
+}
+
 function seededRandom(seed) {
   let state = seed >>> 0;
   return () => {
@@ -560,6 +617,14 @@ describe('Randomized Junos identifier allocation integrity', () => {
 });
 
 describe('Set identifier-plan integration', () => {
+  it('keeps generic policy output names associated with semantics when policies and zones reorder', () => {
+    const forward = setPolicyAssociations(convertToSrxSetCommands(genericPolicyOrderConfig()));
+    const reversed = setPolicyAssociations(convertToSrxSetCommands(reversedGenericPolicyOrderConfig()));
+
+    expect(forward).toHaveLength(8);
+    expect(reversed).toEqual(forward);
+  });
+
   it.each([
     ['routing instance', addRoutingInstanceCollision, /set routing-instances /, 'routing-instance'],
     ['BGP group', addBgpGroupCollision, / protocols bgp group |set protocols bgp group /, 'bgp-group'],
@@ -1594,6 +1659,14 @@ describe('Set identifier-plan integration', () => {
 });
 
 describe('XML identifier-plan integration', () => {
+  it('keeps generic policy output names associated with semantics when policies and zones reorder', () => {
+    const forward = xmlPolicyAssociations(buildSrxXml(genericPolicyOrderConfig()));
+    const reversed = xmlPolicyAssociations(buildSrxXml(reversedGenericPolicyOrderConfig()));
+
+    expect(forward).toHaveLength(8);
+    expect(reversed).toEqual(forward);
+  });
+
   it.each([
     ['file-blocking only', { 'file-blocking': 'Strict Files' }],
     ['mixed file-blocking', { virus: 'Strict AV', 'file-blocking': 'Strict Files' }],

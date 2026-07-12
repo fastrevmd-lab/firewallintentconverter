@@ -1228,9 +1228,11 @@ describe('Junos identifier catalog', () => {
 
     expect(symbols.definitions).toEqual(expect.arrayContaining([
       expect.objectContaining({
-        sourceName: 'permit-trust-zone-to-dmz-https-1',
+        sourceName: 'name:Rule-1',
+        preferredOutputName: 'permit-trust-zone-to-dmz-https',
         definitionPath: 'security_policies[0]',
-        role: 'security-policy-1',
+        role: 'security-policy:Trust Zone->DMZ',
+        stableParentKey: 'security-policy:name:Rule-1',
       }),
       expect.objectContaining({
         sourceName: 'ike-pol-9 branch',

@@ -394,6 +394,18 @@ function buildUserIdentificationXml(policies, lines) {
 // Security Policies XML Builder
 // ---------------------------------------------------------------------------
 
+function generatedPolicyRole(fromZone, toZone) {
+  return `security-policy:${fromZone}->${toZone}`;
+}
+
+function orderedZoneEntries(zones) {
+  return zones
+    .map((zone, index) => ({ zone, index }))
+    .sort((left, right) => (
+      String(left.zone).localeCompare(String(right.zone)) || left.index - right.index
+    ));
+}
+
 function buildPoliciesXml(policies, lines, warnings, profileMaps = {}, appGroups = [], sourceVendor = '', ruleGroups = [], identifierNames) {
   if (!policies || policies.length === 0) return;
 
@@ -423,16 +435,17 @@ function buildPoliciesXml(policies, lines, warnings, profileMaps = {}, appGroups
     }
     const srcZones = policy.src_zones.length > 0 ? policy.src_zones : ['any'];
     const dstZones = policy.dst_zones.length > 0 ? policy.dst_zones : ['any'];
+    const sourceEntries = orderedZoneEntries(srcZones);
+    const destinationEntries = orderedZoneEntries(dstZones);
     let definitionIndex = 0;
     const definedPairs = new Set();
-    for (let sourceIndex = 0; sourceIndex < srcZones.length; sourceIndex += 1) {
-      const src = srcZones[sourceIndex];
+    for (let sourceOrdinal = 0; sourceOrdinal < sourceEntries.length; sourceOrdinal += 1) {
+      const { zone: src, index: sourceIndex } = sourceEntries[sourceOrdinal];
       identifierNames.reference(policy.src_zones.length > 0
         ? `security_policies[${policyIndex}].src_zones[${sourceIndex}]`
         : `security_policies[${policyIndex}]#effective-source-zone`);
-      for (let destinationIndex = 0; destinationIndex < dstZones.length; destinationIndex += 1) {
-        const dst = dstZones[destinationIndex];
-        if (sourceIndex === 0) {
+      for (const { zone: dst, index: destinationIndex } of destinationEntries) {
+        if (sourceOrdinal === 0) {
           identifierNames.reference(policy.dst_zones.length > 0
             ? `security_policies[${policyIndex}].dst_zones[${destinationIndex}]`
             : `security_policies[${policyIndex}]#effective-destination-zone`);
@@ -450,7 +463,10 @@ function buildPoliciesXml(policies, lines, warnings, profileMaps = {}, appGroups
           || /^(rule|policy|permit|deny)[-_]?\d+$/i.test(policy.name)
           || /^\d+$/.test(policy.name);
         const outputName = genericName
-          ? identifierNames.generated(`security_policies[${policyIndex}]`, `security-policy-${occurrence}`)
+          ? identifierNames.generated(
+            `security_policies[${policyIndex}]`,
+            generatedPolicyRole(src, dst),
+          )
           : identifierNames.definition(occurrence === 1
             ? `security_policies[${policyIndex}].name`
             : `security_policies[${policyIndex}].name#zone-pair:${src}->${dst}`);

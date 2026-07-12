@@ -1569,6 +1569,18 @@ function convertUserIdentification(policies, commands, warnings) {
 // Security Policy Converter
 // ---------------------------------------------------------------------------
 
+function generatedPolicyRole(fromZone, toZone) {
+  return `security-policy:${fromZone}->${toZone}`;
+}
+
+function orderedZoneEntries(zones) {
+  return zones
+    .map((zone, index) => ({ zone, index }))
+    .sort((left, right) => (
+      String(left.zone).localeCompare(String(right.zone)) || left.index - right.index
+    ));
+}
+
 function convertSecurityPolicies(policies, commands, warnings, summary, profileMaps = {}, appGroups = [], sourceVendor = '', ruleGroups = [], identifiers, identifierPath) {
   if (!policies || policies.length === 0) return;
 
@@ -1626,18 +1638,18 @@ function convertSecurityPolicies(policies, commands, warnings, summary, profileM
     const destinationZoneField = policy.dst_zones !== undefined ? 'dst_zones' : 'destination_zones';
     const srcZones = policy[sourceZoneField]?.length > 0 ? policy[sourceZoneField] : ['any'];
     const dstZones = policy[destinationZoneField]?.length > 0 ? policy[destinationZoneField] : ['any'];
+    const sourceEntries = orderedZoneEntries(srcZones);
+    const destinationEntries = orderedZoneEntries(dstZones);
 
     // Handle zone-based policy paths
     let definitionIndex = 0;
     const policyNamesByContext = new Map();
-    for (let sourceIndex = 0; sourceIndex < srcZones.length; sourceIndex += 1) {
-      const srcZone = srcZones[sourceIndex];
+    for (const { zone: srcZone, index: sourceIndex } of sourceEntries) {
       const sourcePath = policy[sourceZoneField]?.length > 0
         ? `security_policies[${pIdx}].${sourceZoneField}[${sourceIndex}]`
         : `security_policies[${pIdx}]#effective-source-zone`;
       const fromZone = identifiers.nameForReference(identifierPath(sourcePath));
-      for (let destinationIndex = 0; destinationIndex < dstZones.length; destinationIndex += 1) {
-        const dstZone = dstZones[destinationIndex];
+      for (const { zone: dstZone, index: destinationIndex } of destinationEntries) {
         const destinationPath = policy[destinationZoneField]?.length > 0
           ? `security_policies[${pIdx}].${destinationZoneField}[${destinationIndex}]`
           : `security_policies[${pIdx}]#effective-destination-zone`;
@@ -1656,7 +1668,7 @@ function convertSecurityPolicies(policies, commands, warnings, summary, profileM
           policyName = genericName
             ? identifiers.nameForGenerated(
               identifierPath(`security_policies[${pIdx}]`),
-              `security-policy-${definitionIndex}`,
+              generatedPolicyRole(srcZone, dstZone),
             )
             : identifiers.nameForDefinition(identifierPath(
               definitionIndex === 1

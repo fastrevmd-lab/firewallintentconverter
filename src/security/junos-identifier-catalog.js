@@ -182,23 +182,81 @@ function canonicalFlowTemplateNames(collectors) {
   return new Map(keys.map((key, index) => [key, `flow-tpl-${index + 1}`]));
 }
 
-function generatedPolicyName(policy, index) {
+function canonicalPolicyValue(value) {
+  if (Array.isArray(value)) {
+    return `[${value.map(canonicalPolicyValue).sort().join(',')}]`;
+  }
+  if (value && typeof value === 'object') {
+    return `{${Object.keys(value).sort().map(key => (
+      `${JSON.stringify(key)}:${canonicalPolicyValue(value[key])}`
+    )).join(',')}}`;
+  }
+  if (value === undefined) return 'undefined';
+  if (typeof value === 'bigint') return `bigint:${value}`;
+  return JSON.stringify(value);
+}
+
+function policySemanticFingerprint(policy) {
+  let hash = 14695981039346656037n;
+  for (const byte of new TextEncoder().encode(canonicalPolicyValue(policy))) {
+    hash ^= BigInt(byte);
+    hash = (hash * 1099511628211n) & 0xffffffffffffffffn;
+  }
+  return hash.toString(36).padStart(13, '0');
+}
+
+function generatedPolicySourceIdentity(policy) {
+  const candidates = [
+    ['uid', policy.uid],
+    ['uuid', policy.uuid],
+    ['id', policy.id],
+    ['checkpoint-uid', policy._checkpoint?.uid],
+    ['fortigate-uuid', policy._fortigate?.uuid],
+    ['fortigate-policyid', policy._fortigate?.policyid],
+    ['name', policy.name],
+    ['rule-index', policy._rule_index],
+  ];
+  for (const [kind, value] of candidates) {
+    if (['string', 'number', 'boolean'].includes(typeof value) && String(value).length > 0) {
+      return `${kind}:${value}`;
+    }
+  }
+  return `semantic:${policySemanticFingerprint(policy)}`;
+}
+
+function generatedPolicyRole(fromZone, toZone) {
+  return `security-policy:${fromZone}->${toZone}`;
+}
+
+function orderedZoneEntries(zones) {
+  return zones
+    .map((zone, index) => ({ zone, index }))
+    .sort((left, right) => (
+      String(left.zone).localeCompare(String(right.zone)) || left.index - right.index
+    ));
+}
+
+function generatedPolicyName(policy, fromZone, toZone) {
   const name = policy.name || '';
   const generic = !name
     || /^(rule|policy|permit|deny)[-_]?\d+$/i.test(name)
     || /^\d+$/.test(name);
   if (!generic) return null;
   const action = ['allow', 'permit'].includes(policy.action) ? 'permit' : 'deny';
-  const fromZone = String(sourceZones(policy)[0] || 'any').toLowerCase();
-  const toZone = String(destinationZones(policy)[0] || 'any').toLowerCase();
-  const application = (policy.applications || [])[0];
-  const service = (policy.services || [])[0];
+  const normalizedFromZone = String(fromZone || 'any').toLowerCase();
+  const normalizedToZone = String(toZone || 'any').toLowerCase();
+  const application = [...(policy.applications || [])]
+    .filter(value => value && value !== 'any')
+    .sort((left, right) => String(left).localeCompare(String(right)))[0];
+  const service = [...(policy.services || [])]
+    .filter(value => value && value !== 'any')
+    .sort((left, right) => String(left).localeCompare(String(right)))[0];
   const hint = application && application !== 'any'
     ? String(application).toLowerCase().replace(/^junos-/, '')
     : service && service !== 'any' ? String(service).toLowerCase() : '';
-  const parts = [action, fromZone, 'to', toZone];
+  const parts = [action, normalizedFromZone, 'to', normalizedToZone];
   if (hint) parts.push(hint);
-  return `${sanitizeJunosName(parts.join('-'))}-${index + 1}`;
+  return sanitizeJunosName(parts.join('-'));
 }
 
 function securityFeatureDescriptor(type, value, definitions = {}) {
@@ -1206,17 +1264,18 @@ function collectPoliciesAndSchedules(config, state) {
 
   for (let index = 0; index < (config.security_policies || []).length; index += 1) {
     const policy = config.security_policies[index];
-    const preferredGeneratedName = generatedPolicyName(policy, index);
+    const generatedSourceIdentity = generatedPolicySourceIdentity(policy);
     let definitionIndex = 0;
     const definedContexts = new Set();
-    for (let sourceIndex = 0; sourceIndex < sourceZones(policy).length; sourceIndex += 1) {
-      const fromZone = sourceZones(policy)[sourceIndex];
+    const sourceEntries = orderedZoneEntries(sourceZones(policy));
+    const destinationEntries = orderedZoneEntries(destinationZones(policy));
+    for (let sourceOrdinal = 0; sourceOrdinal < sourceEntries.length; sourceOrdinal += 1) {
+      const { zone: fromZone, index: sourceIndex } = sourceEntries[sourceOrdinal];
       addZoneReference(collector, device, fromZone, effectiveZoneReferencePath(
         prefix, `security_policies[${index}]`, policy, 'source', sourceIndex,
       ));
-      for (let destinationIndex = 0; destinationIndex < destinationZones(policy).length; destinationIndex += 1) {
-        const toZone = destinationZones(policy)[destinationIndex];
-        if (sourceIndex === 0) {
+      for (const { zone: toZone, index: destinationIndex } of destinationEntries) {
+        if (sourceOrdinal === 0) {
           addZoneReference(collector, device, toZone, effectiveZoneReferencePath(
             prefix, `security_policies[${index}]`, policy, 'destination', destinationIndex,
           ));
@@ -1225,16 +1284,18 @@ function collectPoliciesAndSchedules(config, state) {
         if (definedContexts.has(context)) continue;
         definedContexts.add(context);
         definitionIndex += 1;
+        const preferredGeneratedName = generatedPolicyName(policy, fromZone, toZone);
         if (preferredGeneratedName) {
           collector.addGenerated({
             catalogKey: JUNOS_IDENTIFIER_CATALOG.POLICY,
             context,
             namespace: 'security-policy',
             kind: 'security-policy',
-            sourceName: preferredGeneratedName,
+            sourceName: generatedSourceIdentity,
             definitionPath: joinedPath(prefix, `security_policies[${index}]`),
-            role: `security-policy-${definitionIndex}`,
-            stableParentKey: `security-policy:${policy.name || preferredGeneratedName}`,
+            role: generatedPolicyRole(fromZone, toZone),
+            stableParentKey: `security-policy:${generatedSourceIdentity}`,
+            preferredOutputName: preferredGeneratedName,
           });
         } else {
           collector.addDefinition({

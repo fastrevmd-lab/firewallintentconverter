@@ -474,12 +474,12 @@ export default function InterfaceMapper({
                           )}
                           <code>{panosIface}</code>
                           {isLagParent && (
-                            <span className="port-badge" style={{ background: '#4c1d95', color: '#c4b5fd', fontSize: 10, padding: '1px 5px' }}>
+                            <span className="port-badge" style={{ background: 'color-mix(in srgb, var(--info) 15%, transparent)', color: 'var(--info)', fontSize: 10, padding: '1px 5px' }}>
                               LAG
                             </span>
                           )}
                           {isLagMember && (
-                            <span className="port-badge" style={{ background: '#3b0764', color: '#a78bfa', fontSize: 10, padding: '1px 5px' }}>
+                            <span className="port-badge" style={{ background: 'color-mix(in srgb, var(--info) 15%, transparent)', color: 'var(--info)', fontSize: 10, padding: '1px 5px' }}>
                               member
                             </span>
                           )}
@@ -495,7 +495,7 @@ export default function InterfaceMapper({
                           )}
                         </div>
                         {isLagParent && lagInfo && (
-                          <div style={{ fontSize: 10, color: '#a78bfa', marginTop: 2 }}>
+                          <div style={{ fontSize: 10, color: 'var(--info)', marginTop: 2 }}>
                             LACP: {lagInfo.lacp_mode || 'static'} | {lagInfo.source_members?.length || 0} member(s) → {lagInfo.name}
                           </div>
                         )}
@@ -517,8 +517,8 @@ export default function InterfaceMapper({
                         {isLagParent ? (
                           /* LAG parent — show auto-generated ae name */
                           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                            <code style={{ color: '#c4b5fd', fontWeight: 600 }}>{lagInfo?.name || 'ae0'}</code>
-                            <span className="port-badge" style={{ background: '#4c1d95', color: '#c4b5fd', fontSize: 10, padding: '1px 5px' }}>
+                            <code style={{ color: 'var(--info)', fontWeight: 600 }}>{lagInfo?.name || 'ae0'}</code>
+                            <span className="port-badge" style={{ background: 'color-mix(in srgb, var(--info) 15%, transparent)', color: 'var(--info)', fontSize: 10, padding: '1px 5px' }}>
                               Aggregate
                             </span>
                           </div>
@@ -544,7 +544,7 @@ export default function InterfaceMapper({
                                 );
                               })}
                             </select>
-                            <div style={{ fontSize: 10, color: '#a78bfa', marginTop: 2 }}>
+                            <div style={{ fontSize: 10, color: 'var(--info)', marginTop: 2 }}>
                               802.3ad → {lagInfo?.lagName || 'ae0'}
                             </div>
                           </>
@@ -615,10 +615,10 @@ export default function InterfaceMapper({
                       </td>
                       <td>
                         {isLagParent && (
-                          <span style={{ color: '#c4b5fd', fontSize: 12 }}>LAG parent</span>
+                          <span style={{ color: 'var(--info)', fontSize: 12 }}>LAG parent</span>
                         )}
                         {isLagMember && (
-                          <span style={{ color: '#a78bfa', fontSize: 12 }}>LAG member</span>
+                          <span style={{ color: 'var(--info)', fontSize: 12 }}>LAG member</span>
                         )}
                         {isTunnel && (
                           <span style={{ color: 'var(--info)', fontSize: 12 }}>Create tunnel</span>

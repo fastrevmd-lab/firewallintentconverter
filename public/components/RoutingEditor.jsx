@@ -71,15 +71,15 @@ export default function RoutingEditor({ routingContexts, staticRoutes, onRoutesU
     if (editingIfIndex === index) setEditingIfIndex(null);
   };
 
-  const inputStyle = { width: '100%', background: '#0f172a', border: '1px solid #475569', color: '#e2e8f0', padding: '2px 4px', borderRadius: 3, fontSize: 12 };
-  const selectStyle = { background: '#0f172a', border: '1px solid #475569', color: '#e2e8f0', padding: '2px 4px', borderRadius: 3, fontSize: 11 };
+  const inputStyle = { width: '100%', background: 'var(--bg-primary)', border: '1px solid var(--text-muted)', color: 'var(--text-primary)', padding: '2px 4px', borderRadius: 3, fontSize: 12 };
+  const selectStyle = { background: 'var(--bg-primary)', border: '1px solid var(--text-muted)', color: 'var(--text-primary)', padding: '2px 4px', borderRadius: 3, fontSize: 11 };
 
   return (
     <div style={{ padding: '12px', overflowY: 'auto', height: '100%' }}>
       {/* Interfaces Table */}
       <div style={{ marginBottom: 16 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-          <h3 style={{ fontSize: 14, color: '#94a3b8', margin: 0 }}>
+          <h3 style={{ fontSize: 14, color: 'var(--text-secondary)', margin: 0 }}>
             Interfaces ({(interfaces || []).length})
           </h3>
           <button className="btn btn-secondary btn-sm" onClick={handleIfAdd} style={{ fontSize: 11 }}>
@@ -88,13 +88,13 @@ export default function RoutingEditor({ routingContexts, staticRoutes, onRoutesU
         </div>
 
         {(!interfaces || interfaces.length === 0) ? (
-          <div style={{ color: '#64748b', fontSize: 13, padding: 20, textAlign: 'center' }}>
+          <div style={{ color: 'var(--text-muted)', fontSize: 13, padding: 20, textAlign: 'center' }}>
             No interface configurations found in source configuration.
           </div>
         ) : (
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
             <thead>
-              <tr style={{ borderBottom: '1px solid #334155', color: '#64748b', textAlign: 'left' }}>
+              <tr style={{ borderBottom: '1px solid var(--border-color)', color: 'var(--text-muted)', textAlign: 'left' }}>
                 <th style={{ padding: '6px 8px' }}>Interface</th>
                 <th style={{ padding: '6px 8px' }}>IP Address</th>
                 <th style={{ padding: '6px 8px' }}>Zone</th>
@@ -108,38 +108,38 @@ export default function RoutingEditor({ routingContexts, staticRoutes, onRoutesU
             <tbody>
               {interfaces.map((iface, i) => (
                 <tr key={i} style={{
-                  borderBottom: '1px solid #1e293b',
-                  background: editingIfIndex === i ? '#1e293b' : 'transparent',
+                  borderBottom: '1px solid var(--bg-tertiary)',
+                  background: editingIfIndex === i ? 'var(--bg-tertiary)' : 'transparent',
                 }}>
                   <td style={{ padding: '5px 8px' }}>
                     {editingIfIndex === i ? (
                       <input type="text" value={iface.name} onChange={(e) => handleIfChange(i, 'name', e.target.value)} style={inputStyle} />
                     ) : (
-                      <span style={{ color: '#e2e8f0', fontFamily: 'monospace' }}>{iface.name}</span>
+                      <span style={{ color: 'var(--text-primary)', fontFamily: 'monospace' }}>{iface.name}</span>
                     )}
                   </td>
                   <td style={{ padding: '5px 8px' }}>
                     {editingIfIndex === i ? (
                       <input type="text" value={iface.ip || ''} onChange={(e) => handleIfChange(i, 'ip', e.target.value)} style={inputStyle} placeholder="10.0.0.1/24" />
                     ) : (
-                      <span style={{ color: '#94a3b8', fontFamily: 'monospace' }}>{iface.ip || '-'}</span>
+                      <span style={{ color: 'var(--text-secondary)', fontFamily: 'monospace' }}>{iface.ip || '-'}</span>
                     )}
                   </td>
                   <td style={{ padding: '5px 8px' }}>
                     {editingIfIndex === i ? (
                       <input type="text" value={iface.zone || ''} onChange={(e) => handleIfChange(i, 'zone', e.target.value)} style={inputStyle} />
                     ) : (
-                      <span style={{ color: iface.zone ? '#38bdf8' : '#475569' }}>{iface.zone || '-'}</span>
+                      <span style={{ color: iface.zone ? 'var(--info)' : 'var(--text-muted)' }}>{iface.zone || '-'}</span>
                     )}
                   </td>
                   <td style={{ padding: '5px 8px' }}>
                     {editingIfIndex === i ? (
                       <input type="text" value={iface.vlan || ''} onChange={(e) => handleIfChange(i, 'vlan', e.target.value)} style={{ ...inputStyle, width: 50 }} />
                     ) : (
-                      <span style={{ color: '#94a3b8' }}>{iface.vlan || '-'}</span>
+                      <span style={{ color: 'var(--text-secondary)' }}>{iface.vlan || '-'}</span>
                     )}
                   </td>
-                  <td style={{ padding: '5px 8px', color: '#64748b' }}>
+                  <td style={{ padding: '5px 8px', color: 'var(--text-muted)' }}>
                     {editingIfIndex === i ? (
                       <select value={iface.type || 'physical'} onChange={(e) => handleIfChange(i, 'type', e.target.value)} style={selectStyle}>
                         <option value="physical">physical</option>
@@ -155,7 +155,7 @@ export default function RoutingEditor({ routingContexts, staticRoutes, onRoutesU
                       iface.type || 'physical'
                     )}
                   </td>
-                  <td style={{ padding: '5px 8px', color: '#94a3b8', fontSize: 11 }}>
+                  <td style={{ padding: '5px 8px', color: 'var(--text-secondary)', fontSize: 11 }}>
                     {editingIfIndex === i ? (
                       <input type="text" value={iface.description || ''} onChange={(e) => handleIfChange(i, 'description', e.target.value)} style={inputStyle} />
                     ) : (
@@ -163,7 +163,7 @@ export default function RoutingEditor({ routingContexts, staticRoutes, onRoutesU
                     )}
                   </td>
                   <td style={{ padding: '5px 8px' }}>
-                    <span style={{ color: iface.status === 'shutdown' ? '#ef4444' : '#22c55e', fontSize: 11 }}>
+                    <span style={{ color: iface.status === 'shutdown' ? 'var(--error)' : 'var(--success)', fontSize: 11 }}>
                       {iface.status === 'shutdown' ? 'down' : 'up'}
                     </span>
                   </td>
@@ -179,7 +179,7 @@ export default function RoutingEditor({ routingContexts, staticRoutes, onRoutesU
                     <button
                       className="btn btn-secondary btn-sm"
                       onClick={() => handleIfDelete(i)}
-                      style={{ fontSize: 10, padding: '1px 6px', color: '#ef4444' }}
+                      style={{ fontSize: 10, padding: '1px 6px', color: 'var(--error)' }}
                       title="Delete interface"
                     >
                       X
@@ -196,9 +196,9 @@ export default function RoutingEditor({ routingContexts, staticRoutes, onRoutesU
       {bridgeDomains && bridgeDomains.length > 0 && (
         <div style={{ marginBottom: 16 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-            <h3 style={{ fontSize: 14, color: '#94a3b8', margin: 0 }}>
+            <h3 style={{ fontSize: 14, color: 'var(--text-secondary)', margin: 0 }}>
               Bridge Domains ({bridgeDomains.length})
-              <span style={{ fontSize: 11, color: '#475569', marginLeft: 8 }}>L2</span>
+              <span style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 8 }}>L2</span>
             </h3>
             {onBridgeDomainsUpdate && (
               <button className="btn btn-secondary btn-sm" onClick={() => {
@@ -210,7 +210,7 @@ export default function RoutingEditor({ routingContexts, staticRoutes, onRoutesU
           </div>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
             <thead>
-              <tr style={{ borderBottom: '1px solid #334155', color: '#64748b', textAlign: 'left' }}>
+              <tr style={{ borderBottom: '1px solid var(--border-color)', color: 'var(--text-muted)', textAlign: 'left' }}>
                 <th style={{ padding: '6px 8px' }}>Name</th>
                 <th style={{ padding: '6px 8px' }}>VLAN ID</th>
                 <th style={{ padding: '6px 8px' }}>Interfaces</th>
@@ -220,7 +220,7 @@ export default function RoutingEditor({ routingContexts, staticRoutes, onRoutesU
             </thead>
             <tbody>
               {bridgeDomains.map((bd, i) => (
-                <tr key={i} style={{ borderBottom: '1px solid #1e293b' }}>
+                <tr key={i} style={{ borderBottom: '1px solid var(--bg-tertiary)' }}>
                   <td style={{ padding: '5px 8px' }}>
                     {onBridgeDomainsUpdate ? (
                       <input type="text" value={bd.name} onChange={(e) => {
@@ -228,7 +228,7 @@ export default function RoutingEditor({ routingContexts, staticRoutes, onRoutesU
                         onBridgeDomainsUpdate(updated);
                       }} style={inputStyle} />
                     ) : (
-                      <span style={{ color: '#e2e8f0', fontFamily: 'monospace' }}>{bd.name}</span>
+                      <span style={{ color: 'var(--text-primary)', fontFamily: 'monospace' }}>{bd.name}</span>
                     )}
                   </td>
                   <td style={{ padding: '5px 8px' }}>
@@ -238,10 +238,10 @@ export default function RoutingEditor({ routingContexts, staticRoutes, onRoutesU
                         onBridgeDomainsUpdate(updated);
                       }} style={{ ...inputStyle, width: 60 }} />
                     ) : (
-                      <span style={{ color: '#94a3b8' }}>{bd.vlan_id || '-'}</span>
+                      <span style={{ color: 'var(--text-secondary)' }}>{bd.vlan_id || '-'}</span>
                     )}
                   </td>
-                  <td style={{ padding: '5px 8px', color: '#94a3b8', fontSize: 11 }}>
+                  <td style={{ padding: '5px 8px', color: 'var(--text-secondary)', fontSize: 11 }}>
                     {(bd.interfaces || []).join(', ') || '-'}
                   </td>
                   <td style={{ padding: '5px 8px' }}>
@@ -251,14 +251,14 @@ export default function RoutingEditor({ routingContexts, staticRoutes, onRoutesU
                         onBridgeDomainsUpdate(updated);
                       }} style={inputStyle} placeholder="irb.0" />
                     ) : (
-                      <span style={{ color: '#94a3b8', fontFamily: 'monospace' }}>{bd.irb_interface || '-'}</span>
+                      <span style={{ color: 'var(--text-secondary)', fontFamily: 'monospace' }}>{bd.irb_interface || '-'}</span>
                     )}
                   </td>
                   {onBridgeDomainsUpdate && (
                     <td style={{ padding: '5px 4px', textAlign: 'right' }}>
                       <button className="btn btn-secondary btn-sm" onClick={() => {
                         onBridgeDomainsUpdate(bridgeDomains.filter((_, j) => j !== i));
-                      }} style={{ fontSize: 10, padding: '1px 6px', color: '#ef4444' }} title="Delete">X</button>
+                      }} style={{ fontSize: 10, padding: '1px 6px', color: 'var(--error)' }} title="Delete">X</button>
                     </td>
                   )}
                 </tr>
@@ -272,14 +272,14 @@ export default function RoutingEditor({ routingContexts, staticRoutes, onRoutesU
       {l2Interfaces && l2Interfaces.length > 0 && (
         <div style={{ marginBottom: 16 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-            <h3 style={{ fontSize: 14, color: '#94a3b8', margin: 0 }}>
+            <h3 style={{ fontSize: 14, color: 'var(--text-secondary)', margin: 0 }}>
               L2 Interfaces ({l2Interfaces.length})
-              <span style={{ fontSize: 11, color: '#475569', marginLeft: 8 }}>family bridge</span>
+              <span style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 8 }}>family bridge</span>
             </h3>
           </div>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
             <thead>
-              <tr style={{ borderBottom: '1px solid #334155', color: '#64748b', textAlign: 'left' }}>
+              <tr style={{ borderBottom: '1px solid var(--border-color)', color: 'var(--text-muted)', textAlign: 'left' }}>
                 <th style={{ padding: '6px 8px' }}>Interface</th>
                 <th style={{ padding: '6px 8px' }}>Mode</th>
                 <th style={{ padding: '6px 8px' }}>VLAN</th>
@@ -288,14 +288,14 @@ export default function RoutingEditor({ routingContexts, staticRoutes, onRoutesU
             </thead>
             <tbody>
               {l2Interfaces.map((l2if, i) => (
-                <tr key={i} style={{ borderBottom: '1px solid #1e293b' }}>
+                <tr key={i} style={{ borderBottom: '1px solid var(--bg-tertiary)' }}>
                   <td style={{ padding: '5px 8px' }}>
-                    <span style={{ color: '#e2e8f0', fontFamily: 'monospace' }}>{l2if.name}</span>
-                    <span style={{ marginLeft: 6, fontSize: 10, padding: '1px 4px', borderRadius: 3, background: '#1e40af', color: '#93c5fd' }}>L2</span>
+                    <span style={{ color: 'var(--text-primary)', fontFamily: 'monospace' }}>{l2if.name}</span>
+                    <span style={{ marginLeft: 6, fontSize: 10, padding: '1px 4px', borderRadius: 3, background: 'color-mix(in srgb, var(--info) 15%, transparent)', color: 'var(--info)' }}>L2</span>
                   </td>
-                  <td style={{ padding: '5px 8px', color: '#94a3b8' }}>{l2if.mode || 'access'}</td>
-                  <td style={{ padding: '5px 8px', color: '#94a3b8' }}>{l2if.vlan || '-'}</td>
-                  <td style={{ padding: '5px 8px', color: '#38bdf8' }}>{l2if.bridge_domain || '-'}</td>
+                  <td style={{ padding: '5px 8px', color: 'var(--text-secondary)' }}>{l2if.mode || 'access'}</td>
+                  <td style={{ padding: '5px 8px', color: 'var(--text-secondary)' }}>{l2if.vlan || '-'}</td>
+                  <td style={{ padding: '5px 8px', color: 'var(--info)' }}>{l2if.bridge_domain || '-'}</td>
                 </tr>
               ))}
             </tbody>
@@ -307,14 +307,14 @@ export default function RoutingEditor({ routingContexts, staticRoutes, onRoutesU
       {vwirePairs && vwirePairs.length > 0 && (
         <div style={{ marginBottom: 16 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-            <h3 style={{ fontSize: 14, color: '#94a3b8', margin: 0 }}>
+            <h3 style={{ fontSize: 14, color: 'var(--text-secondary)', margin: 0 }}>
               Virtual-Wire Pairs ({vwirePairs.length})
-              <span style={{ fontSize: 11, color: '#f59e0b', marginLeft: 8 }}>No SRX equivalent</span>
+              <span style={{ fontSize: 11, color: 'var(--warning)', marginLeft: 8 }}>No SRX equivalent</span>
             </h3>
           </div>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
             <thead>
-              <tr style={{ borderBottom: '1px solid #334155', color: '#64748b', textAlign: 'left' }}>
+              <tr style={{ borderBottom: '1px solid var(--border-color)', color: 'var(--text-muted)', textAlign: 'left' }}>
                 <th style={{ padding: '6px 8px' }}>Name</th>
                 <th style={{ padding: '6px 8px' }}>Interface 1</th>
                 <th style={{ padding: '6px 8px' }}>Interface 2</th>
@@ -323,24 +323,24 @@ export default function RoutingEditor({ routingContexts, staticRoutes, onRoutesU
             </thead>
             <tbody>
               {vwirePairs.map((vw, i) => (
-                <tr key={i} style={{ borderBottom: '1px solid #1e293b' }}>
+                <tr key={i} style={{ borderBottom: '1px solid var(--bg-tertiary)' }}>
                   <td style={{ padding: '5px 8px' }}>
-                    <span style={{ color: '#e2e8f0' }}>{vw.name}</span>
+                    <span style={{ color: 'var(--text-primary)' }}>{vw.name}</span>
                   </td>
                   <td style={{ padding: '5px 8px' }}>
-                    <span style={{ color: '#94a3b8', fontFamily: 'monospace' }}>{vw.interface1}</span>
+                    <span style={{ color: 'var(--text-secondary)', fontFamily: 'monospace' }}>{vw.interface1}</span>
                   </td>
                   <td style={{ padding: '5px 8px' }}>
-                    <span style={{ color: '#94a3b8', fontFamily: 'monospace' }}>{vw.interface2}</span>
+                    <span style={{ color: 'var(--text-secondary)', fontFamily: 'monospace' }}>{vw.interface2}</span>
                   </td>
-                  <td style={{ padding: '5px 8px', color: '#94a3b8', fontSize: 11 }}>
+                  <td style={{ padding: '5px 8px', color: 'var(--text-secondary)', fontSize: 11 }}>
                     {(vw.tag_allowed || []).join(', ') || 'all'}
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
-          <div style={{ marginTop: 6, padding: '6px 8px', background: '#1e293b', borderRadius: 4, fontSize: 11, color: '#f59e0b' }}>
+          <div style={{ marginTop: 6, padding: '6px 8px', background: 'var(--bg-tertiary)', borderRadius: 4, fontSize: 11, color: 'var(--warning)' }}>
             SRX does not support virtual-wire mode. These pairs will be converted to bridge-domains. Review interface assignments after conversion.
           </div>
         </div>
@@ -349,25 +349,25 @@ export default function RoutingEditor({ routingContexts, staticRoutes, onRoutesU
       {/* Routing Contexts */}
       {routingContexts && routingContexts.length > 0 && (
         <div style={{ marginBottom: 16 }}>
-          <h3 style={{ fontSize: 14, marginBottom: 8, color: '#94a3b8' }}>Routing Contexts</h3>
+          <h3 style={{ fontSize: 14, marginBottom: 8, color: 'var(--text-secondary)' }}>Routing Contexts</h3>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             {routingContexts.map((ctx, i) => (
               <div key={i} style={{
-                background: '#1e293b', border: '1px solid #334155', borderRadius: 6,
+                background: 'var(--bg-tertiary)', border: '1px solid var(--border-color)', borderRadius: 6,
                 padding: '8px 12px', minWidth: 180,
               }}>
-                <div style={{ fontWeight: 600, fontSize: 13, color: '#e2e8f0' }}>{ctx.name}</div>
-                <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>
-                  Type: <span style={{ color: '#94a3b8' }}>{ctx.type}</span>
+                <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--text-primary)' }}>{ctx.name}</div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
+                  Type: <span style={{ color: 'var(--text-secondary)' }}>{ctx.type}</span>
                 </div>
                 {ctx.zones && ctx.zones.length > 0 && (
-                  <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>
-                    Zones: <span style={{ color: '#94a3b8' }}>{ctx.zones.join(', ')}</span>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
+                    Zones: <span style={{ color: 'var(--text-secondary)' }}>{ctx.zones.join(', ')}</span>
                   </div>
                 )}
                 {ctx.virtual_routers && ctx.virtual_routers.length > 0 && (
-                  <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>
-                    VRs: <span style={{ color: '#94a3b8' }}>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
+                    VRs: <span style={{ color: 'var(--text-secondary)' }}>
                       {ctx.virtual_routers.map(vr => `${vr.name} (${vr.static_routes?.length || 0} routes)`).join(', ')}
                     </span>
                   </div>
@@ -381,24 +381,24 @@ export default function RoutingEditor({ routingContexts, staticRoutes, onRoutesU
       {/* BGP Configuration */}
       {bgpConfig && bgpConfig.length > 0 && (
         <div style={{ marginBottom: 16 }}>
-          <h3 style={{ fontSize: 14, marginBottom: 8, color: '#94a3b8' }}>
+          <h3 style={{ fontSize: 14, marginBottom: 8, color: 'var(--text-secondary)' }}>
             BGP Configuration
-            <span className="badge" style={{ marginLeft: 6, fontSize: 10, background: '#1e40af', color: '#93c5fd' }}>
+            <span className="badge" style={{ marginLeft: 6, fontSize: 10, background: 'color-mix(in srgb, var(--info) 15%, transparent)', color: 'var(--info)' }}>
               {bgpConfig.length} instance{bgpConfig.length !== 1 ? 's' : ''}
             </span>
           </h3>
           {bgpConfig.map((bgp, bi) => (
-            <div key={bi} style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 6, padding: 12, marginBottom: 8 }}>
+            <div key={bi} style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border-color)', borderRadius: 6, padding: 12, marginBottom: 8 }}>
               <div style={{ display: 'flex', gap: 16, alignItems: 'center', marginBottom: 8 }}>
-                <div style={{ fontSize: 12, color: '#64748b' }}>
-                  AS: <span style={{ color: '#e2e8f0', fontWeight: 600 }}>{bgp.local_as || '—'}</span>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                  AS: <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{bgp.local_as || '—'}</span>
                 </div>
-                <div style={{ fontSize: 12, color: '#64748b' }}>
-                  Router ID: <span style={{ color: '#e2e8f0' }}>{bgp.router_id || '—'}</span>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                  Router ID: <span style={{ color: 'var(--text-primary)' }}>{bgp.router_id || '—'}</span>
                 </div>
                 {bgp.instance && (
-                  <div style={{ fontSize: 12, color: '#64748b' }}>
-                    Instance: <span style={{ color: '#e2e8f0' }}>{bgp.instance}</span>
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                    Instance: <span style={{ color: 'var(--text-primary)' }}>{bgp.instance}</span>
                   </div>
                 )}
               </div>
@@ -413,12 +413,12 @@ export default function RoutingEditor({ routingContexts, staticRoutes, onRoutesU
                       style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', padding: '4px 0' }}
                       onClick={() => setExpandedBgpGroup(isExpanded ? null : groupKey)}
                     >
-                      <span style={{ fontSize: 10, color: '#64748b' }}>{isExpanded ? '▼' : '▶'}</span>
-                      <span style={{ fontSize: 12, color: '#e2e8f0', fontWeight: 500 }}>{group.name}</span>
-                      <span className="badge" style={{ fontSize: 10, background: group.type === 'external' ? '#065f46' : '#1e3a5f', color: group.type === 'external' ? '#6ee7b7' : '#93c5fd' }}>
+                      <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{isExpanded ? '▼' : '▶'}</span>
+                      <span style={{ fontSize: 12, color: 'var(--text-primary)', fontWeight: 500 }}>{group.name}</span>
+                      <span className="badge" style={{ fontSize: 10, background: group.type === 'external' ? 'color-mix(in srgb, var(--success) 15%, transparent)' : 'color-mix(in srgb, var(--info) 15%, transparent)', color: group.type === 'external' ? 'var(--success)' : 'var(--info)' }}>
                         {group.type === 'external' ? 'EBGP' : 'IBGP'}
                       </span>
-                      <span style={{ fontSize: 11, color: '#64748b' }}>{group.neighbors?.length || 0} neighbor{(group.neighbors?.length || 0) !== 1 ? 's' : ''}</span>
+                      <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{group.neighbors?.length || 0} neighbor{(group.neighbors?.length || 0) !== 1 ? 's' : ''}</span>
                     </div>
                     {isExpanded && (group.neighbors || []).length > 0 && (
                       <table className="routing-table" style={{ marginLeft: 16, marginTop: 4 }}>
@@ -432,11 +432,11 @@ export default function RoutingEditor({ routingContexts, staticRoutes, onRoutesU
                             <tr key={ni}>
                               <td style={{ fontFamily: 'monospace', fontSize: 11 }}>{n.address}</td>
                               <td>{n.peer_as || '—'}</td>
-                              <td style={{ color: '#94a3b8', fontSize: 11 }}>{n.description || '—'}</td>
+                              <td style={{ color: 'var(--text-secondary)', fontSize: 11 }}>{n.description || '—'}</td>
                               <td style={{ fontSize: 11 }}>{n.import_policy || '—'}</td>
                               <td style={{ fontSize: 11 }}>{n.export_policy || '—'}</td>
                               <td>
-                                <span className="badge" style={{ fontSize: 9, background: n.enabled !== false ? '#065f46' : '#7f1d1d', color: n.enabled !== false ? '#6ee7b7' : '#fca5a5' }}>
+                                <span className="badge" style={{ fontSize: 9, background: n.enabled !== false ? 'color-mix(in srgb, var(--success) 15%, transparent)' : 'color-mix(in srgb, var(--error) 15%, transparent)', color: n.enabled !== false ? 'var(--success)' : 'var(--error)' }}>
                                   {n.enabled !== false ? 'Active' : 'Disabled'}
                                 </span>
                               </td>
@@ -451,15 +451,15 @@ export default function RoutingEditor({ routingContexts, staticRoutes, onRoutesU
 
               {/* Networks */}
               {bgp.networks && bgp.networks.length > 0 && (
-                <div style={{ marginTop: 6, fontSize: 11, color: '#64748b' }}>
-                  Networks: <span style={{ color: '#94a3b8' }}>{bgp.networks.map(n => n.prefix).join(', ')}</span>
+                <div style={{ marginTop: 6, fontSize: 11, color: 'var(--text-muted)' }}>
+                  Networks: <span style={{ color: 'var(--text-secondary)' }}>{bgp.networks.map(n => n.prefix).join(', ')}</span>
                 </div>
               )}
 
               {/* Redistribution */}
               {bgp.redistribute && bgp.redistribute.length > 0 && (
-                <div style={{ marginTop: 4, fontSize: 11, color: '#64748b' }}>
-                  Redistribute: <span style={{ color: '#94a3b8' }}>{bgp.redistribute.map(r => r.protocol).join(', ')}</span>
+                <div style={{ marginTop: 4, fontSize: 11, color: 'var(--text-muted)' }}>
+                  Redistribute: <span style={{ color: 'var(--text-secondary)' }}>{bgp.redistribute.map(r => r.protocol).join(', ')}</span>
                 </div>
               )}
             </div>
@@ -470,26 +470,26 @@ export default function RoutingEditor({ routingContexts, staticRoutes, onRoutesU
       {/* OSPF Configuration */}
       {ospfConfig && ospfConfig.length > 0 && (
         <div style={{ marginBottom: 16 }}>
-          <h3 style={{ fontSize: 14, marginBottom: 8, color: '#94a3b8' }}>
+          <h3 style={{ fontSize: 14, marginBottom: 8, color: 'var(--text-secondary)' }}>
             OSPF Configuration
-            <span className="badge" style={{ marginLeft: 6, fontSize: 10, background: '#7c2d12', color: '#fdba74' }}>
+            <span className="badge" style={{ marginLeft: 6, fontSize: 10, background: 'color-mix(in srgb, var(--info) 15%, transparent)', color: 'var(--info)' }}>
               {ospfConfig.reduce((sum, o) => sum + (o.areas?.length || 0), 0)} area{ospfConfig.reduce((sum, o) => sum + (o.areas?.length || 0), 0) !== 1 ? 's' : ''}
             </span>
           </h3>
           {ospfConfig.map((ospf, oi) => (
-            <div key={oi} style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 6, padding: 12, marginBottom: 8 }}>
+            <div key={oi} style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border-color)', borderRadius: 6, padding: 12, marginBottom: 8 }}>
               <div style={{ display: 'flex', gap: 16, alignItems: 'center', marginBottom: 8 }}>
-                <div style={{ fontSize: 12, color: '#64748b' }}>
-                  Router ID: <span style={{ color: '#e2e8f0', fontWeight: 600 }}>{ospf.router_id || '—'}</span>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                  Router ID: <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{ospf.router_id || '—'}</span>
                 </div>
                 {ospf.reference_bandwidth && (
-                  <div style={{ fontSize: 12, color: '#64748b' }}>
-                    Ref BW: <span style={{ color: '#e2e8f0' }}>{ospf.reference_bandwidth}</span>
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                    Ref BW: <span style={{ color: 'var(--text-primary)' }}>{ospf.reference_bandwidth}</span>
                   </div>
                 )}
                 {ospf.instance && (
-                  <div style={{ fontSize: 12, color: '#64748b' }}>
-                    Instance: <span style={{ color: '#e2e8f0' }}>{ospf.instance}</span>
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                    Instance: <span style={{ color: 'var(--text-primary)' }}>{ospf.instance}</span>
                   </div>
                 )}
               </div>
@@ -505,12 +505,12 @@ export default function RoutingEditor({ routingContexts, staticRoutes, onRoutesU
                       style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', padding: '4px 0' }}
                       onClick={() => setExpandedOspfArea(isExpanded ? null : areaKey)}
                     >
-                      <span style={{ fontSize: 10, color: '#64748b' }}>{isExpanded ? '▼' : '▶'}</span>
-                      <span style={{ fontSize: 12, color: '#e2e8f0', fontWeight: 500 }}>Area {area.area_id}</span>
-                      <span className="badge" style={{ fontSize: 10, background: area.area_type === 'normal' ? '#1e3a5f' : '#7c2d12', color: area.area_type === 'normal' ? '#93c5fd' : '#fdba74' }}>
+                      <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{isExpanded ? '▼' : '▶'}</span>
+                      <span style={{ fontSize: 12, color: 'var(--text-primary)', fontWeight: 500 }}>Area {area.area_id}</span>
+                      <span className="badge" style={{ fontSize: 10, background: area.area_type === 'normal' ? 'color-mix(in srgb, var(--info) 15%, transparent)' : 'color-mix(in srgb, var(--warning) 15%, transparent)', color: area.area_type === 'normal' ? 'var(--info)' : 'var(--warning)' }}>
                         {area.area_type}
                       </span>
-                      <span style={{ fontSize: 11, color: '#64748b' }}>{ifaceCount} interface{ifaceCount !== 1 ? 's' : ''}</span>
+                      <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{ifaceCount} interface{ifaceCount !== 1 ? 's' : ''}</span>
                     </div>
                     {isExpanded && (
                       <>
@@ -530,7 +530,7 @@ export default function RoutingEditor({ routingContexts, staticRoutes, onRoutesU
                                   <td>{iface.dead_interval ?? '—'}</td>
                                   <td>
                                     {iface.passive && (
-                                      <span className="badge" style={{ fontSize: 9, background: '#1e3a5f', color: '#93c5fd' }}>Passive</span>
+                                      <span className="badge" style={{ fontSize: 9, background: 'color-mix(in srgb, var(--info) 15%, transparent)', color: 'var(--info)' }}>Passive</span>
                                     )}
                                   </td>
                                   <td style={{ fontSize: 11 }}>{iface.authentication ? iface.authentication.type : '—'}</td>
@@ -540,8 +540,8 @@ export default function RoutingEditor({ routingContexts, staticRoutes, onRoutesU
                           </table>
                         )}
                         {(area.networks || []).length > 0 && (
-                          <div style={{ marginLeft: 16, marginTop: 4, fontSize: 11, color: '#64748b' }}>
-                            Networks: <span style={{ color: '#94a3b8' }}>{area.networks.map(n => n.prefix).join(', ')}</span>
+                          <div style={{ marginLeft: 16, marginTop: 4, fontSize: 11, color: 'var(--text-muted)' }}>
+                            Networks: <span style={{ color: 'var(--text-secondary)' }}>{area.networks.map(n => n.prefix).join(', ')}</span>
                           </div>
                         )}
                       </>
@@ -552,8 +552,8 @@ export default function RoutingEditor({ routingContexts, staticRoutes, onRoutesU
 
               {/* Redistribution */}
               {ospf.redistribute && ospf.redistribute.length > 0 && (
-                <div style={{ marginTop: 6, fontSize: 11, color: '#64748b' }}>
-                  Redistribute: <span style={{ color: '#94a3b8' }}>{ospf.redistribute.map(r => r.protocol).join(', ')}</span>
+                <div style={{ marginTop: 6, fontSize: 11, color: 'var(--text-muted)' }}>
+                  Redistribute: <span style={{ color: 'var(--text-secondary)' }}>{ospf.redistribute.map(r => r.protocol).join(', ')}</span>
                 </div>
               )}
             </div>
@@ -564,26 +564,26 @@ export default function RoutingEditor({ routingContexts, staticRoutes, onRoutesU
       {/* OSPFv3 Configuration */}
       {ospf3Config && ospf3Config.length > 0 && (
         <div style={{ marginBottom: 16 }}>
-          <h3 style={{ fontSize: 14, marginBottom: 8, color: '#94a3b8' }}>
+          <h3 style={{ fontSize: 14, marginBottom: 8, color: 'var(--text-secondary)' }}>
             OSPFv3 (IPv6) Configuration
-            <span className="badge" style={{ marginLeft: 6, fontSize: 10, background: '#312e81', color: '#a5b4fc' }}>
+            <span className="badge" style={{ marginLeft: 6, fontSize: 10, background: 'color-mix(in srgb, var(--info) 15%, transparent)', color: 'var(--info)' }}>
               {ospf3Config.reduce((sum, o) => sum + (o.areas?.length || 0), 0)} area{ospf3Config.reduce((sum, o) => sum + (o.areas?.length || 0), 0) !== 1 ? 's' : ''}
             </span>
           </h3>
           {ospf3Config.map((ospf, oi) => (
-            <div key={oi} style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 6, padding: 12, marginBottom: 8 }}>
+            <div key={oi} style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border-color)', borderRadius: 6, padding: 12, marginBottom: 8 }}>
               <div style={{ display: 'flex', gap: 16, alignItems: 'center', marginBottom: 8 }}>
-                <div style={{ fontSize: 12, color: '#64748b' }}>
-                  Router ID: <span style={{ color: '#e2e8f0', fontWeight: 600 }}>{ospf.router_id || '—'}</span>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                  Router ID: <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{ospf.router_id || '—'}</span>
                 </div>
                 {ospf.reference_bandwidth && (
-                  <div style={{ fontSize: 12, color: '#64748b' }}>
-                    Ref BW: <span style={{ color: '#e2e8f0' }}>{ospf.reference_bandwidth}</span>
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                    Ref BW: <span style={{ color: 'var(--text-primary)' }}>{ospf.reference_bandwidth}</span>
                   </div>
                 )}
                 {ospf.instance && (
-                  <div style={{ fontSize: 12, color: '#64748b' }}>
-                    Instance: <span style={{ color: '#e2e8f0' }}>{ospf.instance}</span>
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                    Instance: <span style={{ color: 'var(--text-primary)' }}>{ospf.instance}</span>
                   </div>
                 )}
               </div>
@@ -597,12 +597,12 @@ export default function RoutingEditor({ routingContexts, staticRoutes, onRoutesU
                       style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', padding: '4px 0' }}
                       onClick={() => setExpandedOspf3Area(isExpanded ? null : areaKey)}
                     >
-                      <span style={{ fontSize: 10, color: '#64748b' }}>{isExpanded ? '▼' : '▶'}</span>
-                      <span style={{ fontSize: 12, color: '#e2e8f0', fontWeight: 500 }}>Area {area.area_id}</span>
-                      <span className="badge" style={{ fontSize: 10, background: area.area_type === 'normal' ? '#312e81' : '#7c2d12', color: area.area_type === 'normal' ? '#a5b4fc' : '#fdba74' }}>
+                      <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{isExpanded ? '▼' : '▶'}</span>
+                      <span style={{ fontSize: 12, color: 'var(--text-primary)', fontWeight: 500 }}>Area {area.area_id}</span>
+                      <span className="badge" style={{ fontSize: 10, background: area.area_type === 'normal' ? 'color-mix(in srgb, var(--info) 15%, transparent)' : 'color-mix(in srgb, var(--warning) 15%, transparent)', color: area.area_type === 'normal' ? 'var(--info)' : 'var(--warning)' }}>
                         {area.area_type}
                       </span>
-                      <span style={{ fontSize: 11, color: '#64748b' }}>{ifaceCount} interface{ifaceCount !== 1 ? 's' : ''}</span>
+                      <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{ifaceCount} interface{ifaceCount !== 1 ? 's' : ''}</span>
                     </div>
                     {isExpanded && (
                       <>
@@ -622,7 +622,7 @@ export default function RoutingEditor({ routingContexts, staticRoutes, onRoutesU
                                   <td>{iface.dead_interval ?? '—'}</td>
                                   <td>
                                     {iface.passive && (
-                                      <span className="badge" style={{ fontSize: 9, background: '#312e81', color: '#a5b4fc' }}>Passive</span>
+                                      <span className="badge" style={{ fontSize: 9, background: 'color-mix(in srgb, var(--info) 15%, transparent)', color: 'var(--info)' }}>Passive</span>
                                     )}
                                   </td>
                                   <td>{iface.instance_id ?? '—'}</td>
@@ -632,8 +632,8 @@ export default function RoutingEditor({ routingContexts, staticRoutes, onRoutesU
                           </table>
                         )}
                         {(area.networks || []).length > 0 && (
-                          <div style={{ marginLeft: 16, marginTop: 4, fontSize: 11, color: '#64748b' }}>
-                            Networks: <span style={{ color: '#94a3b8' }}>{area.networks.map(n => n.prefix).join(', ')}</span>
+                          <div style={{ marginLeft: 16, marginTop: 4, fontSize: 11, color: 'var(--text-muted)' }}>
+                            Networks: <span style={{ color: 'var(--text-secondary)' }}>{area.networks.map(n => n.prefix).join(', ')}</span>
                           </div>
                         )}
                       </>
@@ -642,8 +642,8 @@ export default function RoutingEditor({ routingContexts, staticRoutes, onRoutesU
                 );
               })}
               {ospf.redistribute && ospf.redistribute.length > 0 && (
-                <div style={{ marginTop: 6, fontSize: 11, color: '#64748b' }}>
-                  Redistribute: <span style={{ color: '#94a3b8' }}>{ospf.redistribute.map(r => r.protocol).join(', ')}</span>
+                <div style={{ marginTop: 6, fontSize: 11, color: 'var(--text-muted)' }}>
+                  Redistribute: <span style={{ color: 'var(--text-secondary)' }}>{ospf.redistribute.map(r => r.protocol).join(', ')}</span>
                 </div>
               )}
             </div>
@@ -654,9 +654,9 @@ export default function RoutingEditor({ routingContexts, staticRoutes, onRoutesU
       {/* EVPN Configuration */}
       {evpnConfig && evpnConfig.length > 0 && (
         <div style={{ marginBottom: 16 }}>
-          <h3 style={{ fontSize: 14, marginBottom: 8, color: '#94a3b8' }}>
+          <h3 style={{ fontSize: 14, marginBottom: 8, color: 'var(--text-secondary)' }}>
             EVPN / VxLAN Fabric
-            <span className="badge" style={{ marginLeft: 6, fontSize: 10, background: '#4a1d6a', color: '#d8b4fe' }}>
+            <span className="badge" style={{ marginLeft: 6, fontSize: 10, background: 'color-mix(in srgb, var(--info) 15%, transparent)', color: 'var(--info)' }}>
               {evpnConfig.length} instance{evpnConfig.length !== 1 ? 's' : ''}
             </span>
           </h3>
@@ -664,40 +664,40 @@ export default function RoutingEditor({ routingContexts, staticRoutes, onRoutesU
             const evpnKey = `evpn-${ei}`;
             const isExpanded = expandedEvpn === evpnKey;
             return (
-              <div key={ei} style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 6, padding: 12, marginBottom: 8 }}>
+              <div key={ei} style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border-color)', borderRadius: 6, padding: 12, marginBottom: 8 }}>
                 <div
                   style={{ display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer' }}
                   onClick={() => setExpandedEvpn(isExpanded ? null : evpnKey)}
                 >
-                  <span style={{ fontSize: 10, color: '#64748b' }}>{isExpanded ? '▼' : '▶'}</span>
-                  <span style={{ fontSize: 12, color: '#e2e8f0', fontWeight: 500 }}>
+                  <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{isExpanded ? '▼' : '▶'}</span>
+                  <span style={{ fontSize: 12, color: 'var(--text-primary)', fontWeight: 500 }}>
                     {evpn.instance || 'Global'}
                   </span>
                   {evpn.instance_type && (
-                    <span className="badge" style={{ fontSize: 10, background: '#4a1d6a', color: '#d8b4fe' }}>{evpn.instance_type}</span>
+                    <span className="badge" style={{ fontSize: 10, background: 'color-mix(in srgb, var(--info) 15%, transparent)', color: 'var(--info)' }}>{evpn.instance_type}</span>
                   )}
-                  <span className="badge" style={{ fontSize: 10, background: '#1e3a5f', color: '#93c5fd' }}>
+                  <span className="badge" style={{ fontSize: 10, background: 'color-mix(in srgb, var(--info) 15%, transparent)', color: 'var(--info)' }}>
                     {evpn.encapsulation || 'vxlan'}
                   </span>
-                  {evpn.vlans && <span style={{ fontSize: 11, color: '#64748b' }}>{evpn.vlans.length} VLAN{evpn.vlans.length !== 1 ? 's' : ''}</span>}
+                  {evpn.vlans && <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{evpn.vlans.length} VLAN{evpn.vlans.length !== 1 ? 's' : ''}</span>}
                 </div>
                 {isExpanded && (
                   <div style={{ marginTop: 8 }}>
                     <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 8 }}>
                       {evpn.route_distinguisher && (
-                        <div style={{ fontSize: 11, color: '#64748b' }}>RD: <span style={{ color: '#e2e8f0', fontFamily: 'monospace' }}>{evpn.route_distinguisher}</span></div>
+                        <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>RD: <span style={{ color: 'var(--text-primary)', fontFamily: 'monospace' }}>{evpn.route_distinguisher}</span></div>
                       )}
                       {evpn.vrf_target && (
-                        <div style={{ fontSize: 11, color: '#64748b' }}>VRF Target: <span style={{ color: '#e2e8f0', fontFamily: 'monospace' }}>{evpn.vrf_target}</span></div>
+                        <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>VRF Target: <span style={{ color: 'var(--text-primary)', fontFamily: 'monospace' }}>{evpn.vrf_target}</span></div>
                       )}
                       {evpn.multicast_mode && (
-                        <div style={{ fontSize: 11, color: '#64748b' }}>Multicast: <span style={{ color: '#e2e8f0' }}>{evpn.multicast_mode}</span></div>
+                        <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Multicast: <span style={{ color: 'var(--text-primary)' }}>{evpn.multicast_mode}</span></div>
                       )}
                     </div>
                     {evpn.route_targets && evpn.route_targets.length > 0 && (
-                      <div style={{ fontSize: 11, color: '#64748b', marginBottom: 6 }}>
+                      <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 6 }}>
                         Route Targets: {evpn.route_targets.map((rt, ri) => (
-                          <span key={ri} className="badge" style={{ fontSize: 9, marginLeft: 4, background: '#1e3a5f', color: '#93c5fd' }}>
+                          <span key={ri} className="badge" style={{ fontSize: 9, marginLeft: 4, background: 'color-mix(in srgb, var(--info) 15%, transparent)', color: 'var(--info)' }}>
                             {rt.target} ({rt.direction})
                           </span>
                         ))}
@@ -733,23 +733,23 @@ export default function RoutingEditor({ routingContexts, staticRoutes, onRoutesU
       {/* VxLAN Tunnels (standalone, non-EVPN) */}
       {vxlanConfig && vxlanConfig.length > 0 && (
         <div style={{ marginBottom: 16 }}>
-          <h3 style={{ fontSize: 14, marginBottom: 8, color: '#94a3b8' }}>
+          <h3 style={{ fontSize: 14, marginBottom: 8, color: 'var(--text-secondary)' }}>
             VxLAN Tunnels
-            <span className="badge" style={{ marginLeft: 6, fontSize: 10, background: '#4a1d6a', color: '#d8b4fe' }}>
+            <span className="badge" style={{ marginLeft: 6, fontSize: 10, background: 'color-mix(in srgb, var(--info) 15%, transparent)', color: 'var(--info)' }}>
               {vxlanConfig.length} tunnel{vxlanConfig.length !== 1 ? 's' : ''}
             </span>
           </h3>
           {vxlanConfig.map((tunnel, ti) => (
-            <div key={ti} style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 6, padding: 12, marginBottom: 8 }}>
+            <div key={ti} style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border-color)', borderRadius: 6, padding: 12, marginBottom: 8 }}>
               <div style={{ display: 'flex', gap: 16, alignItems: 'center', marginBottom: 6 }}>
-                <span style={{ fontSize: 12, color: '#e2e8f0', fontWeight: 500 }}>{tunnel.name || `Tunnel ${ti + 1}`}</span>
+                <span style={{ fontSize: 12, color: 'var(--text-primary)', fontWeight: 500 }}>{tunnel.name || `Tunnel ${ti + 1}`}</span>
                 {tunnel.vtep_source_interface && (
-                  <div style={{ fontSize: 11, color: '#64748b' }}>
-                    VTEP Source: <span style={{ color: '#e2e8f0', fontFamily: 'monospace' }}>{tunnel.vtep_source_interface}</span>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                    VTEP Source: <span style={{ color: 'var(--text-primary)', fontFamily: 'monospace' }}>{tunnel.vtep_source_interface}</span>
                   </div>
                 )}
                 {tunnel.udp_port && tunnel.udp_port !== 4789 && (
-                  <div style={{ fontSize: 11, color: '#fbbf24' }}>Port: {tunnel.udp_port}</div>
+                  <div style={{ fontSize: 11, color: 'var(--warning)' }}>Port: {tunnel.udp_port}</div>
                 )}
               </div>
               {tunnel.vnis && tunnel.vnis.length > 0 && (
@@ -778,7 +778,7 @@ export default function RoutingEditor({ routingContexts, staticRoutes, onRoutesU
 
       {/* Static Routes Table */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-        <h3 style={{ fontSize: 14, color: '#94a3b8', margin: 0 }}>
+        <h3 style={{ fontSize: 14, color: 'var(--text-secondary)', margin: 0 }}>
           Static Routes ({staticRoutes.length})
         </h3>
         <button className="btn btn-secondary btn-sm" onClick={handleAdd} style={{ fontSize: 11 }}>
@@ -787,13 +787,13 @@ export default function RoutingEditor({ routingContexts, staticRoutes, onRoutesU
       </div>
 
       {staticRoutes.length === 0 ? (
-        <div style={{ color: '#64748b', fontSize: 13, padding: 20, textAlign: 'center' }}>
+        <div style={{ color: 'var(--text-muted)', fontSize: 13, padding: 20, textAlign: 'center' }}>
           No static routes found in source configuration.
         </div>
       ) : (
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
           <thead>
-            <tr style={{ borderBottom: '1px solid #334155', color: '#64748b', textAlign: 'left' }}>
+            <tr style={{ borderBottom: '1px solid var(--border-color)', color: 'var(--text-muted)', textAlign: 'left' }}>
               <th style={{ padding: '6px 8px' }}>Destination</th>
               <th style={{ padding: '6px 8px' }}>Next-Hop</th>
               <th style={{ padding: '6px 8px' }}>Type</th>
@@ -807,8 +807,8 @@ export default function RoutingEditor({ routingContexts, staticRoutes, onRoutesU
           <tbody>
             {staticRoutes.map((route, i) => (
               <tr key={i} style={{
-                borderBottom: '1px solid #1e293b',
-                background: editingIndex === i ? '#1e293b' : 'transparent',
+                borderBottom: '1px solid var(--bg-tertiary)',
+                background: editingIndex === i ? 'var(--bg-tertiary)' : 'transparent',
               }}>
                 <td style={{ padding: '5px 8px' }}>
                   {editingIndex === i ? (
@@ -818,7 +818,7 @@ export default function RoutingEditor({ routingContexts, staticRoutes, onRoutesU
                       style={inputStyle}
                     />
                   ) : (
-                    <span style={{ color: '#e2e8f0', fontFamily: 'monospace' }}>{route.destination}</span>
+                    <span style={{ color: 'var(--text-primary)', fontFamily: 'monospace' }}>{route.destination}</span>
                   )}
                 </td>
                 <td style={{ padding: '5px 8px' }}>
@@ -829,10 +829,10 @@ export default function RoutingEditor({ routingContexts, staticRoutes, onRoutesU
                       style={inputStyle}
                     />
                   ) : (
-                    <span style={{ color: '#94a3b8', fontFamily: 'monospace' }}>{route.next_hop || '-'}</span>
+                    <span style={{ color: 'var(--text-secondary)', fontFamily: 'monospace' }}>{route.next_hop || '-'}</span>
                   )}
                 </td>
-                <td style={{ padding: '5px 8px', color: '#64748b' }}>
+                <td style={{ padding: '5px 8px', color: 'var(--text-muted)' }}>
                   {editingIndex === i ? (
                     <select
                       value={route.next_hop_type}
@@ -848,7 +848,7 @@ export default function RoutingEditor({ routingContexts, staticRoutes, onRoutesU
                     route.next_hop_type
                   )}
                 </td>
-                <td style={{ padding: '5px 8px', color: '#94a3b8' }}>
+                <td style={{ padding: '5px 8px', color: 'var(--text-secondary)' }}>
                   {editingIndex === i ? (
                     <input
                       type="text" value={route.interface || ''}
@@ -859,7 +859,7 @@ export default function RoutingEditor({ routingContexts, staticRoutes, onRoutesU
                     route.interface || '-'
                   )}
                 </td>
-                <td style={{ padding: '5px 8px', color: '#94a3b8' }}>
+                <td style={{ padding: '5px 8px', color: 'var(--text-secondary)' }}>
                   {editingIndex === i ? (
                     <input
                       type="number" value={route.metric}
@@ -870,10 +870,10 @@ export default function RoutingEditor({ routingContexts, staticRoutes, onRoutesU
                     route.metric
                   )}
                 </td>
-                <td style={{ padding: '5px 8px', color: route.vrf ? '#38bdf8' : '#475569' }}>
+                <td style={{ padding: '5px 8px', color: route.vrf ? 'var(--info)' : 'var(--text-muted)' }}>
                   {route.vrf || '-'}
                 </td>
-                <td style={{ padding: '5px 8px', color: '#64748b', fontSize: 11 }}>
+                <td style={{ padding: '5px 8px', color: 'var(--text-muted)', fontSize: 11 }}>
                   {route.routing_context || '-'}
                 </td>
                 <td style={{ padding: '5px 4px', textAlign: 'right' }}>
@@ -888,7 +888,7 @@ export default function RoutingEditor({ routingContexts, staticRoutes, onRoutesU
                   <button
                     className="btn btn-secondary btn-sm"
                     onClick={() => handleDelete(i)}
-                    style={{ fontSize: 10, padding: '1px 6px', color: '#ef4444' }}
+                    style={{ fontSize: 10, padding: '1px 6px', color: 'var(--error)' }}
                     title="Delete route"
                   >
                     X

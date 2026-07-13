@@ -7,6 +7,7 @@
 
 import { detectVendor } from '../../src/parsers/parser-utils.js';
 import { normalizeConversionOutput } from '../../src/conversion/conversion-output.js';
+import { redactConfigSecrets } from './secret-detection.js';
 
 function normalizeEngineOutput(output, format) {
   if (format === 'set' && Array.isArray(output?.commands)) {
@@ -197,9 +198,14 @@ export function sanitizeConfig(configText) {
     throw new Error(`Config too large to sanitize (${(configText.length / 1024 / 1024).toFixed(1)} MB, max ${MAX_SANITIZE_LENGTH / 1024 / 1024} MB)`);
   }
 
-  const replacements = [];
+  const secretResult = redactConfigSecrets(configText);
+  const replacements = [...secretResult.replacements];
   const counter = {
-    hash: 0, key: 0, user: 0, ip: 0, community: 0, cert: 0, host: 0, bgp: 0,
+    hash: secretResult.counts.hash,
+    key: secretResult.counts.key,
+    community: secretResult.counts.community,
+    cert: secretResult.counts.cert,
+    user: 0, ip: 0, host: 0, bgp: 0,
     device_hostname: 0, domain: 0, zone: 0, object: 0, private_ip: 0,
     ipv6: 0, email: 0, url: 0, description: 0, interface: 0,
   };
@@ -214,7 +220,7 @@ export function sanitizeConfig(configText) {
   const objectMap = new Map();
   const interfaceMap = new Map();
 
-  let sanitized = configText;
+  let sanitized = secretResult.text;
 
   // --- Helpers ---------------------------------------------------------------
 
@@ -366,134 +372,6 @@ export function sanitizeConfig(configText) {
   );
 
   // ==========================================================================
-  // PASS 2: Password hashes
-  // ==========================================================================
-
-  // XML tags: <phash>, <password-hash>, <encrypted-secret>
-  sanitized = sanitized.replace(
-    /(<(?:phash|password-hash|encrypted-secret)>)([^<]+)(<\/)/gi,
-    (match, open, value, close) => {
-      const idx = counter.hash++;
-      const placeholder = `SANITIZED_HASH_${idx}`;
-      replacements.push({ type: 'hash', placeholder, original: value.trim() });
-      return `${open}${placeholder}${close}`;
-    }
-  );
-
-  // Hashes in attribute-style: password "$1$..."
-  sanitized = sanitized.replace(
-    /(password|secret|pre-shared-key|auth-key)\s+"(\$[^"]+)"/gi,
-    (match, keyword, value) => {
-      const idx = counter.hash++;
-      const placeholder = `SANITIZED_HASH_${idx}`;
-      replacements.push({ type: 'hash', placeholder, original: value });
-      return `${keyword} "${placeholder}"`;
-    }
-  );
-
-  // ASA: password <hash> encrypted
-  sanitized = sanitized.replace(
-    /(password\s+)(\S+)(\s+encrypted)/gi,
-    (match, prefix, value, suffix) => {
-      if (value.startsWith('SANITIZED_')) return match;
-      const idx = counter.hash++;
-      const placeholder = `SANITIZED_HASH_${idx}`;
-      replacements.push({ type: 'hash', placeholder, original: value });
-      return `${prefix}${placeholder}${suffix}`;
-    }
-  );
-
-  // FortiGate: set password ENC <base64> — capture the whole ENC block
-  sanitized = sanitized.replace(
-    /(set\s+password\s+)(ENC\s+\S+)/gi,
-    (match, prefix, value) => {
-      if (value.startsWith('SANITIZED_')) return match;
-      const idx = counter.hash++;
-      const placeholder = `SANITIZED_HASH_${idx}`;
-      replacements.push({ type: 'hash', placeholder, original: value });
-      return `${prefix}${placeholder}`;
-    }
-  );
-
-  // ==========================================================================
-  // PASS 3: Pre-shared keys and API keys
-  // ==========================================================================
-
-  // Nested XML: <pre-shared-key><key>VALUE</key>
-  sanitized = sanitized.replace(
-    /(<(?:pre-shared-key|api-key|auth-key|secret|key)>)\s*(<key>)([^<]+)(<\/key>)/gi,
-    (match, outerOpen, innerOpen, value, innerClose) => {
-      const idx = counter.key++;
-      const placeholder = `SANITIZED_KEY_${idx}`;
-      replacements.push({ type: 'key', placeholder, original: value.trim() });
-      return `${outerOpen}${innerOpen}${placeholder}${innerClose}`;
-    }
-  );
-
-  // Simple key value tags
-  sanitized = sanitized.replace(
-    /(<(?:pre-shared-key|api-key|auth-key|community|secret-key)>)([^<]+)(<\/)/gi,
-    (match, open, value, close) => {
-      if (value.trim().startsWith('SANITIZED_')) return match;
-      const idx = counter.key++;
-      const placeholder = `SANITIZED_KEY_${idx}`;
-      replacements.push({ type: 'key', placeholder, original: value.trim() });
-      return `${open}${placeholder}${close}`;
-    }
-  );
-
-  // IKE pre-shared keys: ikev1/ikev2 pre-shared-key
-  sanitized = sanitized.replace(
-    /(ikev[12]\s+(?:local-authentication\s+)?pre-shared-key\s+)(\S+)/gi,
-    (match, prefix, value) => {
-      if (value.startsWith('SANITIZED_')) return match;
-      const idx = counter.key++;
-      const placeholder = `SANITIZED_KEY_${idx}`;
-      replacements.push({ type: 'key', placeholder, original: value });
-      return `${prefix}${placeholder}`;
-    }
-  );
-
-  // ==========================================================================
-  // PASS 4: SNMP communities (XML + CLI)
-  // ==========================================================================
-
-  sanitized = sanitized.replace(
-    /(<community>)([^<]+)(<\/community>)/gi,
-    (match, open, value, close) => {
-      if (value.trim().startsWith('SANITIZED_')) return match;
-      const idx = counter.community++;
-      const placeholder = `SANITIZED_COMMUNITY_${idx}`;
-      replacements.push({ type: 'community', placeholder, original: value.trim() });
-      return `${open}${placeholder}${close}`;
-    }
-  );
-
-  // ASA/FTD: snmp-server community <name>
-  sanitized = sanitized.replace(
-    /(snmp-server\s+community\s+)(\S+)/gi,
-    (match, prefix, value) => {
-      if (value.startsWith('SANITIZED_')) return match;
-      const idx = counter.community++;
-      const placeholder = `SANITIZED_COMMUNITY_${idx}`;
-      replacements.push({ type: 'community', placeholder, original: value });
-      return `${prefix}${placeholder}`;
-    }
-  );
-
-  // SRX: set snmp community <name>
-  sanitized = sanitized.replace(
-    /(set\s+snmp\s+community\s+)(\S+)/gi,
-    (match, prefix, value) => {
-      if (value.startsWith('SANITIZED_')) return match;
-      const idx = counter.community++;
-      const placeholder = `SANITIZED_COMMUNITY_${idx}`;
-      replacements.push({ type: 'community', placeholder, original: value });
-      return `${prefix}${placeholder}`;
-    }
-  );
-
-  // ==========================================================================
   // PASS 5: Usernames
   // ==========================================================================
 
@@ -552,31 +430,6 @@ export function sanitizeConfig(configText) {
       const placeholder = `SANITIZED_USER_${idx}`;
       replacements.push({ type: 'username', placeholder, original: name });
       return `${prefix}${placeholder}`;
-    }
-  );
-
-  // ==========================================================================
-  // PASS 6: Certificates
-  // ==========================================================================
-
-  sanitized = sanitized.replace(
-    /-----BEGIN\s+(?:RSA\s+|EC\s+|DSA\s+|ENCRYPTED\s+)?PRIVATE\s+KEY-----[\s\S]*?-----END\s+(?:RSA\s+|EC\s+|DSA\s+|ENCRYPTED\s+)?PRIVATE\s+KEY-----/g,
-    (match) => {
-      const idx = counter.cert++;
-      const placeholder = `SANITIZED_CERT_${idx}`;
-      replacements.push({ type: 'certificate', placeholder, original: match });
-      return placeholder;
-    }
-  );
-
-  sanitized = sanitized.replace(
-    /(<(?:private-key|certificate-key|ssl-key)>)([^<]+)(<\/)/gi,
-    (match, open, value, close) => {
-      if (value.trim().startsWith('SANITIZED_')) return match;
-      const idx = counter.cert++;
-      const placeholder = `SANITIZED_CERT_${idx}`;
-      replacements.push({ type: 'certificate', placeholder, original: value.trim() });
-      return `${open}${placeholder}${close}`;
     }
   );
 
@@ -665,43 +518,6 @@ export function sanitizeConfig(configText) {
       const placeholder = `SANITIZED_BGP_AS_${idx}`;
       replacements.push({ type: 'bgp', placeholder, original: value });
       return `${prefix}${placeholder}`;
-    }
-  );
-
-  // ==========================================================================
-  // PASS 9: Plaintext secrets in set-command format
-  // ==========================================================================
-
-  sanitized = sanitized.replace(
-    /(set\s+(?:password|passwd|secret|secondary-secret|auth-password|privacy-password)\s+)"([^"]+)"/gi,
-    (match, prefix, value) => {
-      if (value.startsWith('SANITIZED_')) return match;
-      const idx = counter.key++;
-      const placeholder = `SANITIZED_KEY_${idx}`;
-      replacements.push({ type: 'key', placeholder, original: value });
-      return `${prefix}"${placeholder}"`;
-    }
-  );
-
-  sanitized = sanitized.replace(
-    /(set\s+(?:password|passwd|secret|secondary-secret|auth-password|privacy-password)\s+)(\S+)/gi,
-    (match, prefix, value) => {
-      if (value.startsWith('SANITIZED_') || value === '"') return match;
-      const idx = counter.key++;
-      const placeholder = `SANITIZED_KEY_${idx}`;
-      replacements.push({ type: 'key', placeholder, original: value });
-      return `${prefix}${placeholder}`;
-    }
-  );
-
-  sanitized = sanitized.replace(
-    /((?:radius-server|tacplus-server|tacacs-server)\s+\S+\s+secret\s+)"([^"]+)"/gi,
-    (match, prefix, value) => {
-      if (value.startsWith('SANITIZED_')) return match;
-      const idx = counter.key++;
-      const placeholder = `SANITIZED_KEY_${idx}`;
-      replacements.push({ type: 'key', placeholder, original: value });
-      return `${prefix}"${placeholder}"`;
     }
   );
 

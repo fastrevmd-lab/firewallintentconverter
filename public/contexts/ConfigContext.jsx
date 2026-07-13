@@ -25,6 +25,7 @@ const initialState = {
   interfaceMappings: {},
   isSanitized: false,
   sanitizationTable: null,
+  projectSecurityMode: 'unsanitized',
   greenfieldMode: false,
   greenfieldTemplate: null,
   srxTranslatedPolicies: null,
@@ -34,6 +35,11 @@ const initialState = {
   warningStatuses: {},
   sectionAcceptance: {},
 };
+
+const PROVENANCE_FIELDS = new Set([
+  'configText', 'intermediateConfig', 'sourceVendor', 'interfaceMappings',
+  'greenfieldMode', 'greenfieldTemplate',
+]);
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -53,29 +59,54 @@ function removeAt(arr, index) {
   return next;
 }
 
+function invalidateSanitization(state) {
+  return {
+    ...state,
+    isSanitized: false,
+    projectSecurityMode: 'unsanitized',
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Reducer
 // ---------------------------------------------------------------------------
 function configReducer(state, action) {
   switch (action.type) {
     // Generic single-field setter
-    case 'SET_FIELD':
-      return { ...state, [action.field]: action.value };
+    case 'SET_FIELD': {
+      const next = { ...state, [action.field]: action.value };
+      return PROVENANCE_FIELDS.has(action.field) || action.field === 'isSanitized'
+        ? invalidateSanitization(next)
+        : next;
+    }
+
+    case 'SET_SANITIZATION_RESULT':
+      return {
+        ...state,
+        configText: action.configText,
+        sanitizationTable: action.sanitizationTable,
+        isSanitized: true,
+        projectSecurityMode: 'sanitized',
+      };
 
     // Bulk set after a successful parse
-    case 'SET_PARSE_RESULT':
-      return {
+    case 'SET_PARSE_RESULT': {
+      const next = {
         ...state,
         intermediateConfig: action.intermediateConfig,
         parseWarnings: action.warnings ?? [],
         parseStats: action.parseStats ?? null,
         sourceVendor: action.sourceVendor ?? state.sourceVendor,
       };
+      return action.preserveSanitization === true
+        ? next
+        : invalidateSanitization(next);
+    }
 
     // Functional update on intermediateConfig (updater receives prev, returns next)
     case 'UPDATE_CONFIG': {
       const updated = action.updater(state.intermediateConfig);
-      return { ...state, intermediateConfig: updated };
+      return invalidateSanitization({ ...state, intermediateConfig: updated });
     }
 
     // --- Security policy CRUD (source/intermediate rules) ---
@@ -86,13 +117,13 @@ function configReducer(state, action) {
         action.index,
         action.rule,
       );
-      return {
+      return invalidateSanitization({
         ...state,
         intermediateConfig: {
           ...state.intermediateConfig,
           security_policies: policies,
         },
-      };
+      });
     }
 
     case 'DELETE_RULE': {
@@ -101,64 +132,64 @@ function configReducer(state, action) {
         state.intermediateConfig.security_policies,
         action.index,
       );
-      return {
+      return invalidateSanitization({
         ...state,
         intermediateConfig: {
           ...state.intermediateConfig,
           security_policies: policies,
         },
-      };
+      });
     }
 
     case 'ADD_RULE': {
       const existing = state.intermediateConfig?.security_policies ?? [];
-      return {
+      return invalidateSanitization({
         ...state,
         intermediateConfig: {
           ...state.intermediateConfig,
           security_policies: [...existing, action.rule],
         },
-      };
+      });
     }
 
     // --- Translated (SRX) policy CRUD ---
     case 'SET_TRANSLATED_POLICIES':
-      return { ...state, srxTranslatedPolicies: action.policies };
+      return invalidateSanitization({ ...state, srxTranslatedPolicies: action.policies });
 
     case 'UPDATE_TRANSLATED_RULE': {
       if (!state.srxTranslatedPolicies) return state;
-      return {
+      return invalidateSanitization({
         ...state,
         srxTranslatedPolicies: replaceAt(
           state.srxTranslatedPolicies,
           action.index,
           action.rule,
         ),
-      };
+      });
     }
 
     case 'DELETE_TRANSLATED_RULE': {
       if (!state.srxTranslatedPolicies) return state;
-      return {
+      return invalidateSanitization({
         ...state,
         srxTranslatedPolicies: removeAt(
           state.srxTranslatedPolicies,
           action.index,
         ),
-      };
+      });
     }
 
     case 'ADD_TRANSLATED_RULE': {
       const existing = state.srxTranslatedPolicies ?? [];
-      return {
+      return invalidateSanitization({
         ...state,
         srxTranslatedPolicies: [...existing, action.rule],
-      };
+      });
     }
 
     // --- Rule grouping ---
     case 'SET_RULE_GROUPS':
-      return { ...state, ruleGroups: action.groups };
+      return invalidateSanitization({ ...state, ruleGroups: action.groups });
 
     // --- Bulk selection (Set stored immutably) ---
     case 'SET_SELECTED_KEYS':
@@ -249,4 +280,4 @@ function useConfigContext() {
   return ctx;
 }
 
-export { ConfigContext, ConfigProvider, useConfigContext };
+export { ConfigContext, ConfigProvider, configReducer, initialState, useConfigContext };

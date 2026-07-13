@@ -35,17 +35,15 @@ beforeEach(() => {
 });
 
 describe('credential source invariants', () => {
-  it('runs both credential security suites in CI', () => {
+  it('runs credential security suites through complete Vitest discovery in CI', () => {
     const ci = read('.github/workflows/ci.yml');
     const start = ci.indexOf('      - name: Run Vitest suites\n');
     const end = ci.indexOf('\n      - name:', start + 1);
     expect(start).toBeGreaterThanOrEqual(0);
     expect(end).toBeGreaterThan(start);
     const step = ci.slice(start, end);
-    const command = step.match(/\n        run: >-\n([\s\S]*)/)?.[1] || '';
-    expect(command).toContain('npx vitest run');
-    expect(command).toContain('tests/llm-settings.test.js');
-    expect(command).toContain('tests/credential-security.test.js');
+    expect(step).toMatch(/\n        run: npx vitest run\s*$/);
+    expect(step).not.toMatch(/tests\/[\w-]+\.test\.(?:js|jsx)/);
   });
 
   it('has no tracked runtime device inventory', () => {

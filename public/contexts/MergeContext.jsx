@@ -16,6 +16,11 @@ export const initialState = {
   crossLsLinks: [],
 };
 
+const SLOT_PROVENANCE_FIELDS = new Set([
+  'configText', 'intermediateConfig', 'sourceVendor', 'sourceModel',
+  'interfaceMappings', 'srxTranslatedPolicies', 'ruleGroups',
+]);
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -66,15 +71,26 @@ export function mergeReducer(state, action) {
     }
 
     // Update a slot at a given index (shallow merge with existing slot)
-    case 'UPDATE_SLOT':
+    case 'UPDATE_SLOT': {
+      const invalidates = action.preserveSanitization !== true
+        && Object.keys(action.slot).some(key => SLOT_PROVENANCE_FIELDS.has(key));
+      const updatedSlot = {
+        ...state.configSlots[action.index],
+        ...action.slot,
+        ...(invalidates ? {
+          isSanitized: false,
+          projectSecurityMode: 'unsanitized',
+        } : {}),
+      };
       return {
         ...state,
         configSlots: replaceAt(
           state.configSlots,
           action.index,
-          { ...state.configSlots[action.index], ...action.slot },
+          updatedSlot,
         ),
       };
+    }
 
     // Set the active slot index
     case 'SET_ACTIVE_SLOT':

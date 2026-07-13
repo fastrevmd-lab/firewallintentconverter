@@ -31,21 +31,7 @@ jobs:
         run: npm ci
 
       - name: Run Vitest suites
-        run: >-
-          npx vitest run
-          tests/context-reducers.test.js
-          tests/triage.test.js
-          tests/workflow-steps.test.js
-          tests/junos-serialization.test.js
-          tests/junos-validation.test.js
-          tests/srx-injection-defense.test.js
-          tests/conversion-security.test.js
-          tests/conversion-output.test.js
-          tests/conversion-enforcement.test.js
-          tests/project-io.test.js
-          tests/conversion-consumers.test.js
-          tests/llm-settings.test.js
-          tests/credential-security.test.js
+        run: npx vitest run
 
       - name: Run self-contained JavaScript suites
         shell: bash

@@ -28,6 +28,12 @@ const LLMSettings = React.lazy(() => import('./components/LLMSettings.jsx'));
 const AppMappingsEditor = React.lazy(() => import('./components/AppMappingsEditor.jsx'));
 const FeedbackModal = React.lazy(() => import('./components/FeedbackModal.jsx'));
 const SaveProjectModal = React.lazy(() => import('./components/SaveProjectModal.jsx'));
+const loadProjectSecurityImport = () => import('./components/ProjectSecurityImportModal.jsx');
+const ProjectSecurityImportModal = React.lazy(loadProjectSecurityImport);
+const ProjectSecurityNotice = React.lazy(async () => {
+  const module = await loadProjectSecurityImport();
+  return { default: module.ProjectSecurityNotice };
+});
 const ReportModal = React.lazy(() => import('./components/ReportModal.jsx'));
 const GuidedTour = React.lazy(() => import('./components/GuidedTour.jsx'));
 const PushModal = React.lazy(() => import('./components/PushModal.jsx'));
@@ -51,6 +57,15 @@ import useKeyboardShortcuts from './hooks/useKeyboardShortcuts.js';
 // Utils
 import { GREENFIELD_TEMPLATES } from './data/greenfield-templates.js';
 import { parseConfig, sanitizeConfig } from './utils/engine.js';
+import { isProjectCryptoAvailable } from './utils/project-crypto.js';
+import { readProjectSecurityDescriptor } from './components/ProjectSecurityBadge.jsx';
+
+export function deriveSanitizeFirstActions() {
+  return [
+    { type: 'HIDE_MODAL', name: 'saveModal' },
+    { type: 'SET_FIELD', field: 'editTab', value: 'import' },
+  ];
+}
 
 export default function App() {
   // --- Context access ---
@@ -72,6 +87,9 @@ export default function App() {
 
   // --- Computed ---
   const isHealthCheckMode = cfg.sourceVendor === 'srx_healthcheck';
+  const projectSecurityDescriptor = readProjectSecurityDescriptor(
+    project.getExportDescriptor,
+  );
 
   // ------------------------------------------------------------------
   // Keyboard shortcut registration
@@ -336,10 +354,11 @@ export default function App() {
       const data = await parseConfig(sanitized.sanitizedText);
       (data.intermediateConfig.security_policies || []).forEach(r => { r._review_status = 'unreviewed'; });
       const detectedVendor = data.detectedVendor || data.intermediateConfig?.metadata?.source_vendor || 'panos';
-      mergeDispatch({ type: 'UPDATE_SLOT', index: slotIndex, slot: {
+      mergeDispatch({ type: 'UPDATE_SLOT', index: slotIndex, preserveSanitization: true, slot: {
         configText: sanitized.sanitizedText,
         intermediateConfig: data.intermediateConfig,
         isSanitized: true,
+        projectSecurityMode: 'sanitized',
         sanitizationTable: sanitized.replacements,
         sourceVendor: detectedVendor,
         parseWarnings: data.warnings || [],
@@ -477,7 +496,7 @@ export default function App() {
         </div>
       </div>
 
-      <StatusBar />
+      <StatusBar projectSecurityDescriptor={projectSecurityDescriptor} />
 
       {/* Command Palette */}
       {ui.commandPaletteOpen && <CommandPalette />}
@@ -542,8 +561,21 @@ export default function App() {
       {ui.showSaveModal && (
         <SaveProjectModal
           defaultName={project.generateName()}
-          onSave={project.handleSaveProject}
+          descriptor={project.getExportDescriptor()}
+          cryptoAvailable={isProjectCryptoAvailable()}
+          onExport={project.handleExportProject}
+          onSanitizeFirst={() => {
+            deriveSanitizeFirstActions().forEach(action => uiDispatch(action));
+          }}
           onClose={() => uiDispatch({ type: 'HIDE_MODAL', name: 'saveModal' })}
+        />
+      )}
+
+      {ui.showProjectSecurityImport && (
+        <ProjectSecurityImportModal
+          descriptor={ui.showProjectSecurityImport}
+          onConfirm={project.confirmPendingImport}
+          onClose={project.cancelPendingImport}
         />
       )}
 
@@ -640,14 +672,15 @@ export default function App() {
 
       {/* Load project confirmation */}
       {ui.showLoadConfirm && (
-        <div className="modal-overlay" onClick={() => uiDispatch({ type: 'HIDE_MODAL', name: 'loadConfirm' })}>
+        <div className="modal-overlay" onClick={project.cancelValidatedImportReview}>
           <div className="modal-content" onClick={e => e.stopPropagation()} style={{ width: 480 }}>
             <div className="modal-header">
               <h2>Load Project</h2>
-              <button className="modal-close" onClick={() => uiDispatch({ type: 'HIDE_MODAL', name: 'loadConfirm' })}>&times;</button>
+              <button className="modal-close" onClick={project.cancelValidatedImportReview}>&times;</button>
             </div>
             <div className="modal-body" style={{ padding: '16px 20px' }}>
               <p style={{ fontWeight: 600, marginBottom: 8 }}>{ui.showLoadConfirm.project.name || 'Unnamed Project'}</p>
+              <ProjectSecurityNotice descriptor={ui.showLoadConfirm.security} />
               <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 12 }}>
                 <div>Saved: {new Date(ui.showLoadConfirm.project.savedAt).toLocaleString()}</div>
                 <div>Vendor: {ui.showLoadConfirm.project.state?.sourceVendor || 'Unknown'}</div>
@@ -665,8 +698,16 @@ export default function App() {
               )}
             </div>
             <div className="modal-footer" style={{ gap: 8 }}>
-              <button className="btn btn-secondary" onClick={() => uiDispatch({ type: 'HIDE_MODAL', name: 'loadConfirm' })}>Cancel</button>
-              <button className="btn btn-primary" onClick={() => project.applyLoadedProject(ui.showLoadConfirm.project)}>Load Project</button>
+              <button className="btn btn-secondary" onClick={project.cancelValidatedImportReview}>Cancel</button>
+              <button
+                className="btn btn-primary"
+                onClick={() => project.applyLoadedProject(
+                  ui.showLoadConfirm.project,
+                  ui.showLoadConfirm.security,
+                )}
+              >
+                Load Project
+              </button>
             </div>
           </div>
         </div>

@@ -60,9 +60,11 @@ export default function useConfig() {
 
     try {
       const data = sanitizeConfig(configState.configText);
-      configDispatch({ type: 'SET_FIELD', field: 'configText', value: data.sanitizedText });
-      configDispatch({ type: 'SET_FIELD', field: 'sanitizationTable', value: data.replacements });
-      configDispatch({ type: 'SET_FIELD', field: 'isSanitized', value: true });
+      configDispatch({
+        type: 'SET_SANITIZATION_RESULT',
+        configText: data.sanitizedText,
+        sanitizationTable: data.replacements,
+      });
     } catch (err) {
       uiDispatch({ type: 'SET_FIELD', field: 'error', value: `Sanitize error: ${err.message}` });
     } finally {
@@ -105,9 +107,11 @@ export default function useConfig() {
       if (!configState.isSanitized || overrideText) {
         const sanitized = sanitizeConfig(rawText);
         textToParse = sanitized.sanitizedText;
-        configDispatch({ type: 'SET_FIELD', field: 'configText', value: textToParse });
-        configDispatch({ type: 'SET_FIELD', field: 'sanitizationTable', value: sanitized.replacements });
-        configDispatch({ type: 'SET_FIELD', field: 'isSanitized', value: true });
+        configDispatch({
+          type: 'SET_SANITIZATION_RESULT',
+          configText: textToParse,
+          sanitizationTable: sanitized.replacements,
+        });
       }
 
       const data = await parseConfig(textToParse);
@@ -137,6 +141,7 @@ export default function useConfig() {
         warnings: data.warnings || [],
         parseStats: data.parseStats || null,
         sourceVendor: effectiveVendor,
+        preserveSanitization: true,
       });
       configDispatch({ type: 'SET_FIELD', field: 'warningStatuses', value: {} });
       configDispatch({ type: 'SET_FIELD', field: 'ruleGroups', value: [] });

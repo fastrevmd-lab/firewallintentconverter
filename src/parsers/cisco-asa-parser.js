@@ -2710,10 +2710,10 @@ function parseCiscoSnmpConfig(lines, warnings) {
       if (!grouped.has(key)) grouped.set(key, []);
       grouped.get(key).push(th.ip);
     }
-    for (const [groupName, targets] of grouped) {
+    for (const targets of grouped.values()) {
       entries.push({
         type: 'trap-group',
-        name: `trap-${groupName}`,
+        name: `trap-host-${entries.filter(entry => entry.type === 'trap-group').length + 1}`,
         targets,
         categories: [],
         version: trapHosts[0].version || 'v2c',

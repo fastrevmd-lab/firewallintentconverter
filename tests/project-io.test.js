@@ -512,6 +512,72 @@ end`,
 end`,
   };
 
+  const INCOMPLETE_FORTIGATE_EXPORTS = [
+    {
+      label: 'raw SNMP outer scope',
+      text: `config system snmp community
+ edit 1
+  set name "FORGED-SNMP-QUOTED"
+ next
+ edit 2
+  set name FORGED-SNMP-BARE
+ next
+ edit 3
+  set name ENC "FORGED-SNMP-ENC"
+ next`,
+    },
+    {
+      label: 'raw TACACS nested scope',
+      text: `config user tacacs+
+ edit "one"
+  set key "FORGED-TACACS-QUOTED"
+ next
+ edit "two"
+  set key FORGED-TACACS-BARE
+ next
+ edit "three"
+  set key ENC "FORGED-TACACS-ENC"
+ next
+ config metadata
+  edit "unfinished"
+  next`,
+    },
+    {
+      label: 'placeholder-only SNMP nested scope',
+      text: `config system snmp community
+ edit 1
+  set name SANITIZED_COMMUNITY_0
+ next
+ config hosts
+  edit 1
+   set ip 192.0.2.1 255.255.255.255
+  next`,
+    },
+    {
+      label: 'placeholder-only TACACS outer scope',
+      text: `config user tacacs+
+ edit "one"
+  set key SANITIZED_KEY_0
+ next`,
+    },
+  ];
+
+  it.each(INCOMPLETE_FORTIGATE_EXPORTS)(
+    'rejects forged sanitized export with incomplete $label',
+    async ({ text }) => {
+      await expect(serializeProjectExport({
+        ...baseState,
+        configText: text,
+        isSanitized: true,
+        sanitizationTable: null,
+      }, 'forged-incomplete-fortigate', { mode: 'sanitized' }))
+        .rejects.toMatchObject({
+          code: 'secret_leak',
+          message: 'Sanitized export was blocked because secret-bearing content remains.',
+        });
+    },
+  );
+
   it('keeps every nested FortiGate SNMP marker out of sanitized final bytes', async () => {
     const { text, markers } = FORTIGATE_NESTED_SNMP_EXPORT;
     expect(findSecretsInText(text)).toHaveLength(3);

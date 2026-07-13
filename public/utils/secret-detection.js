@@ -1,5 +1,17 @@
 const PLACEHOLDER_RE = /^SANITIZED_(?:HASH|KEY|COMMUNITY|CERT)_\d+$/;
 const KEY_RE = /^(?:password|passwd|passwordhash|phash|encryptedpassword|secret|sharedsecret|secondarysecret|psk|presharedkey|psksecret|authkey|authenticationkey|authenticationpassword|privacykey|privacypassword|apikey|snmpcommunity|radiussecret|radiuskey|tacacssecret|tacacskey|tacplussecret|tacpluskey|privatekey|certificatekey)$/;
+const INCOMPLETE_SCOPE_FINDING = Object.freeze({
+  category: 'scope',
+  ruleId: 'fortigate-incomplete-sensitive-block',
+});
+
+export class SecretScopeError extends Error {
+  constructor() {
+    super('Sensitive FortiGate configuration block is incomplete.');
+    this.name = 'SecretScopeError';
+    this.code = 'incomplete_sensitive_scope';
+  }
+}
 
 function normalizedKey(key) {
   return String(key).replace(/[^a-z0-9]/gi, '').toLowerCase();
@@ -77,11 +89,18 @@ function fortigateBlockRegions(text, targetHeader) {
     } else if (/^[ \t]*end[ \t]*$/i.test(line)) {
       depth -= 1;
       if (depth === 0) {
-        regions.push(Object.freeze({ start: blockStart, end: lineEnd }));
+        regions.push(Object.freeze({ start: blockStart, end: lineEnd, incomplete: false }));
         blockStart = -1;
       }
     }
     lineStart = lineEnd;
+  }
+  if (blockStart >= 0) {
+    regions.push(Object.freeze({
+      start: blockStart,
+      end: text.length,
+      incomplete: true,
+    }));
   }
   return regions;
 }
@@ -190,17 +209,17 @@ export function findSecretsInText(text) {
   const findings = [];
   for (const spec of SECRET_SYNTAXES) {
     const regions = spec.blockHeader
-      ? fortigateBlockRegions(text, spec.blockHeader).map(region => (
-        text.slice(region.start, region.end)
-      ))
-      : [text];
+      ? fortigateBlockRegions(text, spec.blockHeader)
+      : [{ start: 0, end: text.length, incomplete: false }];
     const entryRegex = spec.blockHeader ? spec.entryRegex : spec.regex;
     for (const region of regions) {
-      for (const match of region.matchAll(cloneRegex(entryRegex))) {
+      const regionText = text.slice(region.start, region.end);
+      for (const match of regionText.matchAll(cloneRegex(entryRegex))) {
         const original = secretValue(spec, match);
         if (!original || isSanitizedSecretValue(original.trim())) continue;
         findings.push({ category: spec.category, ruleId: spec.ruleId });
       }
+      if (region.incomplete) findings.push(INCOMPLETE_SCOPE_FINDING);
     }
   }
   return findings;
@@ -228,6 +247,7 @@ export function redactConfigSecrets(text) {
     };
     if (spec.blockHeader) {
       const regions = fortigateBlockRegions(output, spec.blockHeader);
+      if (regions.some(region => region.incomplete)) throw new SecretScopeError();
       const source = output;
       const segments = [];
       let cursor = 0;

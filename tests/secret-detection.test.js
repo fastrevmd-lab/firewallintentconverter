@@ -201,7 +201,176 @@ const FORTIGATE_NESTED_SNMP_BLOCK = `config system snmp community
  next
 end`;
 
+const INCOMPLETE_FORTIGATE_BLOCKS = [
+  {
+    label: 'SNMP outer scope',
+    ruleId: 'fortigate-snmp-block-name',
+    markers: ['SNMP-INCOMPLETE-QUOTED', 'SNMP-INCOMPLETE-BARE', 'SNMP-INCOMPLETE-ENC'],
+    text: `config system snmp community
+ edit 1
+  set name "SNMP-INCOMPLETE-QUOTED"
+ next
+ edit 2
+  set name SNMP-INCOMPLETE-BARE
+ next
+ edit 3
+  set name ENC "SNMP-INCOMPLETE-ENC"
+ next`,
+  },
+  {
+    label: 'TACACS outer scope',
+    ruleId: 'fortigate-tacacs-block-key',
+    markers: ['TACACS-INCOMPLETE-QUOTED', 'TACACS-INCOMPLETE-BARE', 'TACACS-INCOMPLETE-ENC'],
+    text: `config user tacacs+
+ edit "one"
+  set key "TACACS-INCOMPLETE-QUOTED"
+ next
+ edit "two"
+  set key TACACS-INCOMPLETE-BARE
+ next
+ edit "three"
+  set key ENC "TACACS-INCOMPLETE-ENC"
+ next`,
+  },
+  {
+    label: 'SNMP nested scope',
+    ruleId: 'fortigate-snmp-block-name',
+    markers: ['SNMP-NESTED-QUOTED', 'SNMP-NESTED-BARE', 'SNMP-NESTED-ENC'],
+    text: `config system snmp community
+ edit 1
+  set name "SNMP-NESTED-QUOTED"
+ next
+ edit 2
+  set name SNMP-NESTED-BARE
+ next
+ edit 3
+  set name ENC "SNMP-NESTED-ENC"
+ next
+ config hosts
+  edit 1
+   set ip 192.0.2.1 255.255.255.255
+  next`,
+  },
+  {
+    label: 'TACACS nested scope',
+    ruleId: 'fortigate-tacacs-block-key',
+    markers: ['TACACS-NESTED-QUOTED', 'TACACS-NESTED-BARE', 'TACACS-NESTED-ENC'],
+    text: `config user tacacs+
+ edit "one"
+  set key "TACACS-NESTED-QUOTED"
+ next
+ edit "two"
+  set key TACACS-NESTED-BARE
+ next
+ edit "three"
+  set key ENC "TACACS-NESTED-ENC"
+ next
+ config metadata
+  edit "unfinished"
+   set value "not-a-key"
+  next`,
+  },
+];
+
+const PLACEHOLDER_ONLY_INCOMPLETE_BLOCKS = [
+  `config system snmp community
+ edit 1
+  set name SANITIZED_COMMUNITY_0
+ next`,
+  `config user tacacs+
+ edit "one"
+  set key SANITIZED_KEY_0
+ next`,
+  `config system snmp community
+ config hosts
+  edit 1
+   set ip 192.0.2.1 255.255.255.255
+  next`,
+  `config user tacacs+
+ config metadata
+  edit "unfinished"
+  next`,
+];
+
+const INCOMPLETE_SCOPE_ERROR = {
+  name: 'SecretScopeError',
+  code: 'incomplete_sensitive_scope',
+  message: 'Sensitive FortiGate configuration block is incomplete.',
+};
+
 describe('firewall secret registry', () => {
+  it.each(['\n', '\r\n', '\r'])(
+    'preserves complete FortiGate block behavior with %j line endings',
+    lineEnding => {
+      const text = [
+        'config system snmp community',
+        ' edit 1',
+        '  set name "COMPLETE-LINE-ENDING-SECRET"',
+        ' next',
+        'end',
+      ].join(lineEnding);
+      expect(findSecretsInText(text)).toEqual([{
+        category: 'community',
+        ruleId: 'fortigate-snmp-block-name',
+      }]);
+      const redacted = redactConfigSecrets(text);
+      expect(redacted.replacements).toHaveLength(1);
+      expect(redacted.text).not.toContain('COMPLETE-LINE-ENDING-SECRET');
+      expect(redacted.text).toContain(lineEnding);
+    },
+  );
+
+  it.each(INCOMPLETE_FORTIGATE_BLOCKS)(
+    'scans every secret through EOF and reports malformed $label',
+    ({ text, markers, ruleId }) => {
+      const findings = findSecretsInText(text);
+      expect(findings.filter(finding => finding.ruleId === ruleId)).toHaveLength(3);
+      const scopeFindings = findings.filter(finding => (
+        finding.ruleId === 'fortigate-incomplete-sensitive-block'
+      ));
+      expect(scopeFindings).toEqual([{
+        category: 'scope',
+        ruleId: 'fortigate-incomplete-sensitive-block',
+      }]);
+      for (const marker of markers) {
+        expect(JSON.stringify(scopeFindings)).not.toContain(marker);
+      }
+    },
+  );
+
+  it.each(INCOMPLETE_FORTIGATE_BLOCKS)(
+    'rejects redaction and sanitization of malformed $label with fixed local errors',
+    ({ text, markers }) => {
+      for (const operation of [redactConfigSecrets, sanitizeConfig]) {
+        let error;
+        try {
+          operation(text);
+        } catch (caught) {
+          error = caught;
+        }
+        expect(error).toMatchObject(INCOMPLETE_SCOPE_ERROR);
+        expect(error).not.toHaveProperty('cause');
+        for (const marker of markers) expect(error.message).not.toContain(marker);
+      }
+    },
+  );
+
+  it.each(PLACEHOLDER_ONLY_INCOMPLETE_BLOCKS)(
+    'fails closed for placeholder-only or empty incomplete sensitive block %#',
+    text => {
+      expect(findSecretsInText(text)).toEqual([{
+        category: 'scope',
+        ruleId: 'fortigate-incomplete-sensitive-block',
+      }]);
+      expect(() => redactConfigSecrets(text)).toThrow(
+        expect.objectContaining(INCOMPLETE_SCOPE_ERROR),
+      );
+      expect(() => sanitizeConfig(text)).toThrow(
+        expect.objectContaining(INCOMPLETE_SCOPE_ERROR),
+      );
+    },
+  );
+
   it('keeps the complete nested FortiGate target block in secret scope', () => {
     const markers = [
       'FIRST-SNMP-SECRET',

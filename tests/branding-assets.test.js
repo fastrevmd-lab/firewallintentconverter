@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { exportToAnsible, exportToTerraform } from '../public/utils/iac-export.js';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const read = path => readFileSync(join(root, path), 'utf8');
@@ -43,6 +44,21 @@ describe('Mechub browser identity assets', () => {
       const source = read(path);
       expect(source).toContain('@fontsource-variable/geist/wght.css');
       expect(source).toContain('@fontsource-variable/geist-mono/wght.css');
+    }
+  });
+
+  it('brands the standalone guide and generated IaC artifacts', () => {
+    const identity = 'firewallintentconverter · a mechub project';
+    const outputs = [
+      read('standalone/README.txt'),
+      exportToTerraform(['set system host-name branch-a']),
+      exportToAnsible(['set system host-name branch-a']),
+    ];
+
+    for (const output of outputs) {
+      expect(output).toContain(identity);
+      expect(output).not.toContain('Firewall Policy Converter');
+      expect(output).not.toContain('Firewall Intent Converter');
     }
   });
 });

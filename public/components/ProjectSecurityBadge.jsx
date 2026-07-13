@@ -1,33 +1,29 @@
 import React from 'react';
 
-const BADGE_COPY = Object.freeze({
-  sanitized: 'Sanitized — safe to share',
-  'reversible-encrypted': 'Encrypted reversible — sensitive',
-  'legacy-secret-bearing': 'Legacy secret-bearing — sensitive',
-});
-
-function isPopulatedSlot(slot) {
-  return Boolean(
-    typeof slot?.configText === 'string' && slot.configText.trim()
-    || slot?.intermediateConfig !== null && slot?.intermediateConfig !== undefined,
-  );
-}
-
-export function deriveWorkspaceSecurityMode(configState, mergeState) {
-  if (mergeState?.mergeMode === true
-      && Array.isArray(mergeState.configSlots)
-      && mergeState.configSlots.some(slot => isPopulatedSlot(slot) && slot.isSanitized !== true)) {
-    return 'unsanitized';
+export function readProjectSecurityDescriptor(getDescriptor) {
+  try {
+    return typeof getDescriptor === 'function' ? getDescriptor() : null;
+  } catch {
+    return null;
   }
-  return configState?.projectSecurityMode || 'unsanitized';
 }
 
-export default function ProjectSecurityBadge({ mode }) {
-  const safe = mode === 'sanitized';
-  const copy = BADGE_COPY[mode] || 'Unsanitized or stale — sensitive';
+export default function ProjectSecurityBadge({ mode, descriptor }) {
+  const safe = descriptor?.mode === 'sanitized'
+    && descriptor?.sanitizedEligible === true;
+  const reversible = safe
+    && mode === 'reversible-encrypted'
+    && descriptor?.reversibleAvailable === true;
+  const copy = reversible
+    ? 'Encrypted reversible — sensitive'
+    : safe
+      ? 'Sanitized — safe to share'
+      : mode === 'legacy-secret-bearing'
+        ? 'Legacy secret-bearing — sensitive'
+        : 'Unsanitized or stale — sensitive';
   return (
     <div
-      className={`project-security-badge project-security-badge--${safe ? 'safe' : 'danger'}`}
+      className={`project-security-badge project-security-badge--${safe && !reversible ? 'safe' : 'danger'}`}
       role="status"
       aria-label={`Workspace security: ${copy}`}
     >

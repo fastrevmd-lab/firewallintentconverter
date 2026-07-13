@@ -46,6 +46,7 @@ const BARE_KEY_SECRET_CONTEXTS = new Set([
   'certificatecontainer', 'certificatecontainers',
 ]);
 const TEXT_ENCODER = new TextEncoder();
+const PROJECT_DOWNLOAD_SNAPSHOTS = new WeakMap();
 
 const ERROR_MESSAGES = Object.freeze({
   unsafe_state: 'Project state contains an unsupported value.',
@@ -603,7 +604,14 @@ async function serializeProjectExportInternal(stateBag, name, options) {
 
 export async function serializeProjectExport(stateBag, name, options = {}) {
   try {
-    return await serializeProjectExportInternal(stateBag, name, options);
+    const result = await serializeProjectExportInternal(stateBag, name, options);
+    const snapshot = Object.freeze({
+      serialized: result.serialized,
+      filename: result.filename,
+      security: Object.freeze({ mode: result.security.mode }),
+    });
+    PROJECT_DOWNLOAD_SNAPSHOTS.set(result, snapshot);
+    return result;
   } catch (error) {
     if (error instanceof ProjectSecurityError) {
       throw new ProjectSecurityError(error.code);
@@ -611,6 +619,19 @@ export async function serializeProjectExport(stateBag, name, options = {}) {
     if (error instanceof ProjectCryptoError) {
       throw new ProjectCryptoError(error.code);
     }
+    throw new ProjectSecurityError('invalid_project');
+  }
+}
+
+export function consumeValidatedProjectDownload(result) {
+  try {
+    if (result === null || typeof result !== 'object') {
+      throw new ProjectSecurityError('invalid_project');
+    }
+    const snapshot = PROJECT_DOWNLOAD_SNAPSHOTS.get(result);
+    if (!snapshot) throw new ProjectSecurityError('invalid_project');
+    return snapshot;
+  } catch {
     throw new ProjectSecurityError('invalid_project');
   }
 }
@@ -861,9 +882,21 @@ function inspectProjectSource(source) {
 }
 
 export function inspectProjectImport(serialized) {
+  let source;
   try {
-    return inspectProjectSource(parseProjectText(serialized));
+    source = parseProjectText(serialized);
   } catch (error) {
+    if (error instanceof ProjectSecurityError
+        && ['unsupported_version', 'oversized_project'].includes(error.code)) {
+      throw new ProjectSecurityError(error.code);
+    }
+    throw new ProjectSecurityError('invalid_project');
+  }
+  const recognizedEncrypted = isRecognizedEncryptedProject(source.parsed);
+  try {
+    return inspectProjectSource(source);
+  } catch (error) {
+    if (recognizedEncrypted) throw new ProjectCryptoError('decryption_failed');
     if (error instanceof ProjectSecurityError
         && ['unsupported_version', 'oversized_project'].includes(error.code)) {
       throw new ProjectSecurityError(error.code);

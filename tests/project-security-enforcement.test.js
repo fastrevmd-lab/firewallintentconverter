@@ -367,13 +367,17 @@ function propertyKinds(sourceKinds, property) {
   if (sourceKinds.has('project-export-namespace')
       && PROJECT_EXPORT_FUNCTIONS.has(property)) {
     kinds.add('project-export-function');
+    if (property === 'serializeProjectExport') kinds.add('project-export-serializer');
   }
   if (sourceKinds.has('project')
       && ['serialized', 'security', 'state', 'payload', 'envelope'].includes(property)) {
     kinds.add('project');
   }
-  if (sourceKinds.has('validated-project-result') && property === 'serialized') {
+  if (sourceKinds.has('project-download-snapshot') && property === 'serialized') {
     kinds.add('validated-project');
+  }
+  if (sourceKinds.has('untrusted-download-result') && property === 'serialized') {
+    kinds.add('project');
   }
   return kinds;
 }
@@ -456,12 +460,14 @@ function expressionKinds(node, model, projectContext) {
   if (node.type === 'CallExpression') {
     const calleeKinds = expressionKinds(node.callee, model, projectContext);
     if (calleeKinds.has('project-export-function')) kinds.add('project');
+    if (calleeKinds.has('project-export-serializer')) kinds.add('project-export-result');
+    if (calleeKinds.has('project-download-consumer')) kinds.add('project-download-snapshot');
     if (node.callee.type === 'Identifier'
         && node.callee.name === 'ownDataValue'
         && expressionKinds(node.arguments[0], model, projectContext)
-          .has('validated-project-result')
+          .has('untrusted-download-result')
         && constantString(node.arguments[1], model) === 'serialized') {
-      kinds.add('validated-project');
+      kinds.add('project');
     }
     if (calleeKinds.has('json-stringify')
         && expressionKinds(node.arguments[0], model, projectContext).has('project')) {
@@ -566,6 +572,20 @@ function collectBindings(model, projectContext) {
       } else if (isProjectModule(binding.importSource)
           && PROJECT_EXPORT_FUNCTIONS.has(binding.importedName)) {
         addKinds(binding, ['project-export-function']);
+        if (binding.importedName === 'serializeProjectExport') {
+          addKinds(binding, ['project-export-serializer']);
+        }
+      }
+      if (isProjectModule(binding.importSource)
+          && binding.importedName === 'consumeValidatedProjectDownload') {
+        addKinds(binding, ['project-download-consumer']);
+      }
+      if (isProjectModule(binding.importSource)
+          && binding.importedName === 'inspectProjectImport') {
+        addKinds(binding, ['project-inspection-function']);
+      }
+      if (binding.importedName === DOWNLOAD_APPROVED_FUNCTION) {
+        addKinds(binding, ['project-download-helper']);
       }
     }
   }
@@ -639,7 +659,7 @@ async function analyzeSource(source, relativePath) {
     const environmentParameter = identifierFromPattern(approvedDownloadFunction.params[1]);
     if (resultParameter) {
       addKinds(resolveBinding(model, resultParameter, resultParameter.name), [
-        'validated-project-result',
+        'untrusted-download-result',
       ]);
     }
     if (environmentParameter) {
@@ -647,6 +667,11 @@ async function analyzeSource(source, relativePath) {
         'global-namespace',
       ]);
     }
+    addKinds(resolveBinding(
+      model,
+      approvedDownloadFunction.id,
+      approvedDownloadFunction.id.name,
+    ), ['project-download-helper']);
   }
   collectBindings(model, projectContext);
   const decodedMap = transformed.map ? decodeSourceMap(transformed.map) : null;
@@ -660,6 +685,27 @@ async function analyzeSource(source, relativePath) {
     && node.end <= approvedDownloadFunction.end,
   );
 
+  if (approvedDownloadFunction) {
+    let consumesSnapshot = false;
+    let inspectsSnapshot = false;
+    walkAst(approvedDownloadFunction.body, node => {
+      if (node.type !== 'CallExpression') return;
+      const calleeKinds = expressionKinds(node.callee, model, projectContext);
+      if (calleeKinds.has('project-download-consumer')) consumesSnapshot = true;
+      if (calleeKinds.has('project-inspection-function')
+          && expressionKinds(node.arguments[0], model, projectContext)
+            .has('validated-project')) {
+        inspectsSnapshot = true;
+      }
+    });
+    if (!consumesSnapshot) {
+      report(approvedDownloadFunction, 'download helper missing boundary snapshot consumption');
+    }
+    if (!inspectsSnapshot) {
+      report(approvedDownloadFunction, 'download helper missing runtime inspection');
+    }
+  }
+
   walkAst(ast, node => {
     if (isSanitizedV5WithTable(node, model)) {
       report(node, 'sanitized v5 payload includes sanitizationTable');
@@ -671,6 +717,11 @@ async function analyzeSource(source, relativePath) {
     }
     if (node.type === 'CallExpression') {
       const calleeKinds = expressionKinds(node.callee, model, projectContext);
+      if (calleeKinds.has('project-download-helper')
+          && !expressionKinds(node.arguments[0], model, projectContext)
+            .has('project-export-result')) {
+        report(node, 'unproven project download helper call');
+      }
       if (!SERIALIZATION_APPROVED.has(relativePath)
           && calleeKinds.has('json-stringify')
           && expressionKinds(node.arguments[0], model, projectContext)
@@ -725,6 +776,65 @@ async function analyzeRepository() {
 
 const BYPASS_FIXTURES = [
   {
+    label: 'download helper without runtime project inspection',
+    relativePath: 'public/hooks/useProject.js',
+    source: `import { consumeValidatedProjectDownload } from '../utils/project-security.js';
+export function downloadValidatedProject(result, environment = globalThis) {
+  const snapshot = consumeValidatedProjectDownload(result);
+  const serialized = snapshot.serialized;
+  const BlobImpl = environment.Blob;
+  const blob = new BlobImpl([serialized], { type: 'application/json' });
+  return environment.URL.createObjectURL(blob);
+}`,
+    expected: [
+      'public/hooks/useProject.js:2: download helper missing runtime inspection',
+    ],
+  },
+  {
+    label: 'download helper without boundary snapshot consumption',
+    relativePath: 'public/hooks/useProject.js',
+    source: `import { inspectProjectImport } from '../utils/project-security.js';
+export function downloadValidatedProject(result, environment = globalThis) {
+  const serialized = result.serialized;
+  inspectProjectImport(serialized);
+  const blob = new environment.Blob([serialized], { type: 'application/json' });
+  return environment.URL.createObjectURL(blob);
+}`,
+    expected: [
+      'public/hooks/useProject.js:2: download helper missing boundary snapshot consumption',
+      'public/hooks/useProject.js:2: download helper missing runtime inspection',
+      'public/hooks/useProject.js:5: project Blob construction',
+      'public/hooks/useProject.js:6: project object URL creation',
+    ],
+  },
+  {
+    label: 'another hook function calling the helper with a hand-built result',
+    relativePath: 'public/hooks/useProject.js',
+    source: `import { consumeValidatedProjectDownload, inspectProjectImport } from '../utils/project-security.js';
+export function downloadValidatedProject(result, environment = globalThis) {
+  const snapshot = consumeValidatedProjectDownload(result);
+  const serialized = snapshot.serialized;
+  inspectProjectImport(serialized);
+  const blob = new environment.Blob([serialized]);
+  return environment.URL.createObjectURL(blob);
+}
+export function bypassDownload() {
+  return downloadValidatedProject({ serialized: '{}', filename: 'x.fpic.json', security: {} });
+}`,
+    expected: [
+      'public/hooks/useProject.js:10: unproven project download helper call',
+    ],
+  },
+  {
+    label: 'another public file calling the helper with a hand-built result',
+    relativePath: 'public/components/ProjectBypass.js',
+    source: `import { downloadValidatedProject } from '../hooks/useProject.js';
+downloadValidatedProject({ serialized: '{}', filename: 'x.fpic.json', security: {} });`,
+    expected: [
+      'public/components/ProjectBypass.js:2: unproven project download helper call',
+    ],
+  },
+  {
     label: 'raw project download in another function in the approved hook file',
     relativePath: 'public/hooks/useProject.js',
     source: `import { serializeProjectExport } from '../utils/project-security.js';
@@ -741,14 +851,17 @@ export async function unsafeDownload(stateBag) {
   {
     label: 'raw state in the named download helper without validated-result provenance',
     relativePath: 'public/hooks/useProject.js',
-    source: `export function downloadValidatedProject(result, environment = globalThis) {
+    source: `import { consumeValidatedProjectDownload, inspectProjectImport } from '../utils/project-security.js';
+export function downloadValidatedProject(result, environment = globalThis) {
+  const snapshot = consumeValidatedProjectDownload(result);
+  inspectProjectImport(snapshot.serialized);
   const stateBag = { fpic_version: 5, state: {} };
   const blob = new environment.Blob([stateBag], { type: 'application/json' });
   environment.URL.createObjectURL(blob);
 }`,
     expected: [
-      'public/hooks/useProject.js:3: project Blob construction',
-      'public/hooks/useProject.js:4: project object URL creation',
+      'public/hooks/useProject.js:6: project Blob construction',
+      'public/hooks/useProject.js:7: project object URL creation',
     ],
   },
   {
@@ -1005,14 +1118,31 @@ const SAFE_FIXTURES = [
   {
     label: 'validated serialized result in the real download helper',
     relativePath: 'public/hooks/useProject.js',
-    source: `function ownDataValue(value, key) { return value[key]; }
+    source: `import { consumeValidatedProjectDownload, inspectProjectImport } from '../utils/project-security.js';
 export function downloadValidatedProject(result, environment = globalThis) {
-  const serialized = ownDataValue(result, 'serialized');
+  const snapshot = consumeValidatedProjectDownload(result);
+  const serialized = snapshot.serialized;
   inspectProjectImport(serialized);
   const BlobImpl = environment.Blob;
   const urlApi = environment.URL;
   const blob = new BlobImpl([serialized], { type: 'application/json' });
   return urlApi.createObjectURL(blob);
+}`,
+  },
+  {
+    label: 'sole helper call using the direct serializeProjectExport result',
+    relativePath: 'public/hooks/useProject.js',
+    source: `import { consumeValidatedProjectDownload, inspectProjectImport, serializeProjectExport } from '../utils/project-security.js';
+export function downloadValidatedProject(result, environment = globalThis) {
+  const snapshot = consumeValidatedProjectDownload(result);
+  const serialized = snapshot.serialized;
+  inspectProjectImport(serialized);
+  const blob = new environment.Blob([serialized]);
+  return environment.URL.createObjectURL(blob);
+}
+export async function handleExportProject(stateBag) {
+  const result = await serializeProjectExport(stateBag, 'safe', { mode: 'sanitized' });
+  downloadValidatedProject(result);
 }`,
   },
   {

@@ -123,7 +123,98 @@ const ACCEPTANCE_SECRET_MATRIX = [
   ['certificate secret', 'Certificate Secret: ACCEPTANCE-CERTIFICATE-ORIGINAL', 'ACCEPTANCE-CERTIFICATE-ORIGINAL'],
 ];
 
+const FORTIGATE_MULTI_ENTRY_BLOCKS = [
+  {
+    label: 'TACACS keys',
+    type: 'key',
+    markers: [
+      'FGT-TACACS-QUOTED-MULTI-1', 'FGT-TACACS-QUOTED-MULTI-2',
+      'FGT-TACACS-BARE-MULTI-1', 'FGT-TACACS-BARE-MULTI-2',
+      'FGT-TACACS-ENC-MULTI-1', 'FGT-TACACS-ENC-MULTI-2',
+    ],
+    text: `config user tacacs+
+ edit "tac-quoted"
+  set key "FGT-TACACS-QUOTED-MULTI-1"
+ next
+ edit "tac-quoted-2"
+  set key "FGT-TACACS-QUOTED-MULTI-2"
+ next
+ edit "tac-bare"
+  set key FGT-TACACS-BARE-MULTI-1
+ next
+ edit "tac-bare-2"
+  set key FGT-TACACS-BARE-MULTI-2
+ next
+ edit "tac-enc"
+  set key ENC "FGT-TACACS-ENC-MULTI-1"
+ next
+ edit "tac-enc-2"
+  set key ENC "FGT-TACACS-ENC-MULTI-2"
+ next
+end`,
+  },
+  {
+    label: 'SNMP community names',
+    type: 'community',
+    markers: [
+      'FGT-SNMP-QUOTED-MULTI-1', 'FGT-SNMP-QUOTED-MULTI-2',
+      'FGT-SNMP-BARE-MULTI-1', 'FGT-SNMP-BARE-MULTI-2',
+      'FGT-SNMP-ENC-MULTI-1', 'FGT-SNMP-ENC-MULTI-2',
+    ],
+    text: `config system snmp community
+ edit 1
+  set name "FGT-SNMP-QUOTED-MULTI-1"
+ next
+ edit 11
+  set name "FGT-SNMP-QUOTED-MULTI-2"
+ next
+ edit 2
+  set name FGT-SNMP-BARE-MULTI-1
+ next
+ edit 22
+  set name FGT-SNMP-BARE-MULTI-2
+ next
+ edit 3
+  set name ENC "FGT-SNMP-ENC-MULTI-1"
+ next
+ edit 33
+  set name ENC "FGT-SNMP-ENC-MULTI-2"
+ next
+end`,
+  },
+];
+
 describe('firewall secret registry', () => {
+  it.each(FORTIGATE_MULTI_ENTRY_BLOCKS)(
+    'enumerates and redacts every bounded FortiGate $label entry',
+    ({ text, markers, type }) => {
+      const findings = findSecretsInText(text);
+      const redacted = redactConfigSecrets(text);
+      const sanitized = sanitizeConfig(text);
+
+      expect(findings).toHaveLength(6);
+      expect(redacted.replacements).toHaveLength(6);
+      expect(sanitized.replacements).toHaveLength(6);
+      for (const marker of markers) {
+        expect(redacted.text).not.toContain(marker);
+        expect(sanitized.sanitizedText).not.toContain(marker);
+        expect(redacted.replacements.some(entry => entry.original.includes(marker))).toBe(true);
+      }
+      expect(redacted.replacements).toEqual(redacted.replacements.map(entry => ({
+        type,
+        placeholder: entry.placeholder,
+        original: entry.original,
+      })));
+      expect(new Set(redacted.replacements.map(entry => entry.placeholder))).toHaveProperty('size', 6);
+      for (const entry of redacted.replacements) {
+        expect(redacted.text).toContain(entry.placeholder);
+        expect(entry).not.toHaveProperty('restore');
+      }
+      expect(findSecretsInText(redacted.text)).toEqual([]);
+      expect(redactConfigSecrets(redacted.text).replacements).toEqual([]);
+    },
+  );
+
   it.each(ACCEPTANCE_SECRET_MATRIX)(
     'acceptance: redacts the %s secret matrix',
     (_label, text, original) => {

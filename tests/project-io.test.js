@@ -10,6 +10,7 @@ import {
 import {
   PROJECT_SECURITY_MODES,
   MAX_PROJECT_PLAINTEXT_BYTES,
+  ProjectSecurityError,
   classifyProjectSecurity,
   inspectProjectImport,
   openProjectImport,
@@ -20,7 +21,10 @@ import { parseCiscoAsaConfig } from '../src/parsers/cisco-asa-parser.js';
 import { parseFortigateConfig } from '../src/parsers/fortigate-parser.js';
 import { parsePanosConfig } from '../src/parsers/panos-parser.js';
 import { sanitizeConfig } from '../public/utils/engine.js';
-import { encryptReversiblePayload } from '../public/utils/project-crypto.js';
+import {
+  ProjectCryptoError,
+  encryptReversiblePayload,
+} from '../public/utils/project-crypto.js';
 
 const IDENTIFIER_MAPPINGS = { version: 1, entries: [] };
 const RECONVERT_WARNING = 'Generated output from this older project was cleared because it has no validated identifier mapping. Reconvert before export or device push.';
@@ -341,6 +345,50 @@ describe('version 5 project security formats', () => {
     }
   });
 
+  it('normalizes altered recognized encrypted metadata during initial inspection', async () => {
+    const exported = await serializeProjectExport({
+      ...baseState,
+      configText: 'set system host-name SANITIZED_HOST_0',
+      isSanitized: true,
+      sanitizationTable: restorationTable('INSPECTION-ORIGINAL'),
+    }, 'inspection-errors', {
+      mode: PROJECT_SECURITY_MODES.REVERSIBLE,
+      passphrase: PASSPHRASE,
+      confirmationPassphrase: PASSPHRASE,
+      acknowledgement: true,
+    });
+    const envelope = JSON.parse(exported.serialized);
+    envelope.security.schema = 2;
+
+    let error;
+    try {
+      inspectProjectImport(JSON.stringify(envelope));
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toBeInstanceOf(ProjectCryptoError);
+    expect(error).toMatchObject({
+      name: 'ProjectCryptoError',
+      code: 'decryption_failed',
+      message: 'Encrypted project could not be opened.',
+    });
+    expect(error).not.toHaveProperty('cause');
+    expect(Reflect.ownKeys(error).filter(key => ![
+      'stack', 'message', 'name', 'code',
+    ].includes(key))).toEqual([]);
+    expect(error.message).not.toContain('INSPECTION-ORIGINAL');
+
+    const plaintext = JSON.parse(exported.serialized);
+    plaintext.security.mode = PROJECT_SECURITY_MODES.SANITIZED;
+    expect(() => inspectProjectImport(JSON.stringify(plaintext))).toThrow(
+      expect.objectContaining({
+        name: ProjectSecurityError.name,
+        code: 'invalid_project',
+        message: 'Project file is invalid.',
+      }),
+    );
+  });
+
   it('acceptance: sanitized import cannot restore originals', async () => {
     const exported = await serializeProjectExport({
       ...baseState,
@@ -383,6 +431,96 @@ describe('version 5 project security formats', () => {
       parse: value => parsePanosConfig(value),
     },
   ];
+
+  const FORTIGATE_MULTI_ENTRY_EXPORT_CASES = [
+    {
+      label: 'TACACS keys',
+      markers: [
+        'FGT-TACACS-QUOTED-EXPORT-1', 'FGT-TACACS-QUOTED-EXPORT-2',
+        'FGT-TACACS-BARE-EXPORT-1', 'FGT-TACACS-BARE-EXPORT-2',
+        'FGT-TACACS-ENC-EXPORT-1', 'FGT-TACACS-ENC-EXPORT-2',
+      ],
+      text: `config user tacacs+
+ edit "tac-quoted"
+  set key "FGT-TACACS-QUOTED-EXPORT-1"
+ next
+ edit "tac-quoted-2"
+  set key "FGT-TACACS-QUOTED-EXPORT-2"
+ next
+ edit "tac-bare"
+  set key FGT-TACACS-BARE-EXPORT-1
+ next
+ edit "tac-bare-2"
+  set key FGT-TACACS-BARE-EXPORT-2
+ next
+ edit "tac-enc"
+  set key ENC "FGT-TACACS-ENC-EXPORT-1"
+ next
+ edit "tac-enc-2"
+  set key ENC "FGT-TACACS-ENC-EXPORT-2"
+ next
+end`,
+    },
+    {
+      label: 'SNMP community names',
+      markers: [
+        'FGT-SNMP-QUOTED-EXPORT-1', 'FGT-SNMP-QUOTED-EXPORT-2',
+        'FGT-SNMP-BARE-EXPORT-1', 'FGT-SNMP-BARE-EXPORT-2',
+        'FGT-SNMP-ENC-EXPORT-1', 'FGT-SNMP-ENC-EXPORT-2',
+      ],
+      text: `config system snmp community
+ edit 1
+  set name "FGT-SNMP-QUOTED-EXPORT-1"
+ next
+ edit 11
+  set name "FGT-SNMP-QUOTED-EXPORT-2"
+ next
+ edit 2
+  set name FGT-SNMP-BARE-EXPORT-1
+ next
+ edit 22
+  set name FGT-SNMP-BARE-EXPORT-2
+ next
+ edit 3
+  set name ENC "FGT-SNMP-ENC-EXPORT-1"
+ next
+ edit 33
+  set name ENC "FGT-SNMP-ENC-EXPORT-2"
+ next
+end`,
+    },
+  ];
+
+  it.each(FORTIGATE_MULTI_ENTRY_EXPORT_CASES)(
+    'keeps every multi-entry FortiGate $label marker out of sanitized final bytes',
+    async ({ text, markers }) => {
+      await expect(serializeProjectExport({
+        ...baseState,
+        configText: text,
+        isSanitized: true,
+        sanitizationTable: null,
+      }, 'unsafe-multi-entry', { mode: 'sanitized' }))
+        .rejects.toMatchObject({ code: 'secret_leak' });
+
+      const sanitized = sanitizeConfig(text);
+      expect(sanitized.replacements).toHaveLength(6);
+      const parsed = parseFortigateConfig(sanitized.sanitizedText);
+      const result = await serializeProjectExport({
+        ...baseState,
+        configText: sanitized.sanitizedText,
+        intermediateConfig: parsed.intermediateConfig,
+        isSanitized: true,
+        sanitizationTable: sanitized.replacements,
+      }, 'safe-multi-entry', { mode: 'sanitized' });
+
+      for (const marker of markers) expect(result.serialized).not.toContain(marker);
+      for (const entry of sanitized.replacements) {
+        expect(result.serialized).toContain(entry.placeholder);
+        expect(entry).not.toHaveProperty('restore');
+      }
+      expect(result.serialized).not.toContain('sanitizationTable');
+    },
+  );
 
   it.each(PARSER_SECRET_CASES)('rejects raw parser-supported secret syntax from sanitized export: $label', async ({ text }) => {
     await expect(serializeProjectExport({
@@ -443,13 +581,15 @@ describe('version 5 project security formats', () => {
   });
 
   it.each([
-    ['unknown outer key', value => { value.extra = true; }],
-    ['unknown security key', value => { value.security.extra = true; }],
-    ['wrong sanitized claim', value => { value.security.containsOriginals = true; }],
-    ['wrong unsanitized claim', value => { value.security.containsOriginals = false; }],
-    ['unmatched restoration claim', value => { value.security.restorationAvailable = true; }],
-    ['plaintext reversible mode', value => { value.security.mode = 'reversible-encrypted'; }],
-  ])('rejects malformed or cross-mode v5 metadata: %s', (_label, mutate) => {
+    ['unknown outer key', value => { value.extra = true; }, 'invalid_project'],
+    ['unknown security key', value => { value.security.extra = true; }, 'invalid_project'],
+    ['wrong sanitized claim', value => { value.security.containsOriginals = true; }, 'invalid_project'],
+    ['wrong unsanitized claim', value => { value.security.containsOriginals = false; }, 'invalid_project'],
+    ['unmatched restoration claim', value => { value.security.restorationAvailable = true; }, 'invalid_project'],
+    ['recognized reversible outer shape', value => {
+      value.security.mode = 'reversible-encrypted';
+    }, 'decryption_failed'],
+  ])('rejects malformed or cross-mode v5 metadata: %s', (_label, mutate, code) => {
     const value = v5Project('sanitized', {
       ...baseState,
       isSanitized: true,
@@ -463,7 +603,7 @@ describe('version 5 project security formats', () => {
     }
     mutate(value);
     expect(() => inspectProjectImport(JSON.stringify(value))).toThrow(expect.objectContaining({
-      code: 'invalid_project',
+      code,
     }));
   });
 

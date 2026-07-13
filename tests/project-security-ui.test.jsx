@@ -9,8 +9,9 @@ import ProjectSecurityImportModal, {
   ProjectSecurityNotice,
 } from '../public/components/ProjectSecurityImportModal.jsx';
 import ProjectSecurityBadge, {
-  deriveWorkspaceSecurityMode,
+  readProjectSecurityDescriptor,
 } from '../public/components/ProjectSecurityBadge.jsx';
+import { classifyProjectSecurity } from '../public/utils/project-security.js';
 
 const exportInput = {
   descriptor: { sanitizedEligible: true, reversibleAvailable: true },
@@ -25,34 +26,58 @@ const exportInput = {
 
 describe('project security UI', () => {
   it.each([
-    ['sanitized', 'Sanitized — safe to share', true],
-    ['reversible-encrypted', 'Encrypted reversible — sensitive', false],
-    ['unsanitized', 'Unsanitized or stale — sensitive', false],
-    ['legacy-secret-bearing', 'Legacy secret-bearing — sensitive', false],
-    ['future-unknown-mode', 'Unsanitized or stale — sensitive', false],
-  ])('renders persistent workspace classification for %s', (mode, copy, safe) => {
-    const html = renderToStaticMarkup(<ProjectSecurityBadge mode={mode} />);
+    ['sanitized', { mode: 'sanitized', sanitizedEligible: true, reversibleAvailable: false }, 'Sanitized — safe to share', true],
+    ['reversible-encrypted', { mode: 'sanitized', sanitizedEligible: true, reversibleAvailable: true }, 'Encrypted reversible — sensitive', false],
+    ['unsanitized', { mode: 'unsanitized', sanitizedEligible: false, reversibleAvailable: false }, 'Unsanitized or stale — sensitive', false],
+    ['legacy-secret-bearing', { mode: 'unsanitized', sanitizedEligible: false, reversibleAvailable: false }, 'Legacy secret-bearing — sensitive', false],
+    ['future-unknown-mode', null, 'Unsanitized or stale — sensitive', false],
+  ])('renders persistent workspace classification for %s', (mode, descriptor, copy, safe) => {
+    const html = renderToStaticMarkup(
+      <ProjectSecurityBadge mode={mode} descriptor={descriptor} />,
+    );
     expect(html).toContain(copy);
     if (safe) expect(html).toContain('safe to share');
     else expect(html).not.toMatch(/>[^<]*safe to share[^<]*</);
   });
 
-  it('downgrades the persistent badge when a populated merge slot has stale provenance', () => {
-    expect(deriveWorkspaceSecurityMode(
-      { projectSecurityMode: 'sanitized' },
-      {
-        mergeMode: true,
-        configSlots: [{
-          configText: 'set system host-name edited',
-          intermediateConfig: { metadata: {} },
-          isSanitized: false,
-        }],
-      },
-    )).toBe('unsanitized');
-    expect(deriveWorkspaceSecurityMode(
-      { projectSecurityMode: 'sanitized' },
-      { mergeMode: true, configSlots: [{ configText: '', intermediateConfig: null }] },
-    )).toBe('sanitized');
+  it.each([
+    ['config text', { configText: 'set system host-name retained' }],
+    ['intermediate config', { intermediateConfig: { metadata: {} } }],
+    ['generated collection', { srxTranslatedPolicies: [{ name: 'retained-rule' }] }],
+    ['editable collection', { ruleGroups: [{ name: 'retained-group' }] }],
+    ['mapping', { interfaceMappings: { ethernet1: 'ge-0/0/0' } }],
+    ['greenfield state', { greenfieldMode: true, greenfieldTemplate: { hostname: 'retained' } }],
+  ])('never labels sanitized top-level state safe when a retained %s slot is unsanitized', (_label, populated) => {
+    const descriptor = classifyProjectSecurity({
+      configText: 'set system host-name SANITIZED_HOST_0',
+      intermediateConfig: { metadata: {} },
+      isSanitized: true,
+      mergeMode: false,
+      configSlots: [{
+        configText: '',
+        intermediateConfig: null,
+        isSanitized: false,
+        ...populated,
+      }],
+    });
+    expect(descriptor.sanitizedEligible).toBe(false);
+    const html = renderToStaticMarkup(
+      <ProjectSecurityBadge mode="sanitized" descriptor={descriptor} />,
+    );
+    expect(html).toContain('Unsanitized or stale — sensitive');
+    expect(html).not.toMatch(/>[^<]*safe to share[^<]*</);
+  });
+
+  it('fails badge descriptor errors conservatively to sensitive/stale', () => {
+    const descriptor = readProjectSecurityDescriptor(() => {
+      throw new Error('descriptor internals must not escape');
+    });
+    const html = renderToStaticMarkup(
+      <ProjectSecurityBadge mode="sanitized" descriptor={descriptor} />,
+    );
+    expect(descriptor).toBeNull();
+    expect(html).toContain('Unsanitized or stale — sensitive');
+    expect(html).not.toContain('safe to share');
   });
   it('defaults eligible workspaces to irreversible sanitized export', () => {
     const state = deriveProjectExportFormState(exportInput);

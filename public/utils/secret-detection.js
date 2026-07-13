@@ -9,8 +9,33 @@ function syntax(ruleId, category, placeholderKind, regex, valueGroups, render) {
   return Object.freeze({ ruleId, category, placeholderKind, regex, valueGroups, render });
 }
 
+function blockSyntax(
+  ruleId,
+  category,
+  placeholderKind,
+  blockRegex,
+  entryRegex,
+  valueGroups,
+  render,
+) {
+  return Object.freeze({
+    ruleId,
+    category,
+    placeholderKind,
+    blockRegex,
+    entryRegex,
+    valueGroups,
+    render,
+  });
+}
+
 const quotedOrBare = (groups, placeholder) => groups[1] + placeholder;
 const quoted = (groups, placeholder) => groups[1] + '"' + placeholder + '"';
+const fortigateBlockEntry = (groups, placeholder) => (
+  groups[3] !== undefined
+    ? groups[1] + '"' + placeholder + '"'
+    : groups[1] + placeholder
+);
 
 const SECRET_SYNTAXES = Object.freeze([
   syntax('xml-nested-key', 'key', 'KEY', /(<(?:pre-shared-key|api-key|auth-key|secret|key)>\s*<key>)([^<]+)(<\/key>)/gi, 2,
@@ -33,13 +58,24 @@ const SECRET_SYNTAXES = Object.freeze([
   syntax('fortigate-quoted-secret', 'key', 'KEY', /(set\s+(?:secret|secondary-secret|psksecret|tacacs-secret|auth-password|privacy-password)\s+)"([^"]+)"/gi, 2, quoted),
   syntax('fortigate-unquoted-secret', 'key', 'KEY', /(set\s+(?:secret|secondary-secret|psksecret|tacacs-secret|auth-password|privacy-password)\s+)(?!ENC\s|")(\S+)/gi, 2, quotedOrBare),
 
-  syntax('fortigate-tacacs-block-enc-key', 'key', 'KEY', /((?:^|\n)[ \t]*config[ \t]+user[ \t]+tacacs\+[ \t]*\r?\n(?:(?![ \t]*end[ \t]*(?:\r?\n|$))[^\r\n]*(?:\r?\n|$))*?[ \t]*set[ \t]+key[ \t]+)(ENC[ \t]+(?:"[^"\r\n]+"|\S+))/gi, 2, quotedOrBare),
-  syntax('fortigate-tacacs-block-quoted-key', 'key', 'KEY', /((?:^|\n)[ \t]*config[ \t]+user[ \t]+tacacs\+[ \t]*\r?\n(?:(?![ \t]*end[ \t]*(?:\r?\n|$))[^\r\n]*(?:\r?\n|$))*?[ \t]*set[ \t]+key[ \t]+)"([^"\r\n]+)"/gi, 2, quoted),
-  syntax('fortigate-tacacs-block-unquoted-key', 'key', 'KEY', /((?:^|\n)[ \t]*config[ \t]+user[ \t]+tacacs\+[ \t]*\r?\n(?:(?![ \t]*end[ \t]*(?:\r?\n|$))[^\r\n]*(?:\r?\n|$))*?[ \t]*set[ \t]+key[ \t]+)(?!ENC[ \t]+|")(\S+)/gi, 2, quotedOrBare),
-
-  syntax('fortigate-snmp-block-enc-name', 'community', 'COMMUNITY', /((?:^|\n)[ \t]*config[ \t]+system[ \t]+snmp[ \t]+community[ \t]*\r?\n(?:(?![ \t]*end[ \t]*(?:\r?\n|$))[^\r\n]*(?:\r?\n|$))*?[ \t]*set[ \t]+name[ \t]+)(ENC[ \t]+(?:"[^"\r\n]+"|\S+))/gi, 2, quotedOrBare),
-  syntax('fortigate-snmp-block-quoted-name', 'community', 'COMMUNITY', /((?:^|\n)[ \t]*config[ \t]+system[ \t]+snmp[ \t]+community[ \t]*\r?\n(?:(?![ \t]*end[ \t]*(?:\r?\n|$))[^\r\n]*(?:\r?\n|$))*?[ \t]*set[ \t]+name[ \t]+)"([^"\r\n]+)"/gi, 2, quoted),
-  syntax('fortigate-snmp-block-unquoted-name', 'community', 'COMMUNITY', /((?:^|\n)[ \t]*config[ \t]+system[ \t]+snmp[ \t]+community[ \t]*\r?\n(?:(?![ \t]*end[ \t]*(?:\r?\n|$))[^\r\n]*(?:\r?\n|$))*?[ \t]*set[ \t]+name[ \t]+)(?!ENC[ \t]+|")(\S+)/gi, 2, quotedOrBare),
+  blockSyntax(
+    'fortigate-tacacs-block-key',
+    'key',
+    'KEY',
+    /^[ \t]*config[ \t]+user[ \t]+tacacs\+[ \t]*\r?\n[\s\S]*?^[ \t]*end[ \t]*\r?$/gim,
+    /(^[ \t]*set[ \t]+key[ \t]+)(?:(ENC[ \t]+(?:"[^"\r\n]+"|\S+))|"([^"\r\n]+)"|(\S+))[ \t]*$/gim,
+    [2, 3, 4],
+    fortigateBlockEntry,
+  ),
+  blockSyntax(
+    'fortigate-snmp-block-name',
+    'community',
+    'COMMUNITY',
+    /^[ \t]*config[ \t]+system[ \t]+snmp[ \t]+community[ \t]*\r?\n[\s\S]*?^[ \t]*end[ \t]*\r?$/gim,
+    /(^[ \t]*set[ \t]+name[ \t]+)(?:(ENC[ \t]+(?:"[^"\r\n]+"|\S+))|"([^"\r\n]+)"|(\S+))[ \t]*$/gim,
+    [2, 3, 4],
+    fortigateBlockEntry,
+  ),
 
   syntax('fortigate-enc-community', 'community', 'COMMUNITY', /(set\s+community\s+)(ENC\s+(?:"[^"]+"|\S+))/gi, 2, quotedOrBare),
   syntax('asa-snmp-host-community', 'community', 'COMMUNITY', /(snmp-server\s+host\s+\S+\s+\S+[^\r\n]*?\scommunity\s+)(\S+)/gi, 2, quotedOrBare),
@@ -104,11 +140,16 @@ export function findSecretsInText(text) {
   if (typeof text !== 'string') return [];
   const findings = [];
   for (const spec of SECRET_SYNTAXES) {
-    const regex = cloneRegex(spec.regex);
-    for (const match of text.matchAll(regex)) {
-      const original = secretValue(spec, match);
-      if (!original || isSanitizedSecretValue(original.trim())) continue;
-      findings.push({ category: spec.category, ruleId: spec.ruleId });
+    const regions = spec.blockRegex
+      ? [...text.matchAll(cloneRegex(spec.blockRegex))].map(match => match[0])
+      : [text];
+    const entryRegex = spec.blockRegex ? spec.entryRegex : spec.regex;
+    for (const region of regions) {
+      for (const match of region.matchAll(cloneRegex(entryRegex))) {
+        const original = secretValue(spec, match);
+        if (!original || isSanitizedSecretValue(original.trim())) continue;
+        findings.push({ category: spec.category, ruleId: spec.ruleId });
+      }
     }
   }
   return findings;
@@ -124,7 +165,7 @@ export function redactConfigSecrets(text) {
   const replacements = [];
   let output = text;
   for (const spec of SECRET_SYNTAXES) {
-    output = output.replace(cloneRegex(spec.regex), (...args) => {
+    const replaceEntry = (...args) => {
       const groups = args.slice(0, -2);
       const captured = secretValue(spec, groups);
       const original = captured?.trim();
@@ -133,7 +174,12 @@ export function redactConfigSecrets(text) {
       replacements.push({ type: spec.category, placeholder, original });
       counts[spec.category === 'certificate' ? 'cert' : spec.category] += 1;
       return spec.render(groups, placeholder);
-    });
+    };
+    output = spec.blockRegex
+      ? output.replace(cloneRegex(spec.blockRegex), block => (
+        block.replace(cloneRegex(spec.entryRegex), replaceEntry)
+      ))
+      : output.replace(cloneRegex(spec.regex), replaceEntry);
   }
   return { text: output, replacements, counts };
 }

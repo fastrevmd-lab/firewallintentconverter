@@ -243,6 +243,79 @@ describe('secure project workflow helpers', () => {
     expect(revokeObjectURL).toHaveBeenCalledWith('blob:validated-project');
   });
 
+  it('rejects a hand-built download result before Blob, URL, or click', () => {
+    const click = vi.fn();
+    const environment = {
+      Blob: vi.fn(),
+      URL: { createObjectURL: vi.fn(), revokeObjectURL: vi.fn() },
+      document: { createElement: vi.fn(() => ({ click })) },
+    };
+    const forged = {
+      serialized: JSON.stringify({
+        fpic_version: 5,
+        name: 'forged',
+        savedAt: '2026-07-12T00:00:00.000Z',
+        security: {
+          schema: 1, mode: 'unsanitized', containsOriginals: true,
+          reversible: false, restorationAvailable: false,
+        },
+        state: { configText: 'set password FORGED', isSanitized: false },
+      }),
+      filename: 'forged.unsanitized.fpic.json',
+      security: { mode: PROJECT_SECURITY_MODES.UNSANITIZED },
+    };
+
+    expect(() => downloadValidatedProject(forged, environment)).toThrow(
+      expect.objectContaining({ code: 'invalid_project' }),
+    );
+    expect(environment.Blob).not.toHaveBeenCalled();
+    expect(environment.URL.createObjectURL).not.toHaveBeenCalled();
+    expect(environment.document.createElement).not.toHaveBeenCalled();
+    expect(click).not.toHaveBeenCalled();
+  });
+
+  it('downloads the immutable boundary snapshot after the public result is mutated', async () => {
+    const anchor = { click: vi.fn() };
+    const environment = {
+      Blob: vi.fn(function CaptureBlob(parts, options) {
+        this.parts = parts;
+        this.options = options;
+      }),
+      URL: {
+        createObjectURL: vi.fn(() => 'blob:immutable-project'),
+        revokeObjectURL: vi.fn(),
+      },
+      document: { createElement: vi.fn(() => anchor) },
+    };
+    const result = await serializeProjectExport({
+      ...baseConfigState,
+      configText: 'set system host-name SANITIZED_HOST_0',
+      isSanitized: true,
+      sanitizationTable: [{
+        type: 'hostname', placeholder: 'SANITIZED_HOST_0', original: 'immutable.example',
+      }],
+    }, 'immutable', { mode: PROJECT_SECURITY_MODES.SANITIZED });
+    const original = {
+      serialized: result.serialized,
+      filename: result.filename,
+      mode: result.security.mode,
+    };
+
+    result.serialized = '{"forged":true}';
+    result.filename = 'forged.unsanitized.fpic.json';
+    result.security = { mode: PROJECT_SECURITY_MODES.UNSANITIZED };
+    downloadValidatedProject(result, environment);
+
+    expect(environment.Blob).toHaveBeenCalledWith(
+      [original.serialized],
+      { type: 'application/json' },
+    );
+    expect(anchor.download).toBe(original.filename);
+    expect(JSON.parse(environment.Blob.mock.instances[0].parts[0]).security.mode)
+      .toBe(original.mode);
+    expect(anchor.click).toHaveBeenCalledOnce();
+  });
+
   it.each([
     [null],
     [{}],
@@ -468,6 +541,48 @@ describe('transactional project hook orchestration', () => {
     expect(hookHarness.configDispatch).not.toHaveBeenCalled();
     expect(hookHarness.conversionDispatch).not.toHaveBeenCalled();
     expect(hookHarness.mergeDispatch).not.toHaveBeenCalled();
+  });
+
+  it('fails altered encrypted metadata during the initial file read without staging it', async () => {
+    const passphrase = 'correct horse battery staple';
+    const result = await serializeProjectExport({
+      ...baseConfigState,
+      configText: 'set system host-name SANITIZED_HOST_0',
+      isSanitized: true,
+      sanitizationTable: [{
+        type: 'hostname',
+        placeholder: 'SANITIZED_HOST_0',
+        original: 'INITIAL-READ-ORIGINAL',
+      }],
+    }, 'altered-initial-read', {
+      mode: PROJECT_SECURITY_MODES.REVERSIBLE,
+      passphrase,
+      confirmationPassphrase: passphrase,
+      acknowledgement: true,
+    });
+    const envelope = JSON.parse(result.serialized);
+    envelope.security.schema = 2;
+    const project = useProject();
+
+    project.handleLoadProjectFile(loadEvent(JSON.stringify(envelope)));
+
+    expect(findUiAction('SET_FIELD', action => action.field === 'error')).toMatchObject({
+      value: 'Encrypted project could not be opened.',
+    });
+    expect(findUiAction('SHOW_MODAL', action => action.name === 'projectSecurityImport'))
+      .toBeUndefined();
+    expect(findUiAction('SHOW_MODAL', action => action.name === 'loadConfirm'))
+      .toBeUndefined();
+    expect(hookHarness.configDispatch).not.toHaveBeenCalled();
+    expect(hookHarness.conversionDispatch).not.toHaveBeenCalled();
+    expect(hookHarness.mergeDispatch).not.toHaveBeenCalled();
+
+    hookHarness.uiDispatch.mockClear();
+    await project.confirmPendingImport({ passphrase, acknowledgement: true });
+    expect(findUiAction('SET_FIELD', action => action.field === 'error')).toMatchObject({
+      value: 'Project file is invalid.',
+    });
+    expect(findUiAction('SHOW_MODAL')).toBeUndefined();
   });
 
   it('rejects an oversized file before FileReader reads it', () => {

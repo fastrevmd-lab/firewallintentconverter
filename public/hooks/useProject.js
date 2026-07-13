@@ -17,6 +17,7 @@ import {
   PROJECT_SECURITY_MODES,
   ProjectSecurityError,
   classifyProjectSecurity,
+  consumeValidatedProjectDownload,
   inspectProjectImport,
   openProjectImport,
   serializeProjectExport,
@@ -99,15 +100,10 @@ function ownDataValue(value, key) {
 }
 
 export function downloadValidatedProject(result, environment = globalThis) {
-  const serialized = result && typeof result === 'object'
-    ? ownDataValue(result, 'serialized')
-    : undefined;
-  const filename = result && typeof result === 'object'
-    ? ownDataValue(result, 'filename')
-    : undefined;
-  const security = result && typeof result === 'object'
-    ? ownDataValue(result, 'security')
-    : undefined;
+  const snapshot = consumeValidatedProjectDownload(result);
+  const serialized = snapshot.serialized;
+  const filename = snapshot.filename;
+  const security = snapshot.security;
   const BlobImpl = environment?.Blob;
   const urlApi = environment?.URL;
   const documentApi = environment?.document;

@@ -58,6 +58,7 @@ import useKeyboardShortcuts from './hooks/useKeyboardShortcuts.js';
 import { GREENFIELD_TEMPLATES } from './data/greenfield-templates.js';
 import { parseConfig, sanitizeConfig } from './utils/engine.js';
 import { isProjectCryptoAvailable } from './utils/project-crypto.js';
+import { readProjectSecurityDescriptor } from './components/ProjectSecurityBadge.jsx';
 
 export function deriveSanitizeFirstActions() {
   return [
@@ -86,6 +87,9 @@ export default function App() {
 
   // --- Computed ---
   const isHealthCheckMode = cfg.sourceVendor === 'srx_healthcheck';
+  const projectSecurityDescriptor = readProjectSecurityDescriptor(
+    project.getExportDescriptor,
+  );
 
   // ------------------------------------------------------------------
   // Keyboard shortcut registration
@@ -492,7 +496,7 @@ export default function App() {
         </div>
       </div>
 
-      <StatusBar />
+      <StatusBar projectSecurityDescriptor={projectSecurityDescriptor} />
 
       {/* Command Palette */}
       {ui.commandPaletteOpen && <CommandPalette />}

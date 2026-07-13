@@ -1,6 +1,7 @@
 /**
  * Migration Report Generator — self-contained HTML report from parsed/converted firewall config
  */
+import { BRAND, BRAND_COLORS as B, reportBrandLockup } from './brand.js';
 
 const VENDOR_LABELS = {
   panos: 'PAN-OS', srx: 'SRX', fortigate: 'FortiGate',
@@ -237,37 +238,43 @@ export function generateReportHtml(data) {
 <title>Migration Report — ${esc(siteName || vendorLabel)}</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #1a1a2e; color: #e0e0e0; padding: 24px; line-height: 1.5; }
-  .report-header { text-align: center; padding: 24px 0 16px; border-bottom: 2px solid #333; margin-bottom: 20px; }
-  .report-header h1 { font-size: 22px; color: #6ec1e4; margin-bottom: 4px; }
-  .report-header .subtitle { font-size: 13px; color: #888; }
-  .section { border: 1px solid #333; border-radius: 6px; margin-bottom: 12px; overflow: hidden; }
-  .section-header { background: #16213e; padding: 10px 14px; cursor: pointer; user-select: none; display: flex; align-items: center; gap: 8px; }
-  .section-header:hover { background: #1a2744; }
+  body { font-family: 'Geist Variable', 'Geist', 'Inter', system-ui, sans-serif; background: ${B.ink0}; color: ${B.text1}; padding: 24px; line-height: 1.5; }
+  .report-header { text-align: center; padding: 24px 0 16px; border-bottom: 2px solid ${B.border}; margin-bottom: 20px; }
+  .report-brand { display: flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 8px; font-family: 'Geist Variable', 'Inter', system-ui, sans-serif; }
+  .mechub-report-mark { width: 34px; height: 34px; }
+  .report-brand-name { font-weight: 700; letter-spacing: -.045em; }
+  .brand-intent { color: ${B.plum}; }
+  .report-endorsement { color: #6B7280; font: 500 10px 'Geist Mono Variable', monospace; }
+  .report-header h1 { font-size: 22px; color: ${B.teal}; margin-bottom: 4px; }
+  .report-header .subtitle { font-size: 13px; color: ${B.text3}; }
+  .target-platform { color: ${B.juniper}; font-weight: 600; }
+  .section { border: 1px solid ${B.border}; border-radius: 6px; margin-bottom: 12px; overflow: hidden; background: ${B.ink1}; }
+  .section-header { background: ${B.ink2}; padding: 10px 14px; cursor: pointer; user-select: none; display: flex; align-items: center; gap: 8px; }
+  .section-header:hover { background: ${B.border}; }
   .section-title { font-weight: 600; font-size: 14px; }
   .arrow { font-size: 10px; transition: transform 0.2s; }
   .collapsed .arrow { transform: rotate(-90deg); }
   .collapsed .section-body { display: none; }
   .section-body { padding: 12px 14px; }
-  .badge { background: #6ec1e4; color: #111; font-size: 11px; padding: 1px 7px; border-radius: 10px; font-weight: 600; }
+  .badge { background: ${B.teal}; color: ${B.ink0}; font: 600 11px 'Geist Mono Variable', monospace; padding: 1px 7px; border-radius: 999px; }
   table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 8px; }
-  th { background: #16213e; padding: 6px 8px; text-align: left; font-weight: 600; border-bottom: 2px solid #333; white-space: nowrap; }
-  td { padding: 5px 8px; border-bottom: 1px solid #2a2a3e; word-break: break-word; max-width: 300px; }
-  tr:hover td { background: rgba(110,193,228,0.05); }
+  th { background: ${B.ink2}; padding: 6px 8px; text-align: left; font-weight: 600; border-bottom: 2px solid ${B.border}; white-space: nowrap; }
+  td { padding: 5px 8px; border-bottom: 1px solid ${B.border}; word-break: break-word; max-width: 300px; }
+  tr:hover td { background: rgba(77,208,200,0.05); }
   .summary-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; margin-bottom: 12px; }
-  .summary-item { background: #16213e; padding: 10px 12px; border-radius: 6px; }
-  .summary-item .label { display: block; font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; }
+  .summary-item { background: ${B.ink2}; padding: 10px 12px; border-radius: 6px; }
+  .summary-item .label { display: block; font-size: 11px; color: ${B.text3}; text-transform: uppercase; letter-spacing: 0.5px; }
   .summary-item .value { display: block; font-size: 16px; font-weight: 600; margin-top: 2px; }
-  .empty { color: #666; font-style: italic; font-size: 13px; }
-  .group-heading { font-size: 13px; color: #6ec1e4; margin: 12px 0 4px; padding-bottom: 4px; border-bottom: 1px solid #333; }
+  .empty { color: ${B.text3}; font-style: italic; font-size: 13px; }
+  .group-heading { font-size: 13px; color: ${B.teal}; margin: 12px 0 4px; padding-bottom: 4px; border-bottom: 1px solid ${B.border}; }
   .group-heading:first-child { margin-top: 0; }
-  .group-desc { font-size: 12px; color: #888; margin-bottom: 6px; }
+  .group-desc { font-size: 12px; color: ${B.text3}; margin-bottom: 6px; }
   .warnings-list { list-style: none; padding: 0; }
   .warnings-list li { padding: 6px 10px; border-radius: 4px; margin-bottom: 4px; font-size: 12px; }
-  .warn-error, .warn-critical { background: rgba(231,76,60,0.15); color: #e74c3c; }
-  .warn-warning { background: rgba(241,196,15,0.15); color: #f1c40f; }
-  .warn-info { background: rgba(110,193,228,0.1); color: #6ec1e4; }
-  .report-footer { text-align: center; padding: 16px 0; margin-top: 20px; border-top: 1px solid #333; font-size: 11px; color: #555; }
+  .warn-error, .warn-critical { background: rgba(248,113,113,0.15); color: ${B.error}; }
+  .warn-warning { background: rgba(251,191,36,0.15); color: ${B.warning}; }
+  .warn-info { background: rgba(96,165,250,0.1); color: ${B.info}; }
+  .report-footer { text-align: center; padding: 16px 0; margin-top: 20px; border-top: 1px solid ${B.border}; font-size: 11px; color: ${B.text3}; }
 
   @media print {
     body { background: #fff; color: #111; padding: 12px; }
@@ -293,11 +300,12 @@ export function generateReportHtml(data) {
 </head>
 <body>
 <div class="report-header">
-  <h1>Firewall Migration Report</h1>
-  <div class="subtitle">${esc(vendorLabel)}${sourceModel ? ' (' + esc(sourceModel) + ')' : ''} &rarr; Juniper SRX${targetModel ? ' (' + esc(targetModel) + ')' : ''} | Generated: ${esc(now)}</div>
+  ${reportBrandLockup()}
+  <h1>Firewall migration report</h1>
+  <div class="subtitle">${esc(vendorLabel)}${sourceModel ? ' (' + esc(sourceModel) + ')' : ''} &rarr; <span class="target-platform">Juniper SRX${targetModel ? ' (' + esc(targetModel) + ')' : ''}</span> | Generated: ${esc(now)}</div>
 </div>
 ${sections.join('\n')}
-<div class="report-footer">Generated by Firewall Intent Converter &mdash; ${esc(now)}</div>
+<div class="report-footer">Generated by ${BRAND.product} &middot; ${BRAND.endorsement} &mdash; ${esc(now)}</div>
 </body>
 </html>`;
 }

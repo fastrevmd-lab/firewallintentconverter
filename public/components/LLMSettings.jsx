@@ -12,6 +12,8 @@ import {
   DEFAULT_GREENFIELD_SYSTEM_PROMPT,
   VENDOR_PROMPT_KEYS,
   loadVendorTranslatePrompt,
+  testLLMConnection,
+  describeLLMError,
 } from '../utils/llm-client.js';
 import { loadLLMSettings, saveLLMSettings } from '../utils/llm-settings.js';
 import {
@@ -94,6 +96,9 @@ export default function LLMSettings({ onClose, initialTab }) {
   const [promptSubTab, setPromptSubTab] = useState('fullReview');
   const [vendorPromptSelection, setVendorPromptSelection] = useState('');
   const [vendorPrompts, setVendorPrompts] = useState({});
+  const [llmTesting, setLlmTesting] = useState(false);
+  const [llmTestResult, setLlmTestResult] = useState('');
+  const [llmTestOk, setLlmTestOk] = useState(true);
 
   // PyEZ Bridge state
   const [bridgeUrl, setBridgeUrl] = useState(() => loadBridgeSettings().url);
@@ -238,6 +243,23 @@ export default function LLMSettings({ onClose, initialTab }) {
   const handleBridgeTokenChange = (value) => {
     invalidateBridgeConnection();
     setBridgeToken(value);
+  };
+
+  /** Test the LLM connection with the current (unsaved) form settings */
+  const handleLLMTest = async () => {
+    setLlmTesting(true);
+    setLlmTestResult('');
+    try {
+      const reply = await testLLMConnection({ provider, apiKey, model, baseUrl, temperature });
+      const text = (reply || '').trim();
+      setLlmTestOk(true);
+      setLlmTestResult(text ? `Connected — model replied: "${text.slice(0, 160)}"` : 'Connected, but the model returned an empty reply.');
+    } catch (error) {
+      setLlmTestOk(false);
+      setLlmTestResult(describeLLMError(error));
+    } finally {
+      setLlmTesting(false);
+    }
   };
 
   /** Save LLM settings */
@@ -893,6 +915,23 @@ export default function LLMSettings({ onClose, initialTab }) {
           )}
         </SettingsField>
         </>
+        )}
+
+        {activeTab === 'llm' && (
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8 }}>
+            <button
+              className="btn btn-secondary btn-sm"
+              onClick={handleLLMTest}
+              disabled={llmTesting}
+            >
+              {llmTesting ? 'Testing…' : 'Test Connection'}
+            </button>
+            {llmTestResult && (
+              <span style={{ fontSize: 11, color: llmTestOk ? 'var(--success)' : 'var(--error)' }}>
+                {llmTestResult}
+              </span>
+            )}
+          </div>
         )}
 
         {/* Buttons */}

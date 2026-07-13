@@ -613,6 +613,61 @@ export function getLLMStatus() {
   };
 }
 
+/**
+ * Sends a minimal greeting prompt to verify an LLM provider is reachable and
+ * configured correctly. Uses the passed settings (typically live, unsaved form
+ * values) rather than persisted settings so users can test before saving.
+ *
+ * @param {{provider:string, apiKey?:string, model?:string, baseUrl?:string, temperature?:number, maxTokens?:number}} settings
+ * @returns {Promise<string>} The model's reply text.
+ * @throws {Error} With a diagnostic message on any failure.
+ */
+export async function testLLMConnection(settings) {
+  if (!settings || !settings.provider) {
+    throw new Error('No provider selected.');
+  }
+  const userPrompt = 'Reply with a short, friendly one-sentence greeting to confirm the connection works.';
+  const systemPrompt = 'You are a connection test. Respond in a single short sentence.';
+  const testSettings = { ...settings, maxTokens: settings.maxTokens || 128 };
+  try {
+    switch (settings.provider) {
+      case 'claude': return await callClaude(testSettings, userPrompt, systemPrompt);
+      case 'openai': return await callOpenAI(testSettings, userPrompt, systemPrompt);
+      case 'gemini': return await callGemini(testSettings, userPrompt, systemPrompt);
+      case 'ollama': return await callOllama(testSettings, userPrompt, systemPrompt);
+      case 'lmstudio': return await callLMStudio(testSettings, userPrompt, systemPrompt);
+      case 'custom': return await callCustom(testSettings, userPrompt, systemPrompt);
+      default: throw new Error(`Unknown LLM provider: ${settings.provider}`);
+    }
+  } catch (err) {
+    // A browser fetch to a local LLM most commonly fails with an opaque
+    // "Failed to fetch" TypeError, which almost always means the server is
+    // unreachable or is not sending CORS headers for this origin.
+    if (err instanceof TypeError && /fetch/i.test(err.message || '')) {
+      const where = testSettings.baseUrl ? ` at ${testSettings.baseUrl}` : '';
+      const origin = (typeof location !== 'undefined' && location.origin) ? location.origin : 'this origin';
+      throw new Error(
+        `Could not reach the LLM server${where}. Check the Base URL, confirm the server is running, ` +
+        `and — for Ollama — that it allows this origin (set OLLAMA_ORIGINS to include ${origin}).`,
+      );
+    }
+    throw err;
+  }
+}
+
+/**
+ * Returns a safe, human-readable description of an LLM error for display.
+ * Messages thrown by testLLMConnection and the provider callers are already
+ * curated (no secrets), so this simply falls back to a generic string.
+ *
+ * @param {unknown} error
+ * @returns {string}
+ */
+export function describeLLMError(error) {
+  const message = error && typeof error.message === 'string' ? error.message.trim() : '';
+  return message || 'Connection test failed.';
+}
+
 // ---------------------------------------------------------------------------
 // Provider Implementations — Single message
 // ---------------------------------------------------------------------------
@@ -750,7 +805,8 @@ async function callOllama(settings, userPrompt, systemPrompt) {
   });
 
   if (!response.ok) {
-    throw new Error(`Ollama error: ${response.status}. Is Ollama running at ${baseUrl}?`);
+    const detail = await response.text().catch(() => '');
+    throw new Error(`Ollama error ${response.status}${detail ? `: ${detail.slice(0, 300)}` : ''}. Is Ollama running at ${baseUrl} with model "${settings.model || 'qwen2.5-coder:7b'}" pulled?`);
   }
 
   const data = await response.json();
@@ -944,7 +1000,8 @@ async function callOllamaChat(settings, messages, systemPrompt) {
   });
 
   if (!response.ok) {
-    throw new Error(`Ollama error: ${response.status}. Is Ollama running at ${baseUrl}?`);
+    const detail = await response.text().catch(() => '');
+    throw new Error(`Ollama error ${response.status}${detail ? `: ${detail.slice(0, 300)}` : ''}. Is Ollama running at ${baseUrl} with model "${settings.model || 'qwen2.5-coder:7b'}" pulled?`);
   }
 
   const data = await response.json();

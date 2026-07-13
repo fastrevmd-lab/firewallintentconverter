@@ -1,251 +1,88 @@
-# Design System
+# firewallintentconverter · a mechub project — Design System
 
-Reference for the Firewall Intent Converter UI. Dark professional theme targeting 1920x1080 and 1440x900 viewports.
+This is the implementation reference for the firewallintentconverter interface, generated reports, and supporting documentation. The upstream identity authority is [Mechub branding](https://command.mechub.org/branding).
 
----
+## Identity
 
-## Color Palette
+- The product name is always lowercase: `firewallintentconverter`.
+- The endorsed accessible name is `firewallintentconverter · a mechub project`.
+- The Mechub topology M uses the path `M18,96 L18,32 L60,74 L102,32 L102,96`.
+- Use `mechub-mark.svg` on dark surfaces, `mechub-mark-light.svg` on light surfaces, and `mechub-favicon.svg` for browser metadata.
+- In the wordmark, only `intent` is plum. The surrounding product name uses the primary text color.
+- The endorsement may hide where horizontal space is constrained, but the mark and product name remain visible.
 
-### Core Backgrounds
-
-| Variable | Value | Use |
-|----------|-------|-----|
-| `--bg-primary` | `#1a1d23` | App background |
-| `--bg-secondary` | `#22262e` | Panels, sidebars, topbar |
-| `--bg-tertiary` | `#2a2f38` | Status bar, sub-headers |
-| `--bg-elevated` | `#31363f` | Cards, active items |
-| `--bg-hover` | `#383e48` | Hover states |
-
-### Accent
-
-| Variable | Value | Use |
-|----------|-------|-----|
-| `--accent` | `#4dd0c8` | Primary teal accent |
-| `--accent-dim` | `#005b5a` | Hover/pressed accent |
-| `--accent-text` | `#005b5a` | Accent on dark text |
-| `--accent-glow` | `rgba(77,208,200,0.15)` | Glow/focus rings |
-
-### Text
-
-| Variable | Value | Use |
-|----------|-------|-----|
-| `--text-primary` | `#e8eaed` | Body text |
-| `--text-secondary` | `#9aa0a6` | Labels, descriptions |
-| `--text-muted` | `#6b7280` | Captions, disabled |
-
-### Semantic
-
-| Variable | Value | Use |
-|----------|-------|-----|
-| `--success` | `#34d399` | Success states |
-| `--warning` | `#fbbf24` | Warnings |
-| `--error` | `#f87171` | Errors, destructive |
-| `--info` | `#60a5fa` | Informational |
-
-### LLM Mode
-
-| Variable | Value | Use |
-|----------|-------|-----|
-| `--llm-cloud` | `#a78bfa` | Cloud LLM features (violet) |
-| `--llm-local` | `#db2777` | Local LLM features (plum/maroon) |
-
-### App Analysis / Caution
-
-| Variable | Value | Use |
-|----------|-------|-----|
-| `--caution` | `#f59e0b` | App-driven analysis, warnings (orange) |
-| `--juniper-green` | `#90C641` | SRX model branding |
-
-### Status Badges
-
-| Variable | Value | Maps to |
-|----------|-------|---------|
-| `--status-clean` | `#34d399` | `--success` |
-| `--status-warning` | `#fbbf24` | `--warning` |
-| `--status-unsupported` | `#f87171` | `--error` |
-| `--status-interview` | `#f59e0b` | `--caution` |
-
-### Layout Tokens
-
-| Variable | Value |
-|----------|-------|
-| `--header-height` | `52px` |
-| `--border-color` | `#3a3f48` |
-| `--radius` | `6px` |
-| `--radius-lg` | `10px` |
-
----
-
-## Color Conventions (STRICT)
-
-These rules prevent visual confusion between LLM-driven and app-driven features.
-
-| Color | CSS Variable | Allowed Use | Forbidden Use |
-|-------|-------------|-------------|---------------|
-| Violet | `--llm-cloud` | LLM/cloud features ONLY (cloud LLM buttons, AI actions) | App-driven analysis, warnings, topology |
-| Orange | `--caution` | App-driven analysis, warnings, app-generated highlights | LLM features |
-| Plum/Maroon | `--llm-local` | Local LLM features | App-driven features |
-| Green | `--juniper-green` | SRX model branding, target platform labels | Semantic status (use `--success` instead) |
-| Teal | `--accent` | General UI accent, links, focus rings | Semantic warnings |
-
----
+The canonical browser implementation is `public/components/BrandLockup.jsx`. Report lockups use the same geometry and accessible name through `public/utils/brand.js`.
 
 ## Typography
 
-**Families:**
-
-| Variable | Stack | Use |
-|----------|-------|-----|
-| `--font-sans` | `Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif` | Body text |
-| `--font-mono` | `JetBrains Mono, Fira Code, Cascadia Code, Consolas, monospace` | Code, config output |
-
-**Size scale (from CSS):**
-
-| Context | Size |
-|---------|------|
-| Base body | `14px` |
-| Modal heading | `16px` |
-| Empty state heading | `14px` |
-| Nav items | `13px` |
-| Buttons | `13px` |
-| `.btn-sm` | `12px` |
-| Nav group headers, sidebar titles | `12px` |
-| Status bar, inspector header, tooltips | `11px` |
-| Status labels, nav badges | `10px` |
-
-**Line height:** `1.5` (base), `1.6` (empty state body)
-
----
-
-## Spacing & Layout
-
-**Base grid:** 4px increments. Common values: `4px`, `8px`, `12px`, `16px`, `20px`, `40px`.
-
-**Border radius:** `--radius: 6px` (buttons, inputs), `--radius-lg: 10px` (modals, cards).
-
-### 4-Panel IDE Shell
-
-```
-+----------------------------------------------------------+
-| .app-topbar                              height: 52px     |
-+----------+----------------------------+------------------+
-| .app-    | .app-center               | .app-inspector   |
-| sidebar  |  .center-toolbar (40px)   |  .inspector-     |
-| 260px    |  .center-content          |   header         |
-| (48-400) |  (flex: 1)               |  .inspector-     |
-|          |                           |   body           |
-|          |                           |  320px (0-500)   |
-+----------+----------------------------+------------------+
-| .app-statusbar                           height: 28px     |
-+----------------------------------------------------------+
-```
-
-- **Sidebar** collapses to `48px` (icons only)
-- **Inspector** collapses to a `24px` clickable strip
-- **Resize handles** are `4px` wide, highlight with `--accent` on hover
-- Responsive: sidebar `220px` at `<1280px`, `300px` at `>2560px`
-
----
-
-## Component Patterns
-
-### Buttons
-
-| Class | Style |
-|-------|-------|
-| `.btn` | Base: `padding: 8px 16px`, `font-size: 13px`, `border-radius: var(--radius)` |
-| `.btn-primary` | `background: var(--accent)`, `color: var(--bg-primary)` |
-| `.btn-secondary` | `background: var(--bg-elevated)`, `border: 1px solid var(--border-color)` |
-| `.btn-sm` | `padding: 5px 12px`, `font-size: 12px`, `min-height: 30px` |
-| `.btn-block` | `width: 100%`, `margin-top: 12px` |
-| `.btn-icon` | Icon-only button |
-| `.btn-accept` | Green success action (`--success` with 10% alpha bg) |
-
-Disabled state: `opacity: 0.5; cursor: not-allowed`.
-
-### Empty States
-
-```html
-<div class="empty-state">
-  <svg width="48" height="48" opacity="0.3">...</svg>
-  <h3>Title</h3>
-  <p>Description (max-width: 280px)</p>
-</div>
-```
-
-Centered flex column, `padding: 40px 20px`, `gap: 12px`, `color: var(--text-muted)`.
-
-### Modals
-
-```html
-<div class="modal-overlay">       <!-- fixed, backdrop-filter: blur(2px) -->
-  <div class="modal-content">     <!-- bg-secondary, radius-lg, max-height: 85vh -->
-    <div class="modal-header">    <!-- padding: 16px 20px -->
-      <h2>Title</h2>
-      <button class="modal-close">&times;</button>
-    </div>
-    <div class="modal-body">...</div>
-    <div class="modal-footer">...</div>
-  </div>
-</div>
-```
-
-### Nav Tree
-
-Collapsible groups with badges in `.app-sidebar`:
-
-- `.nav-group` > `.nav-group-header` (12px uppercase) + `.nav-group-items`
-- `.nav-item` has `border-left: 2px solid transparent`, becomes `--accent` when `.active`
-- `.nav-badge` pill: `font-size: 10px`, `border-radius: 10px`, auto-margin-left
-- `.nav-badge.warn` uses `--caution` color
-- Review workflow: `.nav-review-pending` (teal), `.nav-review-done` (juniper-green)
-
-### Status Labels
-
-```html
-<span class="status-label status-accepted">Accepted</span>
-```
-
-| Modifier | Color | Background |
-|----------|-------|------------|
-| `.status-disabled` | `--error` | `rgba(248,113,113,0.15)` |
-| `.status-unreviewed` | `--text-muted` | `rgba(107,114,128,0.15)` |
-| `.status-llm_reviewed` | `--accent` | `rgba(96,165,250,0.15)` |
-| `.status-accepted` | `--success` | `rgba(52,211,153,0.15)` |
-
-Base: `font-size: 10px`, `font-weight: 600`, `text-transform: uppercase`, `border-radius: 3px`.
-
-### Tooltips (CSS-only)
-
-```html
-<span data-tooltip="Help text" data-tooltip-pos="top">Hover me</span>
-```
-
-Positions: `top` (default), `bottom`, `left`, `right`. Styled with `--bg-elevated` background, `--border-color` border, `box-shadow`.
-
----
-
-## Accessibility
-
-### Focus Visible
-
-All interactive elements use `:focus-visible` with `outline: 2px solid var(--accent); outline-offset: 2px`. Applied to:
-`.btn`, `.btn-primary`, `.btn-secondary`, `.btn-sm`, `.sub-tab-btn`, `.modal-close`, `.btn-icon`, `.btn-accept`.
-
-### Reduced Motion
+Geist is the interface face and Geist Mono is used for controls, badges, status values, and configuration text. Both variable fonts are self-hosted; runtime font requests are not permitted.
 
 ```css
-@media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
-    animation-duration: 0.01ms !important;
-    transition-duration: 0.01ms !important;
-    scroll-behavior: auto !important;
-  }
-}
+--font-sans: 'Geist Variable', 'Geist', 'Inter', system-ui, sans-serif;
+--font-mono: 'Geist Mono Variable', 'Geist Mono', 'JetBrains Mono', ui-monospace, monospace;
 ```
 
-### Touch Targets
+## Color system
 
-- `.sidebar-toggle`: `min-width: 32px; min-height: 32px`
-- `.btn-sm`: `min-height: 30px`
-- Nav items and group headers have `padding: 6px 12px` minimum hit areas
+### Dark theme
+
+| Token | Value | Purpose |
+|---|---:|---|
+| `--ink-0` / `--bg-primary` | `#0B0D12` | Application canvas |
+| `--ink-1` / `--bg-secondary` | `#12151C` | Navigation and panels |
+| `--ink-2` / `--bg-tertiary` | `#171A22` | Elevated surfaces |
+| `--border-color` | `#262B38` | Dividers and outlines |
+| `--text-primary` | `#F8F9FA` | Primary content |
+| `--text-secondary` | `#C9CED5` | Supporting content |
+| `--text-muted` | `#9AA2AD` | Metadata and disabled content |
+| `--accent` | `#4DD0C8` | Primary actions, links, and focus |
+| `--model-plum` | `#7C3AED` | Model activity and `intent` only |
+| `--model-text` | `#C4B5FD` | Model text on dark surfaces |
+| `--juniper-green` | `#90C641` | Juniper target identity only |
+
+### Light theme
+
+| Token | Value | Purpose |
+|---|---:|---|
+| `--bg-primary` | `#F5F6F8` | Application canvas |
+| `--bg-secondary` | `#FFFFFF` | Navigation and panels |
+| `--bg-tertiary` | `#EBEDF0` | Subtle surfaces |
+| `--bg-elevated` | `#E0E3E8` | Elevated surfaces |
+| `--border-color` | `#C9CDD4` | Dividers and outlines |
+| `--text-primary` | `#171A22` | Primary content |
+| `--text-secondary` | `#4B5563` | Supporting content |
+| `--text-muted` | `#6B7280` | Metadata and disabled content |
+| `--accent` | `#0D9488` | Primary actions, links, and focus |
+| `--model-plum` | `#7C3AED` | Model activity and `intent` only |
+| `--juniper-green` | `#3F6212` | Juniper target identity only |
+
+### Semantic colors
+
+`--success`, `--warning`, `--error`, and `--info` communicate status. They must not substitute for vendor or model identity. Conversely, Juniper green must not communicate generic success, and plum must not decorate ordinary application features.
+
+Both cloud and local model actions map to `--model-plum`. Provider choice is communicated with text and labels, not competing colors.
+
+## Controls and layout
+
+- Standard controls are `34px` high; compact icon controls are at least `28px`.
+- Buttons, compact controls, badges, and chips use the pill radius `999px`.
+- The application remains a dense four-panel workspace with a `52px` top bar and `28px` status bar.
+- Use the 4px spacing grid and existing `6px`/`10px` surface radii for cards, menus, and modals.
+- Preserve the mark and product name at constrained widths; hide the endorsement first.
+- Scrollbars use theme tokens so native controls do not introduce a bright track in dark mode.
+
+## Interaction and accessibility
+
+- Every keyboard-focusable button, link, input, select, and textarea receives a visible 2px accent outline with a 2px offset.
+- The decorative mark is hidden from assistive technology; the lockup exposes the exact endorsed accessible name once.
+- Text and controls must remain legible in explicit dark and light themes and in OS-level automatic theme selection.
+- Respect `prefers-reduced-motion` by minimizing animation and transition duration.
+- Do not encode state or provider identity by color alone; retain labels, icons, or status text.
+
+## Reports and exports
+
+HTML and PDF reports use the topology M, the endorsed accessible name, Geist-compatible stacks, canonical teal/plum tokens, and the footer `Generated by firewallintentconverter · a mechub project`. Standalone guides, Terraform exports, Ansible exports, and device commit comments use the same exact product identity.
+
+## Source of truth
+
+The runtime tokens live in `public/styles/main.css`; the final component overrides live in `public/styles/brand.css`; identity strings and report geometry live in `public/utils/brand.js`. Update those sources and their branding contract tests together whenever the system changes.

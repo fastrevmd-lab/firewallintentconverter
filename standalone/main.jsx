@@ -7,6 +7,8 @@
  */
 import React from 'react';
 import ReactDOM from 'react-dom/client';
+import '@fontsource-variable/geist/wght.css';
+import '@fontsource-variable/geist-mono/wght.css';
 import App from '../public/app.jsx';
 import { ConfigProvider } from '../public/contexts/ConfigContext.jsx';
 import { UIProvider } from '../public/contexts/UIContext.jsx';
@@ -19,6 +21,7 @@ import '../public/styles/nav-tree.css';
 import '../public/styles/command-palette.css';
 import '../public/styles/status-bar.css';
 import './standalone-overrides.css';
+import '../public/styles/brand.css';
 
 // Force deterministic mode — bypasses LLM disclaimer and disables all AI
 // features via the existing isDeterministicMode() gates in the app.

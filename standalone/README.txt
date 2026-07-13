@@ -1,5 +1,5 @@
-Firewall Policy Converter — Standalone Edition
-================================================
+firewallintentconverter · a mechub project — Standalone Edition
+===============================================================
 
 A self-contained, offline web application that converts multi-vendor
 firewall configurations to Juniper SRX format. No server, no install,

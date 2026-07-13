@@ -129,8 +129,8 @@ export default function RightPanel() {
           <div
             style={{
               padding: '10px 12px', margin: '8px 0', borderRadius: 6,
-              background: 'var(--surface-2)', cursor: 'pointer',
-              border: '1px solid var(--border)',
+              background: 'var(--bg-secondary)', cursor: 'pointer',
+              border: '1px solid var(--border-color)',
             }}
             onClick={() => uiDispatch({ type: 'SET_FIELD', field: 'editTab', value: 'analysis' })}
             title="View full analysis"
@@ -142,7 +142,7 @@ export default function RightPanel() {
                 return (
                   <span key={f.id} style={{
                     fontSize: 11, padding: '2px 6px', borderRadius: 4,
-                    background: isWarn ? 'rgba(167, 139, 250, 0.1)' : 'var(--surface-3)',
+                    background: isWarn ? 'color-mix(in srgb, var(--caution) 12%, transparent)' : 'var(--bg-tertiary)',
                     color: isWarn ? 'var(--caution)' : 'var(--text-secondary)',
                   }}>
                     {f.id.replace(/_/g, ' ')}: {f.count}

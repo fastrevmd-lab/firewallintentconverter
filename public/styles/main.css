@@ -1,7 +1,5 @@
 /* =============================================================
-   Firewall Policy Converter — Dark Professional Theme
-   Dark charcoal background with cyan/teal accents.
-   Designed for 1920x1080 and 1440x900 viewports.
+   firewallintentconverter — Mechub brand system
    ============================================================= */
 
 /* --- Reset & Base --- */
@@ -12,114 +10,110 @@
 }
 
 :root {
-  /* Core palette */
-  --bg-primary: #1a1d23;
-  --bg-secondary: #22262e;
-  --bg-tertiary: #2a2f38;
-  --bg-elevated: #31363f;
-  --bg-hover: #383e48;
-
-  /* Accent */
-  --accent: #4dd0c8;
-  --accent-dim: #005b5a;
-  --accent-text: #005b5a;
+  --ink-0: #0B0D12;
+  --ink-1: #12151C;
+  --ink-2: #171A22;
+  --bg-primary: var(--ink-0);
+  --bg-secondary: var(--ink-1);
+  --bg-tertiary: var(--ink-2);
+  --bg-elevated: var(--ink-2);
+  --bg-hover: color-mix(in srgb, var(--ink-2) 84%, var(--text-primary));
+  --border-color: #262B38;
+  --text-primary: #F8F9FA;
+  --text-secondary: #C9CED5;
+  --text-muted: #9AA2AD;
+  --accent: #4DD0C8;
+  --accent-dim: #005B5A;
+  --accent-text: #4DD0C8;
   --accent-glow: rgba(77, 208, 200, 0.15);
-
-  /* Text */
-  --text-primary: #e8eaed;
-  --text-secondary: #9aa0a6;
-  --text-muted: #6b7280;
-
-  /* Semantic */
-  --success: #34d399;
-  --warning: #fbbf24;
-  --error: #f87171;
-  --info: #60a5fa;
-
-  /* LLM mode colors */
-  --llm-cloud: #a78bfa;
-  --llm-local: #db2777;
-
-  /* Caution — app-driven analysis/warnings (orange) */
-  --caution: #f59e0b;
-
-  /* Juniper SRX brand green (front panel color) */
+  --model-plum: #7C3AED;
+  --model-text: #C4B5FD;
+  --model-surface: rgba(124, 58, 237, 0.14);
+  --llm-cloud: var(--model-plum);
+  --llm-local: var(--model-plum);
+  --success: #34D399;
+  --warning: #FBBF24;
+  --error: #F87171;
+  --info: #60A5FA;
+  --caution: #FBBF24;
   --juniper-green: #90C641;
-
-  /* Status badges */
-  --status-clean: #34d399;
-  --status-warning: #fbbf24;
-  --status-unsupported: #f87171;
-  --status-interview: #f59e0b;
-
-  /* Layout */
+  --status-clean: var(--success);
+  --status-warning: var(--warning);
+  --status-unsupported: var(--error);
+  --status-interview: var(--caution);
   --header-height: 52px;
-  --border-color: #3a3f48;
   --radius: 6px;
   --radius-lg: 10px;
-
-  /* Typography */
-  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
+  --control-height: 34px;
+  --control-compact: 28px;
+  --control-radius: 999px;
+  --font-sans: 'Geist Variable', 'Geist', 'Inter', system-ui, sans-serif;
+  --font-mono: 'Geist Mono Variable', 'Geist Mono', 'JetBrains Mono', ui-monospace, monospace;
 }
 
 /* --- Light Theme --- */
 :root[data-theme="light"] {
-  --bg-primary: #f5f6f8;
-  --bg-secondary: #ebedf0;
-  --bg-tertiary: #e0e3e8;
-  --bg-elevated: #d5d8de;
-  --bg-hover: #cbcfd6;
-  --accent: #0d9488;
-  --accent-dim: #b2dfdb;
-  --accent-text: #0d9488;
+  --bg-primary: #F5F6F8;
+  --bg-secondary: #FFFFFF;
+  --bg-tertiary: #EBEDF0;
+  --bg-elevated: #E0E3E8;
+  --bg-hover: #D5D8DE;
+  --border-color: #C9CDD4;
+  --text-primary: #171A22;
+  --text-secondary: #4B5563;
+  --text-muted: #6B7280;
+  --accent: #0D9488;
+  --accent-dim: #005B5A;
+  --accent-text: #005B5A;
   --accent-glow: rgba(13, 148, 136, 0.12);
-  --text-primary: #1a1d23;
-  --text-secondary: #4b5563;
-  --text-muted: #9ca3af;
-  --success: #059669;
-  --warning: #d97706;
-  --error: #dc2626;
-  --info: #2563eb;
-  --llm-cloud: #7c3aed;
-  --llm-local: #be185d;
-  --caution: #d97706;
-  --juniper-green: #65a30d;
-  --status-clean: #059669;
-  --status-warning: #d97706;
-  --status-unsupported: #dc2626;
-  --status-interview: #d97706;
-  --border-color: #c9cdd4;
+  --model-plum: #7C3AED;
+  --model-text: #7C3AED;
+  --model-surface: rgba(124, 58, 237, 0.10);
+  --llm-cloud: var(--model-plum);
+  --llm-local: var(--model-plum);
+  --success: #047857;
+  --warning: #B45309;
+  --error: #B91C1C;
+  --info: #1D4ED8;
+  --caution: #B45309;
+  --juniper-green: #3F6212;
+  --status-clean: var(--success);
+  --status-warning: var(--warning);
+  --status-unsupported: var(--error);
+  --status-interview: var(--caution);
 }
 
 /* OS-level preference (auto mode — no explicit data-theme set) */
 @media (prefers-color-scheme: light) {
   :root:not([data-theme="dark"]):not([data-theme="light"]) {
-    --bg-primary: #f5f6f8;
-    --bg-secondary: #ebedf0;
-    --bg-tertiary: #e0e3e8;
-    --bg-elevated: #d5d8de;
-    --bg-hover: #cbcfd6;
-    --accent: #0d9488;
-    --accent-dim: #b2dfdb;
-    --accent-text: #0d9488;
+    --bg-primary: #F5F6F8;
+    --bg-secondary: #FFFFFF;
+    --bg-tertiary: #EBEDF0;
+    --bg-elevated: #E0E3E8;
+    --bg-hover: #D5D8DE;
+    --border-color: #C9CDD4;
+    --text-primary: #171A22;
+    --text-secondary: #4B5563;
+    --text-muted: #6B7280;
+    --accent: #0D9488;
+    --accent-dim: #005B5A;
+    --accent-text: #005B5A;
     --accent-glow: rgba(13, 148, 136, 0.12);
-    --text-primary: #1a1d23;
-    --text-secondary: #4b5563;
-    --text-muted: #9ca3af;
-    --success: #059669;
-    --warning: #d97706;
-    --error: #dc2626;
-    --info: #2563eb;
-    --llm-cloud: #7c3aed;
-    --llm-local: #be185d;
-    --caution: #d97706;
-    --juniper-green: #65a30d;
-    --status-clean: #059669;
-    --status-warning: #d97706;
-    --status-unsupported: #dc2626;
-    --status-interview: #d97706;
-    --border-color: #c9cdd4;
+    --model-plum: #7C3AED;
+    --model-text: #7C3AED;
+    --model-surface: rgba(124, 58, 237, 0.10);
+    --llm-cloud: var(--model-plum);
+    --llm-local: var(--model-plum);
+    --success: #047857;
+    --warning: #B45309;
+    --error: #B91C1C;
+    --info: #1D4ED8;
+    --caution: #B45309;
+    --juniper-green: #3F6212;
+    --status-clean: var(--success);
+    --status-warning: var(--warning);
+    --status-unsupported: var(--error);
+    --status-interview: var(--caution);
   }
 }
 
@@ -134,6 +128,11 @@ html, body, #root {
 }
 
 /* --- Scrollbar --- */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--bg-elevated) var(--bg-secondary);
+}
+
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
@@ -977,7 +976,7 @@ html, body, #root {
 .warning-icon.clean { background: rgba(52, 211, 153, 0.15); color: var(--status-clean); }
 .warning-icon.warning { background: rgba(251, 191, 36, 0.15); color: var(--status-warning); }
 .warning-icon.unsupported { background: rgba(248, 113, 113, 0.15); color: var(--status-unsupported); }
-.warning-icon.interview { background: rgba(167, 139, 250, 0.15); color: var(--status-interview); }
+.warning-icon.interview { background: color-mix(in srgb, var(--caution) 15%, transparent); color: var(--status-interview); }
 
 .warning-body {
   flex: 1;
@@ -2595,20 +2594,20 @@ html, body, #root {
 
 .sanitize-type-badge.hash { background: rgba(248, 113, 113, 0.15); color: var(--error); }
 .sanitize-type-badge.key { background: rgba(251, 191, 36, 0.15); color: var(--warning); }
-.sanitize-type-badge.community { background: rgba(167, 139, 250, 0.15); color: #a78bfa; }
+.sanitize-type-badge.community { background: color-mix(in srgb, var(--info) 15%, transparent); color: var(--info); }
 .sanitize-type-badge.username { background: rgba(96, 165, 250, 0.15); color: var(--info); }
 .sanitize-type-badge.public_ip { background: rgba(52, 211, 153, 0.15); color: var(--success); }
 .sanitize-type-badge.certificate { background: rgba(251, 146, 60, 0.15); color: #f97316; }
-.sanitize-type-badge.hostname { background: rgba(139, 92, 246, 0.15); color: #a78bfa; }
-.sanitize-type-badge.bgp { background: rgba(236, 72, 153, 0.15); color: #ec4899; }
+.sanitize-type-badge.hostname { background: color-mix(in srgb, var(--accent) 15%, transparent); color: var(--accent-text); }
+.sanitize-type-badge.bgp { background: color-mix(in srgb, var(--info) 15%, transparent); color: var(--info); }
 .sanitize-type-badge.device_hostname { background: rgba(14, 165, 233, 0.15); color: #0ea5e9; }
-.sanitize-type-badge.domain { background: rgba(168, 85, 247, 0.15); color: #a855f7; }
+.sanitize-type-badge.domain { background: color-mix(in srgb, var(--accent) 15%, transparent); color: var(--accent-text); }
 .sanitize-type-badge.zone { background: rgba(34, 197, 94, 0.15); color: #22c55e; }
 .sanitize-type-badge.object { background: rgba(59, 130, 246, 0.15); color: #3b82f6; }
 .sanitize-type-badge.private_ip { background: rgba(52, 211, 153, 0.15); color: #10b981; }
 .sanitize-type-badge.ipv6 { background: rgba(20, 184, 166, 0.15); color: #14b8a6; }
-.sanitize-type-badge.email { background: rgba(244, 114, 182, 0.15); color: #f472b6; }
-.sanitize-type-badge.url { background: rgba(99, 102, 241, 0.15); color: #6366f1; }
+.sanitize-type-badge.email { background: color-mix(in srgb, var(--info) 15%, transparent); color: var(--info); }
+.sanitize-type-badge.url { background: color-mix(in srgb, var(--accent) 15%, transparent); color: var(--accent-text); }
 .sanitize-type-badge.description { background: rgba(156, 163, 175, 0.15); color: #9ca3af; }
 .sanitize-type-badge.interface { background: rgba(245, 158, 11, 0.15); color: #f59e0b; }
 
@@ -2951,9 +2950,9 @@ html, body, #root {
 }
 
 .profile-group-chip {
-  background: rgba(167, 139, 250, 0.12);
-  color: var(--status-interview);
-  border: 1px solid rgba(167, 139, 250, 0.25);
+  background: color-mix(in srgb, var(--info) 12%, transparent);
+  color: var(--info);
+  border: 1px solid color-mix(in srgb, var(--info) 25%, transparent);
   font-weight: 500;
   font-size: 10px;
 }
@@ -3045,7 +3044,7 @@ html, body, #root {
   width: 23px; height: 23px; border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
   font-size: 12px; font-weight: 700; flex-shrink: 0;
-  background: #2a333d; color: var(--text-secondary);
+  background: var(--bg-tertiary); color: var(--text-secondary);
 }
 .wf-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.2; }
 .wf-lbl { font-size: 12.5px; font-weight: 600; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -3063,7 +3062,7 @@ html, body, #root {
 .wf-seg.wf-cur .wf-num { background: var(--accent); color: #0f1419; }
 
 .wf-seg.wf-cur-llm { box-shadow: inset 0 0 0 1px var(--llm-cloud); background: color-mix(in srgb, var(--llm-cloud) 14%, transparent); }
-.wf-seg.wf-cur-llm .wf-num { background: var(--llm-cloud); color: #0f1419; }
+.wf-seg.wf-cur-llm .wf-num { background: var(--llm-cloud); color: var(--text-primary); }
 
 .wf-seg.wf-avail-llm { box-shadow: inset 0 0 0 1px var(--llm-cloud); }
 .wf-seg.wf-avail-llm .wf-opt { color: var(--llm-cloud); border-color: color-mix(in srgb, var(--llm-cloud) 45%, transparent); }
@@ -3075,7 +3074,7 @@ html, body, #root {
 /* LLM translate button — colored variant in the chain */
 .btn-translate {
   background: var(--llm-cloud);
-  color: #1a1a2e;
+  color: var(--text-primary);
   border-color: var(--llm-cloud);
   margin: 0;
 }
@@ -3321,8 +3320,8 @@ html, body, #root {
   color: var(--accent-text);
 }
 .srx-cell-icon.app {
-  background: rgba(167, 139, 250, 0.2);
-  color: var(--status-interview);
+  background: color-mix(in srgb, var(--info) 20%, transparent);
+  color: var(--info);
 }
 .srx-cell-icon.svc {
   background: rgba(251, 191, 36, 0.2);
@@ -3638,11 +3637,11 @@ html, body, #root {
 .fg-prof-av    { background: rgba(52, 211, 153, 0.15); color: var(--success); }
 .fg-prof-wf    { background: rgba(96, 165, 250, 0.15); color: var(--info); }
 .fg-prof-ips   { background: rgba(251, 191, 36, 0.15); color: var(--warning); }
-.fg-prof-app   { background: rgba(139, 92, 246, 0.15); color: #a78bfa; }
-.fg-prof-ssl   { background: rgba(236, 72, 153, 0.15); color: #ec4899; }
+.fg-prof-app   { background: color-mix(in srgb, var(--info) 15%, transparent); color: var(--info); }
+.fg-prof-ssl   { background: color-mix(in srgb, var(--accent) 15%, transparent); color: var(--accent-text); }
 .fg-prof-dns   { background: rgba(45, 212, 191, 0.15); color: #2dd4bf; }
 .fg-prof-email { background: rgba(251, 146, 60, 0.15); color: #fb923c; }
-.fg-prof-dlp   { background: rgba(167, 139, 250, 0.15); color: #c4b5fd; }
+.fg-prof-dlp   { background: color-mix(in srgb, var(--info) 15%, transparent); color: var(--info); }
 .fg-profile-none {
   font-size: 11px;
   color: var(--text-muted);
@@ -3775,8 +3774,8 @@ html, body, #root {
   font-weight: 600;
   padding: 2px 6px;
   border-radius: 3px;
-  background: rgba(139, 92, 246, 0.12);
-  color: #a78bfa;
+  background: color-mix(in srgb, var(--info) 12%, transparent);
+  color: var(--info);
   letter-spacing: 0.3px;
 }
 
@@ -3918,8 +3917,8 @@ html, body, #root {
   font-size: 9px;
   padding: 1px 6px;
   border-radius: 3px;
-  background: rgba(167, 139, 250, 0.15);
-  color: #a78bfa;
+  background: color-mix(in srgb, var(--info) 15%, transparent);
+  color: var(--info);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.3px;

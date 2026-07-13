@@ -10,14 +10,12 @@
  *   6. Final SRX Output
  *   7. Unconverted / Unsupported Commands
  *
- * Color coding follows project DESIGN.md conventions:
- *   - Violet (#a78bfa)    = LLM/Cloud-driven changes
- *   - Plum (#db2777)      = Local LLM changes
- *   - Orange (#f59e0b)    = App/tool-driven analysis
- *   - Juniper Green (#90C641) = SRX target branding
- *   - Teal (#4dd0c8)      = Accent / general
+ * Color coding follows the Mechub brand system: provider-neutral plum for
+ * model activity, caution for analysis, teal for actions, and Juniper green
+ * only for the target platform.
  */
 import { getConversionOutputText } from '../../src/conversion/conversion-output.js';
+import { BRAND, BRAND_COLORS as B, reportBrandLockup } from './brand.js';
 
 const VENDOR_LABELS = {
   panos: 'PAN-OS', srx: 'SRX', fortigate: 'FortiGate',
@@ -59,7 +57,7 @@ function table(headers, rows, opts = {}) {
 function section(num, title, content, opts = {}) {
   const badge = opts.count != null ? ` <span class="badge" style="${opts.badgeStyle || ''}">${opts.count}</span>` : '';
   const pageBreak = num > 1 ? ' page-break' : '';
-  const accent = opts.accent || '#1a5276';
+  const accent = opts.accent || C.accent;
   return `<div class="section${pageBreak}">
     <h2 class="section-title" style="border-bottom-color: ${accent};">
       <span class="section-num" style="background: ${accent};">${num}</span> ${esc(title)}${badge}
@@ -90,21 +88,22 @@ function fmtList(items) {
 }
 
 // ---------------------------------------------------------------------------
-// Color constants (matching DESIGN.md)
+// Print-safe Mechub color roles
 // ---------------------------------------------------------------------------
 const C = {
-  llmCloud: '#a78bfa',       // Violet — LLM/Cloud
-  llmCloudBg: 'rgba(167,139,250,0.10)',
-  llmLocal: '#db2777',       // Plum — Local LLM
-  llmLocalBg: 'rgba(219,39,119,0.10)',
-  caution: '#f59e0b',        // Orange — App-driven analysis
-  cautionBg: 'rgba(245,158,11,0.10)',
-  juniper: '#90C641',        // Juniper green
-  juniperBg: 'rgba(144,198,65,0.10)',
-  accent: '#1a5276',         // Report accent (teal-like for headers)
-  success: '#059669',
-  error: '#dc2626',
-  muted: '#6b7280',
+  llmCloud: B.plum,
+  llmCloudBg: 'rgba(124,58,237,.10)',
+  llmLocal: B.plum,
+  llmLocalBg: 'rgba(124,58,237,.10)',
+  caution: '#B45309',
+  cautionBg: 'rgba(180,83,9,.10)',
+  juniper: B.juniper,
+  juniperBg: 'rgba(144,198,65,.10)',
+  accent: B.tealDeep,
+  success: '#047857',
+  error: '#B91C1C',
+  muted: '#6B7280',
+  info: '#1D4ED8',
 };
 
 // ---------------------------------------------------------------------------
@@ -182,8 +181,8 @@ function buildOverview(data) {
       const isLag = lagMemberSet.has(src);
       const lagParent = lagIfaces.find(l => l.source_name === src);
       let typeTag = '';
-      if (lagParent) typeTag = pill('LAG Parent', '#4c1d95', '#c4b5fd');
-      else if (isLag) typeTag = pill('LAG Member', '#4c1d95', '#c4b5fd');
+      if (lagParent) typeTag = pill('LAG Parent', 'rgba(29,78,216,.10)', C.info);
+      else if (isLag) typeTag = pill('LAG Member', 'rgba(29,78,216,.10)', C.info);
       else if (/^tunnel/i.test(src)) typeTag = pill('Tunnel', '#1e40af', '#93c5fd');
       else if (/^loopback/i.test(src)) typeTag = pill('Loopback', '#065f46', '#6ee7b7');
 
@@ -711,7 +710,7 @@ export function generateFullPdfHtml(data) {
   * { margin: 0; padding: 0; box-sizing: border-box; }
 
   body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-family: 'Geist Variable', 'Geist', 'Inter', system-ui, sans-serif;
     background: #fff;
     color: #1a1a1a;
     padding: 24px;
@@ -726,8 +725,14 @@ export function generateFullPdfHtml(data) {
     border-bottom: 3px solid ${C.accent};
     margin-bottom: 20px;
   }
+  .report-brand { display: flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 8px; font-family: 'Geist Variable', 'Inter', system-ui, sans-serif; }
+  .mechub-report-mark { width: 34px; height: 34px; }
+  .report-brand-name { font-weight: 700; letter-spacing: -.045em; }
+  .brand-intent { color: ${B.plum}; }
+  .report-endorsement { color: #6B7280; font: 500 10px 'Geist Mono Variable', monospace; }
   .report-header h1 { font-size: 22px; color: ${C.accent}; margin-bottom: 4px; }
   .report-header .subtitle { font-size: 12px; color: #666; }
+  .target-platform { color: ${C.juniper}; font-weight: 600; }
 
   /* --- Model comparison --- */
   .model-comparison {
@@ -849,7 +854,7 @@ export function generateFullPdfHtml(data) {
     border: 1px solid #e0e0e0;
     border-radius: 4px;
     padding: 10px 12px;
-    font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+    font-family: 'Geist Mono Variable', 'Geist Mono', 'JetBrains Mono', monospace;
     font-size: 8.5px;
     line-height: 1.4;
     white-space: pre-wrap;
@@ -898,11 +903,12 @@ export function generateFullPdfHtml(data) {
 </head>
 <body>
 <div class="report-header">
-  <h1>Firewall Migration Report</h1>
-  <div class="subtitle">${esc(vendorLabel)}${sourceModel ? ' (' + esc(sourceModel) + ')' : ''} &rarr; Juniper SRX${targetModel ? ' (' + esc(targetModel) + ')' : ''}${siteName ? ' | Site: ' + esc(siteName) : ''}${siteGroup ? ' (' + esc(siteGroup) + ')' : ''} | Generated: ${esc(now)}</div>
+  ${reportBrandLockup()}
+  <h1>Firewall migration report</h1>
+  <div class="subtitle">${esc(vendorLabel)}${sourceModel ? ' (' + esc(sourceModel) + ')' : ''} &rarr; <span class="target-platform">Juniper SRX${targetModel ? ' (' + esc(targetModel) + ')' : ''}</span>${siteName ? ' | Site: ' + esc(siteName) : ''}${siteGroup ? ' (' + esc(siteGroup) + ')' : ''} | Generated: ${esc(now)}</div>
 </div>
 ${sections.join('\n')}
-<div class="report-footer">Generated by Firewall Intent Converter &mdash; ${esc(now)}</div>
+<div class="report-footer">Generated by ${BRAND.product} &middot; ${BRAND.endorsement} &mdash; ${esc(now)}</div>
 <script>window.onload=function(){window.print();}<\/script>
 </body>
 </html>`;

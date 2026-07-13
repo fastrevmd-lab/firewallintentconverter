@@ -29,7 +29,7 @@ export default function PushModal({ onClose }) {
   const [logExpanded, setLogExpanded] = useState(false);
   const [commitMode, setCommitMode] = useState('immediate');
   const [confirmMinutes, setConfirmMinutes] = useState(10);
-  const [commitComment, setCommitComment] = useState('Pushed via Firewall Intent Converter');
+  const [commitComment, setCommitComment] = useState('Pushed via firewallintentconverter · a mechub project');
   const [timerDisplay, setTimerDisplay] = useState('');
 
   const {

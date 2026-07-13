@@ -12,6 +12,8 @@
     "zip:standalone": "npm run build:standalone && cd dist-standalone && zip -r ../firewallintentconverter-standalone.zip . -x 'prompts/*' && cd .."
   },
   "devDependencies": {
+    "@fontsource-variable/geist": "5.2.9",
+    "@fontsource-variable/geist-mono": "5.2.8",
     "@vitejs/plugin-react": "6.0.2",
     "acorn": "^8.17.0",
     "fast-xml-parser": "5.8.0",

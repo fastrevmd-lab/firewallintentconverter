@@ -33,6 +33,53 @@
   flex-shrink: 0;
 }
 
+.brand-lockup {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 16px;
+  flex: 0 0 auto;
+  min-width: 0;
+}
+
+.brand-mark {
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+}
+
+.brand-copy {
+  display: flex;
+  align-items: baseline;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.brand-product {
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: -0.045em;
+}
+
+.brand-intent {
+  color: var(--model-text);
+}
+
+.brand-endorsement {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0;
+}
+
+@media (max-width: 1200px) {
+  .brand-endorsement {
+    display: none;
+  }
+}
+
 /* --- Main Area --- */
 .app-main {
   display: flex;

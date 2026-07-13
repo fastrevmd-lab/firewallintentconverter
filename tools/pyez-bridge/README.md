@@ -1,6 +1,6 @@
 # PyEZ Bridge
 
-The PyEZ Bridge is a localhost-only REST API that lets Firewall Intent Converter load, validate, commit, pull, and inspect Juniper SRX configurations over NETCONF.
+The PyEZ Bridge is a localhost-only REST API that lets firewallintentconverter · a mechub project load, validate, commit, pull, and inspect Juniper SRX configurations over NETCONF.
 
 ```text
 Browser (React SPA) ── authenticated HTTP ──> PyEZ Bridge (loopback:8830) ── NETCONF ──> SRX

@@ -4,6 +4,8 @@
  */
 import React from 'react';
 import ReactDOM from 'react-dom/client';
+import '@fontsource-variable/geist/wght.css';
+import '@fontsource-variable/geist-mono/wght.css';
 import App from './app.jsx';
 import { ConfigProvider } from './contexts/ConfigContext.jsx';
 import { UIProvider } from './contexts/UIContext.jsx';
@@ -15,6 +17,7 @@ import './styles/layout.css';
 import './styles/nav-tree.css';
 import './styles/command-palette.css';
 import './styles/status-bar.css';
+import './styles/brand.css';
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>

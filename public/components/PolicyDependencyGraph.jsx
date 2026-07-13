@@ -10,7 +10,7 @@ import React, { useState, useMemo, useCallback, useRef, useEffect } from 'react'
 const NODE_TYPES = {
   policy: { color: 'var(--accent)', label: 'Policy', radius: 10 },
   address: { color: 'var(--info)', label: 'Address', radius: 7 },
-  address_group: { color: '#818cf8', label: 'Addr Group', radius: 8 },
+  address_group: { color: 'var(--info)', label: 'Addr Group', radius: 8 },
   service: { color: 'var(--success)', label: 'Service', radius: 7 },
   application: { color: 'var(--warning)', label: 'Application', radius: 7 },
 };
@@ -262,7 +262,7 @@ export default function PolicyDependencyGraph({ intermediateConfig }) {
       </div>
 
       {isLimited && (
-        <div style={{ padding: '4px 12px', background: 'rgba(167, 139, 250, 0.1)', fontSize: 11, color: 'var(--caution)' }}>
+        <div style={{ padding: '4px 12px', background: 'color-mix(in srgb, var(--caution) 12%, transparent)', fontSize: 11, color: 'var(--caution)' }}>
           Graph limited to first {maxNodes} nodes for performance. Full config has {nodes.length} objects.
         </div>
       )}
@@ -286,7 +286,7 @@ export default function PolicyDependencyGraph({ intermediateConfig }) {
               y1={from.y}
               x2={to.x}
               y2={to.y}
-              stroke={isHighlighted ? 'var(--border-color)' : 'rgba(58, 63, 72, 0.2)'}
+              stroke={isHighlighted ? 'var(--border-color)' : 'color-mix(in srgb, var(--border-color) 20%, transparent)'}
               strokeWidth={isHighlighted ? 1.5 : 0.5}
               strokeOpacity={isHighlighted ? 0.8 : 0.15}
             />

@@ -357,7 +357,7 @@ export default function usePush() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          comment: options.comment || 'Pushed via Firewall Intent Converter',
+          comment: options.comment || 'Pushed via firewallintentconverter · a mechub project',
           confirm_minutes: confirmMin || undefined,
         }),
       });

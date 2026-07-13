@@ -2,8 +2,8 @@
 PyEZ Bridge — Lightweight REST API for pushing SRX configurations via NETCONF.
 
 Wraps Juniper PyEZ (junos-eznc) behind Flask endpoints so the browser-based
-Firewall Intent Converter can push configs, run commit checks, and manage
-commits on live SRX devices.
+firewallintentconverter · a mechub project can push configs, run commit checks,
+and manage commits on live SRX devices.
 
 Usage:
     pip install -r requirements.txt
@@ -718,7 +718,7 @@ def pull_config(name):
       format: 'set' (default) or 'xml'
 
     Returns the full configuration as a text string that can be pasted
-    directly into the Firewall Intent Converter input panel.
+    directly into the firewallintentconverter input panel.
     """
     dev_dict, _ = _find_device(name)
     if not dev_dict:

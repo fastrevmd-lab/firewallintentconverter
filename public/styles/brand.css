@@ -1,0 +1,57 @@
+/* Final Mechub brand layer. Keep this stylesheet last in both entry points. */
+button,
+[role="button"],
+.stat-badge,
+.badge {
+  font-family: var(--font-mono);
+}
+
+:where(button, [role="button"], a, input, select, textarea):focus-visible {
+  outline: 2px solid var(--accent) !important;
+  outline-offset: 2px;
+}
+
+:where(.btn, .btn-primary, .btn-secondary, .btn-sm, .btn-translate, .risk-btn-accept, .risk-btn-local, .risk-btn-reject) {
+  min-height: var(--control-height);
+  border-radius: var(--control-radius) !important;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+}
+
+:where(.settings-btn, .btn-icon, .modal-close) {
+  min-width: var(--control-compact);
+  min-height: var(--control-compact);
+  border-radius: var(--control-radius);
+}
+
+:where(.stat-badge, .tab-badge, .nav-badge, .status-label, .profile-chip, .project-security-badge) {
+  border-radius: var(--control-radius);
+  font-family: var(--font-mono);
+}
+
+.btn-primary {
+  background: var(--accent);
+  color: var(--ink-0);
+}
+
+.btn-primary:hover {
+  background: color-mix(in srgb, var(--accent) 82%, white);
+}
+
+.btn-translate,
+.risk-btn-accept,
+.risk-btn-local {
+  background: var(--model-surface) !important;
+  border: 1px solid var(--model-plum) !important;
+  color: var(--model-text) !important;
+}
+
+.btn-translate:hover:not(:disabled),
+.risk-btn-accept:hover,
+.risk-btn-local:hover {
+  background: color-mix(in srgb, var(--model-plum) 22%, transparent) !important;
+}
+
+.llm-local {
+  --llm-local: var(--model-plum);
+}

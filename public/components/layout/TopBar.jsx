@@ -3,6 +3,7 @@ import { useConfigContext } from '../../contexts/ConfigContext.jsx';
 import { useConversionContext } from '../../contexts/ConversionContext.jsx';
 import { useUIContext, isDeterministicMode } from '../../contexts/UIContext.jsx';
 import { countOverrides } from '../../utils/app-mapping-overrides.js';
+import BrandLockup from '../brand/BrandLockup.jsx';
 
 /**
  * Resolves the active theme ('dark' or 'light') based on localStorage and OS preference.
@@ -128,12 +129,7 @@ export default function TopBar() {
   return (
     <div className="app-topbar">
       {/* Left: Brand */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '0 16px', flexShrink: 0 }}>
-        <img src="/logo.png" alt="Intent Converter" style={{ width: 28, height: 28 }} />
-        <h1 style={{ fontSize: 14, fontWeight: 600, whiteSpace: 'nowrap' }}>
-          Firewall Policy to <span style={{ color: 'var(--accent)' }}>Intent Converter</span>
-        </h1>
-      </div>
+      <BrandLockup theme={theme} />
 
       {/* Center: Consolidated stat badges */}
       {displayStats && (

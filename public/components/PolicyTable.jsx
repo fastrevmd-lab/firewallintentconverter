@@ -20,12 +20,12 @@ import AutocompleteInput from './shared/AutocompleteInput.jsx';
 const SUBSCRIPTION_DEFS = [
   { key: 'ips',     abbr: 'IP', label: 'IPS',              color: '#f87171' },
   { key: 'cs',      abbr: 'CS', label: 'Content Security', color: '#60a5fa' },
-  { key: 'dec',     abbr: 'DE', label: 'Decrypt',          color: '#c084fc' },
+  { key: 'dec',     abbr: 'DE', label: 'Decrypt',          color: '#60A5FA' },
   { key: 'av',      abbr: 'AV', label: 'Flow-based AV',    color: '#34d399' },
   { key: 'am',      abbr: 'AM', label: 'Anti-malware',     color: '#fb923c' },
   { key: 'si',      abbr: 'SI', label: 'SecIntel',         color: '#fbbf24' },
   { key: 'swp',     abbr: 'SW', label: 'Secure Web Proxy', color: '#2dd4bf' },
-  { key: 'icap',    abbr: 'IC', label: 'ICAP Redirect',    color: '#a78bfa' },
+  { key: 'icap',    abbr: 'IC', label: 'ICAP Redirect',    color: '#4DD0C8' },
 ];
 
 /** Get active subscription keys for a policy */
@@ -1792,11 +1792,10 @@ export default function PolicyTable({
         {/* Group controls */}
         {onGroupWithAI && (
           <button
-            className="btn btn-secondary btn-sm"
+            className={`btn btn-secondary btn-sm btn-translate${llmColor === 'var(--llm-local)' ? ' llm-local' : ''}`}
             onClick={onGroupWithAI}
             disabled={groupingInProgress || policies.length === 0}
             title={llmColor === 'var(--llm-local)' ? 'Note: sending info to Local LLM' : 'Warning: sending info to a Public LLM'}
-            style={{ background: llmColor || 'var(--llm-cloud)', color: '#1a1a2e', borderColor: llmColor || 'var(--llm-cloud)' }}
           >
             {groupingInProgress ? 'Grouping...' : hasGroups ? `Grouped (${displayGroups.length})` : 'Auto-group w/LLM'}
           </button>

@@ -1,7 +1,7 @@
 # Mechub Branding Design
 
 **Date:** 2026-07-13  
-**Status:** Design approved; pending written-spec review  
+**Status:** Approved for implementation
 **Brand authority:** <https://command.mechub.org/branding> (Mechub brand system v1.1)
 
 ## Objective

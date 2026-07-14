@@ -48,6 +48,48 @@ describe('Junos intermediate-input validation', () => {
       'interfaceMappings',
     )).toThrow(expect.objectContaining({ fieldPath: 'interfaceMappings.ethernet1/1' }));
   });
+
+  it('allows UI metadata _analysisFindings with NUL delimiters in duplicate keys', () => {
+    const config = {
+      address_objects: [
+        { name: 'server1', type: 'ip-netmask', value: '192.0.2.10/32' },
+      ],
+      _analysisFindings: [
+        {
+          id: 'duplicates',
+          count: 1,
+          items: [
+            { key: 'objA\x00objB', label: 'objA / objB' },
+          ],
+        },
+      ],
+    };
+
+    expect(validateJunosInput(config)).toBe(config);
+  });
+
+  it('allows UI metadata _review_status without validating it', () => {
+    const config = {
+      address_objects: [
+        { name: 'server1', type: 'ip-netmask', value: '192.0.2.10/32' },
+      ],
+      _review_status: { reviewed: true, timestamp: 1234567890 },
+    };
+
+    expect(validateJunosInput(config)).toBe(config);
+  });
+
+  it('still validates control chars in real serializable fields', () => {
+    const config = {
+      address_objects: [
+        { name: 'bad\x00name', type: 'ip-netmask', value: '192.0.2.10/32' },
+      ],
+    };
+
+    expect(() => validateJunosInput(config)).toThrow(
+      expect.objectContaining({ fieldPath: 'address_objects[0].name' }),
+    );
+  });
 });
 
 describe('Junos set-output validation', () => {

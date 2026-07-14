@@ -21,6 +21,11 @@ const POLICY_ACTIONS = [
   'reset-both',
 ];
 
+// Transient UI/analysis metadata attached to the working config for display
+// only. These never reach the generated Junos config, so the output serializer
+// must not police them (e.g. the duplicates finding keys join names with NUL).
+const NON_SERIALIZED_METADATA_KEYS = new Set(['_analysisFindings', '_review_status']);
+
 function joinPath(parent, key) {
   if (typeof key === 'number') return `${parent}[${key}]`;
   return parent ? `${parent}.${key}` : key;
@@ -32,7 +37,10 @@ function walkScalars(value, path) {
     return;
   }
   if (value !== null && typeof value === 'object') {
-    Object.entries(value).forEach(([key, child]) => walkScalars(child, joinPath(path, key)));
+    Object.entries(value).forEach(([key, child]) => {
+      if (NON_SERIALIZED_METADATA_KEYS.has(key)) return;
+      walkScalars(child, joinPath(path, key));
+    });
     return;
   }
   if (value !== null && value !== undefined) assertSafeScalar(value, path);

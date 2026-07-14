@@ -2,7 +2,7 @@
   "name": "firewallintentconverter",
   "version": "1.2.0",
   "description": "Professional firewall configuration conversion tool — PAN-OS to Juniper SRX",
-  "license": "(MIT OR Apache-2.0)",
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "dev": "vite --host",

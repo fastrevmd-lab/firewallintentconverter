@@ -15,7 +15,7 @@
 A browser-based tool that converts firewall configurations into an intermediate format for review, editing, and conversion to Juniper SRX. Supports **PAN-OS XML**, **Junos SRX**, **FortiGate / FortiOS**, **Cisco ASA / FTD**, **Check Point R80+**, **SonicWall SonicOS**, **Huawei USG**, **AWS Security Groups**, **Azure NSG**, and **GCP Firewall Rules** as source formats, plus a **Greenfield** mode that builds an SRX configuration from scratch via LLM-guided interview. Paste or upload a config (or start a greenfield interview), review and edit the parsed rules through an interactive UI, optionally get AI-powered best-practice suggestions, then export as SRX set commands or XML.
 
 <p align="center">
-  <a href="#license"><img src="https://img.shields.io/badge/License-MIT%2FApache--2.0-blue.svg" alt="License: MIT/Apache-2.0"></a>
+  <a href="#license"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT"></a>
 </p>
 
 <p align="center">
@@ -541,13 +541,13 @@ This repository is an independent, community-driven initiative and carries no fo
 
 ## License
 
-Licensed under either of [MIT](LICENSE-MIT) or [Apache License 2.0](LICENSE-APACHE), at your option.
+Licensed under [MIT](LICENSE).
 
 Configuration output produced by this tool is a **migration draft requiring review**, never production-ready. Always validate generated configurations against vendor documentation and your own change-management process before deployment. No warranty is provided, express or implied.
 
 ### Contribution
 
-Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in this work by you, as defined in the Apache-2.0 license, shall be dual licensed as above, without any additional terms or conditions.
+Unless explicitly stated otherwise, contributions submitted for inclusion in this project are licensed under the [MIT License](LICENSE).
 
 ---
 

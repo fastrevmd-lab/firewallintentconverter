@@ -97,6 +97,7 @@ export default function useConversion() {
         format,
         interfaceMappings,
         targetContext.type !== 'none' ? targetContext : null,
+        { policyStructure: uiState?.policyStructure || 'global' },
       );
 
       // Append hardware capacity warnings if target model is set
@@ -132,7 +133,7 @@ export default function useConversion() {
     } finally {
       uiDispatch({ type: 'SET_LOADING', isLoading: false });
     }
-  }, [intermediateConfig, interfaceMappings, srxTranslatedPolicies, ruleGroups, siteName, siteGroup, targetModel, targetContext, conversionDispatch, uiDispatch]);
+  }, [intermediateConfig, interfaceMappings, srxTranslatedPolicies, ruleGroups, siteName, siteGroup, targetModel, targetContext, uiState?.policyStructure, conversionDispatch, uiDispatch]);
 
   // -----------------------------------------------------------------------
   // handleConvertClick — warn if not all rules accepted, else convert

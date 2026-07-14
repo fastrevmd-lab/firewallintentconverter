@@ -74,7 +74,7 @@ export async function parseConfig(configText) {
 // ---------------------------------------------------------------------------
 // convertConfig  (replaces POST /api/convert)
 // ---------------------------------------------------------------------------
-export async function convertConfig(intermediateConfig, format = 'set', interfaceMappings = {}, targetContext = null) {
+export async function convertConfig(intermediateConfig, format = 'set', interfaceMappings = {}, targetContext = null, options = {}) {
   if (!intermediateConfig) {
     throw new Error('intermediateConfig is required');
   }
@@ -102,7 +102,7 @@ export async function convertConfig(intermediateConfig, format = 'set', interfac
   if (format === 'xml') {
     output = xmlMod.buildSrxXml(intermediateConfig, interfaceMappings, targetContext);
   } else {
-    output = converterMod.convertToSrxSetCommands(intermediateConfig, interfaceMappings, targetContext);
+    output = converterMod.convertToSrxSetCommands(intermediateConfig, interfaceMappings, targetContext, options);
   }
   if (format === 'xml') outputValidatorMod.validateXmlOutput(output.xml);
   else outputValidatorMod.validateSetOutput(output.commands);

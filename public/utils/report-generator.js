@@ -201,6 +201,20 @@ export function generateReportHtml(data) {
   }
   sections.push(section('routing', 'Routing', routeHtml, staticRoutes.length));
 
+  // Remote Access VPN (SSL-VPN / GlobalProtect) — manual, not auto-converted.
+  const gpGateways = arr(ic?.global_protect?.gateways);
+  if (gpGateways.length > 0) {
+    const raRows = gpGateways.map(g => [
+      esc(g.tunnel_interface || ''),
+      esc(g.name || ''),
+      'Rebuild as Juniper Secure Connect / IPsec dial-up (re-implement MFA via RADIUS).',
+    ]);
+    const raHtml = `<p>SSL-VPN remote access is <strong>not auto-converted</strong>. `
+      + `The tunnels below map to <code>st0</code> placeholders only.</p>`
+      + table(['Tunnel', 'GlobalProtect Gateway', 'Manual action'], raRows);
+    sections.push(section('remote-access', 'Remote Access VPN (SSL-VPN)', raHtml, gpGateways.length));
+  }
+
   // 9. Warnings
   const allWarnings = [...arr(parseWarnings), ...arr(convertWarnings)];
   let warnHtml = '';

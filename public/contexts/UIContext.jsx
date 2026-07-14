@@ -18,6 +18,7 @@ const initialState = {
   isLoading: false,
   loadingMessage: '',
   error: null,
+  policyStructure: 'global',
 
   // Modals / dialogs
   showModelSelector: false,
@@ -182,4 +183,4 @@ function isDeterministicMode(acceptance) {
   return acceptance === 'deterministic';
 }
 
-export { UIContext, UIProvider, useUIContext, isLLMEnabled, isDeterministicMode };
+export { UIContext, UIProvider, useUIContext, isLLMEnabled, isDeterministicMode, uiReducer, initialState };

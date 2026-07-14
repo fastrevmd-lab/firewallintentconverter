@@ -40,6 +40,7 @@ export default defineConfig({
   plugins: [react(), cspPlugin()],
   test: {
     exclude: [...configDefaults.exclude, ...SELF_RUNNING_NODE_TESTS],
+    setupFiles: ['./tests/setup.js'],
   },
   // Rename Vite's static asset directory so 'public/' can hold React source
   publicDir: 'static',

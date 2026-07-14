@@ -132,6 +132,7 @@ export function convertToSrxSetCommands(config, interfaceMappings = {}, targetCo
   convertSystemConfig(config.system_config, commands, warnings, summary);
   convertZones(config.zones, commands, warnings, summary, interfaceMappings, identifiers, identifierPath);
   convertInterfaceAddresses(config.interfaces, commands, warnings, summary, interfaceMappings);
+  convertRemoteAccessPlaceholders(config.interfaces, commands, interfaceMappings, config.global_protect);
   ensureZoneInterfaceFamilies(config.zones, config.interfaces, commands, interfaceMappings);
   convertLagInterfaces(config.lag_interfaces, commands, warnings, summary, interfaceMappings);
   convertAddressObjects(config.address_objects, commands, warnings, summary, identifiers, identifierPath);
@@ -608,6 +609,42 @@ function convertInterfaceAddresses(interfaces, commands, warnings, summary, inte
     }
   }
 
+  commands.push('');
+}
+
+// ---------------------------------------------------------------------------
+// Remote Access (SSL-VPN) Placeholder
+// ---------------------------------------------------------------------------
+
+/**
+ * Emit an honest caveat for SSL-VPN / remote-access tunnels (e.g. PAN-OS
+ * GlobalProtect). The st0 unit itself is already ensured elsewhere; here we
+ * only document that the remote-access VPN was NOT auto-converted. No IKE,
+ * IPsec, or access configuration is generated.
+ *
+ * @param {Array} interfaces - intermediateConfig.interfaces
+ * @param {Array<string>} commands - output command accumulator
+ * @param {object} interfaceMappings - PAN-OS→SRX interface map
+ * @param {{gateways: Array<{name: string, tunnel_interface: string}>}} globalProtect
+ */
+function convertRemoteAccessPlaceholders(interfaces, commands, interfaceMappings = {}, globalProtect = { gateways: [] }) {
+  const raInterfaces = (interfaces || []).filter(i => i.remote_access_role === 'ssl-vpn');
+  if (raInterfaces.length === 0) return;
+
+  const gatewayByTunnel = new Map(
+    (globalProtect?.gateways || []).map(g => [g.tunnel_interface, g.name]),
+  );
+
+  commands.push('# =============================================');
+  commands.push('# SSL-VPN / Remote Access — NOT CONVERTED');
+  commands.push('# =============================================');
+  for (const iface of raInterfaces) {
+    const mapped = mapInterfaceName(iface.name || '', interfaceMappings);
+    const gateway = gatewayByTunnel.get(iface.name);
+    const gwLabel = gateway ? ` (GlobalProtect '${gateway}')` : '';
+    commands.push(`# ${iface.name} -> ${mapped}: SSL-VPN${gwLabel} — remote-access VPN not auto-converted;`);
+    commands.push('#   rebuild as Juniper Secure Connect / IPsec dial-up (re-implement MFA via RADIUS).');
+  }
   commands.push('');
 }
 

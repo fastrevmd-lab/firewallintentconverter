@@ -283,6 +283,13 @@ export function parsePanosConfig(configText) {
   const vwirePairs = parseVwirePairs(config, warnings);
   const hasL2 = allZones.some(z => z.zone_type === 'layer2' || z.zone_type === 'virtual-wire');
 
+  // Detect GlobalProtect (SSL-VPN) and mark the tunnel interfaces it binds.
+  const globalProtect = parseGlobalProtect(config, warnings);
+  const sslVpnTunnels = new Set(globalProtect.gateways.map(g => g.tunnel_interface));
+  for (const iface of interfaces) {
+    if (sslVpnTunnels.has(iface.name)) iface.remote_access_role = 'ssl-vpn';
+  }
+
   // Re-index all policies across vsys for consistent ordering
   for (let i = 0; i < allSecurityPolicies.length; i++) {
     allSecurityPolicies[i]._rule_index = i + 1;
@@ -305,6 +312,7 @@ export function parsePanosConfig(configText) {
     security_profile_definitions: allSecurityProfileDefinitions,
     external_lists: allExternalLists,
     vpn_tunnels: vpnTunnels,
+    global_protect: globalProtect,
     ha_config: haConfig,
     screen_config: screenConfig,
     syslog_config: syslogConfig,
@@ -2082,6 +2090,44 @@ function parseNatRules(vsys, warnings) {
 
 
 // ---------------------------------------------------------------------------
+// GlobalProtect Parser
+// ---------------------------------------------------------------------------
+
+/**
+ * Parse GlobalProtect gateways and the tunnel interface each one binds.
+ * GlobalProtect is SSL-VPN; it has no automatic SRX equivalent, so we only
+ * record it for the UI/report and to stamp the tunnel interface.
+ *
+ * @param {object} config - Parsed PAN-OS XML config root.
+ * @param {Array} warnings - Warning accumulator (unused today; reserved).
+ * @returns {{ gateways: Array<{ name: string, tunnel_interface: string }> }}
+ */
+function parseGlobalProtect(config, warnings) {
+  const gateways = [];
+  const devices = getNestedValue(config, 'devices');
+  if (!devices) return { gateways };
+
+  for (const device of extractEntries(devices)) {
+    const vsysNode = getNestedValue(device, 'vsys');
+    if (!vsysNode) continue;
+    for (const vsys of extractEntries(vsysNode)) {
+      const gwContainer = getNestedValue(vsys, 'global-protect.global-protect-gateway');
+      if (!gwContainer) continue;
+      for (const entry of extractEntries(gwContainer)) {
+        const name = entry['@_name'] || '';
+        const tunnelInterface = typeof entry['tunnel-interface'] === 'string'
+          ? entry['tunnel-interface'].trim()
+          : '';
+        if (!name || !tunnelInterface) continue;
+        gateways.push({ name, tunnel_interface: tunnelInterface });
+      }
+    }
+  }
+  return { gateways };
+}
+
+
+// ---------------------------------------------------------------------------
 // Decryption Rules Parser
 // ---------------------------------------------------------------------------
 
@@ -2495,8 +2541,13 @@ function parseInterfaceConfig(config, zones, warnings) {
     }
   }
 
-  const network = getNestedValue(config, 'devices.entry.network.interface');
-  if (!network) return interfaces;
+  const devices = getNestedValue(config, 'devices');
+  if (!devices) return interfaces;
+
+  // Iterate over device entries
+  for (const device of extractEntries(devices)) {
+    const network = getNestedValue(device, 'network.interface');
+    if (!network) continue;
 
   // PAN-OS interface types: ethernet, loopback, tunnel, aggregate-ethernet, vlan
   const typeMap = {
@@ -2596,6 +2647,7 @@ function parseInterfaceConfig(config, zones, warnings) {
         });
       }
     }
+  }
   }
 
   if (interfaces.length > 0) {

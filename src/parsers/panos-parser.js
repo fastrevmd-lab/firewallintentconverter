@@ -494,7 +494,7 @@ function parseScreenConfig(config, zones, warnings) {
       const zoneEntries = extractEntries(zoneContainer);
       for (const zEntry of zoneEntries) {
         const zoneName = zEntry['@_name'] || '';
-        const zpp = zEntry['zone-protection-profile'];
+        const zpp = getNestedValue(zEntry, 'network.zone-protection-profile');
         if (zpp && typeof zpp === 'string') {
           profileToZone[zpp] = zoneName;
         }
@@ -509,9 +509,8 @@ function parseScreenConfig(config, zones, warnings) {
     // TCP SYN flood
     const tcpSyn = flood['tcp-syn'] || {};
     const tcpSynEnabled = getNestedValue(tcpSyn, 'enable') === 'yes';
-    const tcpSynRate = tcpSynEnabled
-      ? parseInt(getNestedValue(tcpSyn, 'red.activate-rate') || getNestedValue(tcpSyn, 'red.alarm-rate')) || null
-      : null;
+    const activateRate = tcpSynEnabled ? (parseInt(getNestedValue(tcpSyn, 'red.activate-rate')) || null) : null;
+    const alarmRate = tcpSynEnabled ? (parseInt(getNestedValue(tcpSyn, 'red.alarm-rate')) || null) : null;
 
     // ICMP flood
     const icmpFlood = flood.icmp || {};
@@ -542,7 +541,8 @@ function parseScreenConfig(config, zones, warnings) {
         fragment: false,
       },
       tcp: {
-        syn_flood_threshold: tcpSynRate,
+        syn_flood_threshold: activateRate ?? alarmRate,
+        syn_flood_alarm_threshold: alarmRate ?? activateRate,
         syn_flood_timeout: null,
         land_attack: false,
         winnuke: false,

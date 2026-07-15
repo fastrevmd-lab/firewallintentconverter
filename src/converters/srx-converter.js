@@ -3465,11 +3465,12 @@ function convertScreenConfig(screens, commands, warnings, summary, identifiers, 
     // TCP protections
     if (screen.tcp) {
       if (screen.tcp.syn_flood_threshold) {
-        const rawAlarm = screen.tcp.syn_flood_alarm_threshold || Math.round(screen.tcp.syn_flood_threshold * 5) || 1024;
-        const alarmVal = clampScreen(rawAlarm, 'syn_flood_alarm_threshold');
         const attackVal = clampScreen(screen.tcp.syn_flood_threshold, 'syn_flood_threshold');
-        commands.push(`${prefix} tcp syn-flood alarm-threshold ${alarmVal}`);
         commands.push(`${prefix} tcp syn-flood attack-threshold ${attackVal}`);
+        if (screen.tcp.syn_flood_alarm_threshold) {
+          const alarmVal = clampScreen(screen.tcp.syn_flood_alarm_threshold, 'syn_flood_alarm_threshold');
+          commands.push(`${prefix} tcp syn-flood alarm-threshold ${alarmVal}`);
+        }
       }
       if (screen.tcp.syn_flood_timeout) commands.push(`${prefix} tcp syn-flood timeout ${clampScreen(screen.tcp.syn_flood_timeout, 'syn_flood_timeout')}`);
       if (screen.tcp.land_attack) commands.push(`${prefix} tcp land`);
@@ -3501,6 +3502,11 @@ function convertScreenConfig(screens, commands, warnings, summary, identifiers, 
     if (screen.zone) {
       const zoneName = identifiers.nameForReference(`${ownerPath}.zone`);
       commands.push(`set security zones security-zone ${zoneName} screen ${name}`);
+    } else {
+      commands.push(`# NOTE: screen profile "${name}" is not attached to any zone — attach it to the intended zone.`);
+      warnings.push(createWarning('warning', `screen/${name}`,
+        `Screen profile "${name}" is defined but not attached to a security zone`,
+        'Bind it with: set security zones security-zone <zone> screen <name>'));
     }
 
     summary.screens_converted = (summary.screens_converted || 0) + 1;

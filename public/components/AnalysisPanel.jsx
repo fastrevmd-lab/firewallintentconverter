@@ -21,6 +21,12 @@ const FINDING_LABELS = {
   inbound_any: 'Inbound Any (External)',
   exposed_services: 'Exposed Mgmt/Risky Services',
   broad_address: 'Broad Source/Destination',
+  orphan_ref: 'Undefined References',
+  no_deny_all: 'No Logged Deny-All',
+  redundant_rule: 'Redundant Rules',
+  empty_policyset: 'Empty Policy Set',
+  zones_no_policy: 'Zones Without Policy',
+  log_completeness: 'No Remote Logging',
 };
 
 const FINDING_SEVERITY = {
@@ -35,6 +41,12 @@ const FINDING_SEVERITY = {
   inbound_any: 'warning',
   exposed_services: 'warning',
   broad_address: 'warning',
+  orphan_ref: 'warning',
+  no_deny_all: 'info',
+  redundant_rule: 'warning',
+  empty_policyset: 'warning',
+  zones_no_policy: 'info',
+  log_completeness: 'info',
 };
 
 const FINDING_ACTIONS = {

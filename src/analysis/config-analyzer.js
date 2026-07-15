@@ -15,6 +15,8 @@
  *   fatcat r.orig_src             → ours r.src_addresses (array)
  */
 
+import { findPolicyReferenceIssues } from '../security/policy-reference-integrity.js';
+
 /** Heuristic: is this an external/untrusted zone (by name)? */
 function isExternalZone(zoneName) {
   return /untrust|internet|outside|\bwan\b|external|public|inet/i.test(String(zoneName || ''));
@@ -44,6 +46,12 @@ export const AnalysisEngine = {
       await step('Checking for inbound any-source rules...', () => this._inboundAny(config)),
       await step('Checking for exposed risky services...', () => this._exposedServices(config)),
       await step('Checking for broad addresses...', () => this._broadAddresses(config)),
+      await step('Checking for orphan references...', () => this._orphanReferences(config)),
+      await step('Checking for deny-all tail rule...', () => this._noDenyAll(config)),
+      await step('Checking for redundant rules...', () => this._redundantRules(config)),
+      await step('Checking for empty policy set...', () => this._emptyPolicySet(config)),
+      await step('Checking for zones without policy...', () => this._zonesWithoutPolicy(config)),
+      await step('Checking for remote logging...', () => this._logCompleteness(config)),
     ];
   },
 
@@ -553,6 +561,248 @@ export const AnalysisEngine = {
       count,
       items,
       description: `${count} permit rule${count !== 1 ? 's have' : ' has'} broad source or destination addresses. ${firstFew}${count > 3 ? ` + ${count - 3} more` : ''}.`,
+    };
+  },
+
+  /**
+   * 12. Orphan References — policies with undefined address/service object references.
+   * Issue #49 Group C check.
+   * Deactivated policies would fail commit.
+   */
+  _orphanReferences(config) {
+    const policies = config.security_policies || [];
+    const pKey = (p) => p._rule_index != null ? String(p._rule_index) : p.name;
+    const pLabel = (p) => p._rule_index != null ? `#${p._rule_index} ${p.name}` : p.name;
+
+    const issuesMap = findPolicyReferenceIssues(config);
+    if (issuesMap.size === 0) {
+      return {
+        id: 'orphan_ref',
+        count: 0,
+        items: [],
+        description: 'No policies reference undefined address/service objects.',
+      };
+    }
+
+    const items = [];
+    for (const [policyIndex, { addresses, services }] of issuesMap) {
+      const policy = policies[policyIndex];
+      if (!policy) continue;
+
+      const parts = [];
+      if (addresses.length) {
+        parts.push(`address "${addresses.join('", "')}"${addresses.length > 1 ? 's' : ''}`);
+      }
+      if (services.length) {
+        parts.push(`service "${services.join('", "')}"${services.length > 1 ? 's' : ''}`);
+      }
+      const label = `${pLabel(policy)} — undefined: ${parts.join(', ')}`;
+      items.push({ key: pKey(policy), label });
+    }
+
+    const count = items.length;
+    return {
+      id: 'orphan_ref',
+      count,
+      items,
+      description: `${count} polic${count !== 1 ? 'ies' : 'y'} reference${count === 1 ? 's' : ''} undefined address/service objects (would fail commit; deactivated by the converter).`,
+    };
+  },
+
+  /**
+   * 13. No Deny-All — missing explicit logged deny-all at policy tail.
+   * Issue #49 Group C check.
+   * Advisory check — implicit deny still blocks, but isn't logged.
+   */
+  _noDenyAll(config) {
+    const policies = config.security_policies || [];
+    const nonImplicit = policies.filter(p => !p._implicit && !p.disabled);
+
+    if (nonImplicit.length === 0) {
+      return { id: 'no_deny_all', count: 0, items: [], description: 'No non-implicit policies to check.' };
+    }
+
+    const DENY_ACTIONS = new Set(['deny', 'reject', 'drop']);
+
+    const hasDenyAll = nonImplicit.some(p => {
+      if (!DENY_ACTIONS.has(p.action) && !String(p.action || '').startsWith('reset-')) return false;
+      const srcAddrs = p.src_addresses || [];
+      const dstAddrs = p.dst_addresses || [];
+      const hasAnySrc = srcAddrs.some(a => a === 'any' || a === 'all');
+      const hasAnyDst = dstAddrs.some(a => a === 'any' || a === 'all');
+      const logged = p.log_start || p.log_end;
+      return hasAnySrc && hasAnyDst && logged;
+    });
+
+    if (hasDenyAll) {
+      return { id: 'no_deny_all', count: 0, items: [], description: 'Explicit logged deny-all rule found.' };
+    }
+
+    return {
+      id: 'no_deny_all',
+      count: 1,
+      items: [{ key: 'no_deny_all', label: 'Missing explicit logged deny-all tail rule' }],
+      description: 'No explicit logged deny-all rule at the policy tail — recommended for visibility.',
+    };
+  },
+
+  /**
+   * 14. Redundant Rules — identical match + action as an earlier rule.
+   * Issue #49 Group C check.
+   */
+  _redundantRules(config) {
+    const policies = config.security_policies || [];
+    const enabled = policies.filter(p => !p._implicit && !p.disabled);
+    const pKey = (p) => p._rule_index != null ? String(p._rule_index) : p.name;
+    const pLabel = (p) => p._rule_index != null ? `#${p._rule_index} ${p.name}` : p.name;
+
+    const seen = new Map();
+    const duplicates = [];
+
+    for (const p of enabled) {
+      const matchKey = JSON.stringify({
+        action: p.action,
+        src_zones: (p.src_zones || []).slice().sort(),
+        dst_zones: (p.dst_zones || []).slice().sort(),
+        src_addresses: (p.src_addresses || []).slice().sort(),
+        dst_addresses: (p.dst_addresses || []).slice().sort(),
+        applications: (p.applications || []).slice().sort(),
+        services: (p.services || []).slice().sort(),
+      });
+
+      if (seen.has(matchKey)) {
+        const earlier = seen.get(matchKey);
+        duplicates.push({
+          policy: p,
+          earlier,
+          label: `${pLabel(p)} — duplicates ${pLabel(earlier)}`,
+        });
+      } else {
+        seen.set(matchKey, p);
+      }
+    }
+
+    const count = duplicates.length;
+    if (!count) {
+      return {
+        id: 'redundant_rule',
+        count: 0,
+        items: [],
+        description: 'No redundant rules found.',
+      };
+    }
+
+    const items = duplicates.map(d => ({ key: pKey(d.policy), label: d.label }));
+    const firstFew = duplicates.slice(0, 3).map(d => d.label).join('; ');
+    return {
+      id: 'redundant_rule',
+      count,
+      items,
+      description: `${count} rule${count !== 1 ? 's are' : ' is'} redundant (identical match and action as an earlier rule). ${firstFew}${count > 3 ? ` + ${count - 3} more` : ''}.`,
+    };
+  },
+
+  /**
+   * 15. Empty Policy Set — no non-implicit policies defined.
+   * Issue #49 Group C check.
+   */
+  _emptyPolicySet(config) {
+    const policies = config.security_policies || [];
+    const nonImplicit = policies.filter(p => !p._implicit);
+
+    if (nonImplicit.length === 0) {
+      return {
+        id: 'empty_policyset',
+        count: 1,
+        items: [{ key: 'empty', label: 'No security policies defined' }],
+        description: 'No security policies defined — the configuration would rely entirely on the default deny (no explicit allow/deny rules).',
+      };
+    }
+
+    return {
+      id: 'empty_policyset',
+      count: 0,
+      items: [],
+      description: 'Policy set is not empty.',
+    };
+  },
+
+  /**
+   * 16. Zones Without Policy — zones not referenced by any policy or NAT rule.
+   * Issue #49 Group C check.
+   */
+  _zonesWithoutPolicy(config) {
+    const zones = config.zones || [];
+    if (zones.length === 0) {
+      return { id: 'zones_no_policy', count: 0, items: [], description: 'No zones defined.' };
+    }
+
+    const usedZones = new Set();
+
+    // Collect from non-implicit policies
+    const policies = config.security_policies || [];
+    for (const p of policies) {
+      if (p._implicit) continue;
+      const srcZones = p.src_zones || [];
+      const dstZones = p.dst_zones || [];
+      for (const z of [...srcZones, ...dstZones]) {
+        if (z && z !== 'any') usedZones.add(z);
+      }
+    }
+
+    // Collect from NAT rules
+    const natRules = config.nat_rules || [];
+    for (const r of natRules) {
+      const sourceZones = r.source_zones || r.src_zones || [];
+      const destZones = r.destination_zones || r.dst_zones || [];
+      for (const z of [...sourceZones, ...destZones]) {
+        if (z && z !== 'any') usedZones.add(z);
+      }
+    }
+
+    const unused = zones.filter(z => z.name && !usedZones.has(z.name));
+    const count = unused.length;
+    if (!count) {
+      return {
+        id: 'zones_no_policy',
+        count: 0,
+        items: [],
+        description: 'All zones are referenced in policies or NAT rules.',
+      };
+    }
+
+    const items = unused.map(z => ({ key: z.name, label: z.name }));
+    const names = unused.map(z => z.name).join(', ');
+    return {
+      id: 'zones_no_policy',
+      count,
+      items,
+      description: `${count} zone${count !== 1 ? 's are' : ' is'} not referenced by any non-implicit security policy or NAT rule: ${names}.`,
+    };
+  },
+
+  /**
+   * 17. Log Completeness — no remote syslog target configured.
+   * Issue #49 Group C check.
+   */
+  _logCompleteness(config) {
+    const syslogConfig = config.syslog_config || [];
+    const hasRemoteTarget = syslogConfig.some(entry => entry.server || entry.host);
+
+    if (hasRemoteTarget) {
+      return {
+        id: 'log_completeness',
+        count: 0,
+        items: [],
+        description: 'Remote syslog/security-log target is configured.',
+      };
+    }
+
+    return {
+      id: 'log_completeness',
+      count: 1,
+      items: [{ key: 'no_remote_log', label: 'No remote syslog target configured' }],
+      description: 'No remote syslog/security-log target configured — policy and threat logs are not forwarded off-box.',
     };
   },
 };

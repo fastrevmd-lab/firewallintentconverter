@@ -186,7 +186,7 @@ describe('Static Routes: qualified-next-hop for backup routes (issue #36)', () =
       static_routes: [
         { destination: '10.0.0.0/8', next_hop: '192.0.2.1', next_hop_type: 'ip-address', metric: 10 },
         { destination: '10.0.0.0/8', next_hop: '192.0.2.2', next_hop_type: 'ip-address', metric: 20 },
-        { destination: '10.0.0.0/8', next_hop_type: 'discard' },
+        { destination: '10.0.0.0/8', next_hop_type: 'discard', metric: 30 },
       ],
       zones: [],
       address_objects: [],
@@ -208,7 +208,9 @@ describe('Static Routes: qualified-next-hop for backup routes (issue #36)', () =
     // Summary should count all 3 routes (before fix: discard was silently dropped & not counted)
     expect(result.summary.static_routes_converted).toBe(3);
 
-    // The discard route will be deduped from emission (because destination already has a concrete next-hop)
-    // but it should still be processed and counted — that's the fix.
+    // The discard route (metric 30) is deduped from emission (destination already has a concrete
+    // next-hop) and must NOT leak a route-level `preference 30`, which would corrupt the primary's
+    // preference and invert the failover. Only the qualified-next-hop carries a preference.
+    expect(routeCommands.filter(cmd => cmd.match(/^set routing-options static route 10\.0\.0\.0\/8 preference \d+$/))).toHaveLength(0);
   });
 });

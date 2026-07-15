@@ -2741,7 +2741,7 @@ function convertStaticRoutes(routes, commands, warnings, summary, interfaceMappi
           commands.push(`set routing-instances ${instanceName} routing-options static route ${dest} next-hop ${nextHop}`);
           routesWithAction.add(key);
         }
-        if (route.metric && route.metric !== 10) {
+        if (nextHop && route.next_hop_type !== 'discard' && route.next_hop_type !== 'next-vr' && route.metric && route.metric !== 10) {
           const pref = Math.max(1, Math.min(4294967295, route.metric));
           commands.push(`set routing-instances ${instanceName} routing-options static route ${dest} preference ${pref}`);
         }
@@ -2762,7 +2762,7 @@ function convertStaticRoutes(routes, commands, warnings, summary, interfaceMappi
           commands.push(`set routing-options static route ${dest} next-hop ${nextHop}`);
           routesWithAction.add(key);
         }
-        if (route.metric && route.metric !== 10) {
+        if (nextHop && route.next_hop_type !== 'discard' && route.next_hop_type !== 'next-vr' && route.metric && route.metric !== 10) {
           const pref = Math.max(1, Math.min(4294967295, route.metric));
           commands.push(`set routing-options static route ${dest} preference ${pref}`);
         }

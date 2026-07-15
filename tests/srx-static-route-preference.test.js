@@ -179,4 +179,36 @@ describe('Static Routes: qualified-next-hop for backup routes (issue #36)', () =
     expect(count([mk(1), mk(2)])).toBe(2);     // primary + 1 backup
     expect(count([mk(1), mk(2), mk(3)])).toBe(3); // primary + 2 backups (was 4 before the fix)
   });
+
+  it('handles mixed ip-address group + discard route for same destination', () => {
+    const config = {
+      metadata: { source_vendor: 'paloalto' },
+      static_routes: [
+        { destination: '10.0.0.0/8', next_hop: '192.0.2.1', next_hop_type: 'ip-address', metric: 10 },
+        { destination: '10.0.0.0/8', next_hop: '192.0.2.2', next_hop_type: 'ip-address', metric: 20 },
+        { destination: '10.0.0.0/8', next_hop_type: 'discard' },
+      ],
+      zones: [],
+      address_objects: [],
+      address_groups: [],
+      service_objects: [],
+      service_groups: [],
+      applications: [],
+      security_policies: [],
+      nat_rules: [],
+    };
+
+    const result = convertToSrxSetCommands(config);
+    const routeCommands = result.commands.filter(cmd => cmd.includes('routing-options static route 10.0.0.0/8'));
+
+    // ip-address group: primary + qualified-next-hop backup
+    expect(routeCommands).toContain('set routing-options static route 10.0.0.0/8 next-hop 192.0.2.1');
+    expect(routeCommands).toContain('set routing-options static route 10.0.0.0/8 qualified-next-hop 192.0.2.2 preference 20');
+
+    // Summary should count all 3 routes (before fix: discard was silently dropped & not counted)
+    expect(result.summary.static_routes_converted).toBe(3);
+
+    // The discard route will be deduped from emission (because destination already has a concrete next-hop)
+    // but it should still be processed and counted — that's the fix.
+  });
 });

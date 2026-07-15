@@ -2678,6 +2678,8 @@ function convertStaticRoutes(routes, commands, warnings, summary, interfaceMappi
 
     // Check if this route is part of an ip-address group that needs qualified-next-hop processing
     const group = ipAddressRouteGroups.get(key);
+    const isGroupedIpRoute = !!group && group.length > 1 && group.some(member => member.routeIndex === routeIndex);
+
     if (group && group.length > 1 && !processedGroups.has(key)) {
       // Process the entire group at once
       processedGroups.add(key);
@@ -2717,8 +2719,11 @@ function convertStaticRoutes(routes, commands, warnings, summary, interfaceMappi
 
       // Count every route in this group once (later members hit the skip branch).
       summary.static_routes_converted += sortedGroup.length;
-    } else if (!processedGroups.has(key)) {
-      // Single route or discard/next-vr route — use the old logic
+    } else if (isGroupedIpRoute) {
+      // This ip-address route was already emitted with its group — skip, do not count
+      // (counted in branch 1)
+    } else {
+      // Single route, or discard/next-vr route (not part of any ip group) — normal per-route logic
       if (route.vrf) {
         // Routing instance
         if (route.next_hop_type === 'discard') {
@@ -2765,7 +2770,6 @@ function convertStaticRoutes(routes, commands, warnings, summary, interfaceMappi
 
       summary.static_routes_converted++;
     }
-    // else: already counted with its qualified-next-hop group — skip.
   }
 
   commands.push('');

@@ -15,6 +15,11 @@
  *   fatcat r.orig_src             → ours r.src_addresses (array)
  */
 
+/** Heuristic: is this an external/untrusted zone (by name)? */
+function isExternalZone(zoneName) {
+  return /untrust|internet|outside|\bwan\b|external|public|inet/i.test(String(zoneName || ''));
+}
+
 export const AnalysisEngine = {
   _yield() { return new Promise(r => setTimeout(r, 0)); },
 
@@ -36,6 +41,9 @@ export const AnalysisEngine = {
       await step('Checking for permissive rules...', () => this._permissivePolicies(config)),
       await step('Checking for empty groups...', () => this._emptyGroups(config)),
       await step('Checking for never-hit policies...', () => this._neverHitPolicies(config)),
+      await step('Checking for inbound any-source rules...', () => this._inboundAny(config)),
+      await step('Checking for exposed risky services...', () => this._exposedServices(config)),
+      await step('Checking for broad addresses...', () => this._broadAddresses(config)),
     ];
   },
 
@@ -319,6 +327,232 @@ export const AnalysisEngine = {
         _rule_index: p._rule_index,
       })),
       description: `${neverHit.length} of ${annotated.length} annotated policies have zero hits.`,
+    };
+  },
+
+  /**
+   * 9. Inbound Any (External) — permit rules allowing 'any' source from external zones.
+   * Issue #30 Group A check.
+   */
+  _inboundAny(config) {
+    const policies = config.security_policies || [];
+    const pKey = (p) => p._rule_index != null ? String(p._rule_index) : p.name;
+    const pLabel = (p) => p._rule_index != null ? `#${p._rule_index} ${p.name}` : p.name;
+
+    const flagged = policies.filter(p => {
+      if (p.disabled || p.action !== 'allow') return false;
+      const srcZones = p.src_zones || [];
+      const hasExternalZone = srcZones.some(z => isExternalZone(z));
+      if (!hasExternalZone) return false;
+      const srcAddrs = p.src_addresses || [];
+      return srcAddrs.some(a => a === 'any' || a === 'all');
+    });
+
+    const count = flagged.length;
+    if (!count) {
+      return {
+        id: 'inbound_any',
+        count: 0,
+        items: [],
+        description: 'No inbound any-source rules from external zones.',
+      };
+    }
+
+    const items = flagged.map(p => ({ key: pKey(p), label: pLabel(p) }));
+    const firstFew = flagged.slice(0, 3).map(p => pLabel(p)).join(', ');
+    return {
+      id: 'inbound_any',
+      count,
+      items,
+      description: `${count} permit rule${count !== 1 ? 's' : ''} allow${count === 1 ? 's' : ''} ANY source inbound from an external zone: ${firstFew}${count > 3 ? ` + ${count - 3} more` : ''}.`,
+    };
+  },
+
+  /**
+   * 10. Exposed Mgmt/Risky Services — permit rules from external zones allowing dangerous apps/ports.
+   * Issue #30 Group A check.
+   */
+  _exposedServices(config) {
+    const RISKY_APPS = new Set([
+      'ms-rdp', 'rdp', 'ms-ds-smb', 'ms-ds-smbv3', 'netbios-ss',
+      'telnet', 'ssh', 'snmp', 'mysql', 'ms-sql', 'mssql-db',
+      'oracle', 'postgres', 'postgresql', 'vnc', 'ftp', 'tftp',
+      'rlogin', 'rsh',
+    ]);
+    const RISKY_PORTS = new Set([
+      22, 23, 69, 135, 139, 161, 445, 512, 513, 514,
+      1433, 1521, 3306, 3389, 5432, 5900, 21,
+    ]);
+
+    const policies = config.security_policies || [];
+    const pKey = (p) => p._rule_index != null ? String(p._rule_index) : p.name;
+    const pLabel = (p) => p._rule_index != null ? `#${p._rule_index} ${p.name}` : p.name;
+
+    // Build service name → ports map
+    const servicePorts = new Map();
+    for (const svc of (config.service_objects || [])) {
+      if (!svc.name || !svc.port_range) continue;
+      const ports = [];
+      for (const part of String(svc.port_range).split(',')) {
+        const trimmed = part.trim();
+        if (trimmed.includes('-')) {
+          const low = parseInt(trimmed.split('-')[0], 10);
+          if (!isNaN(low)) ports.push(low);
+        } else {
+          const port = parseInt(trimmed, 10);
+          if (!isNaN(port)) ports.push(port);
+        }
+      }
+      if (ports.length) servicePorts.set(svc.name, ports);
+    }
+
+    const flagged = [];
+    for (const p of policies) {
+      if (p.disabled || p.action !== 'allow') continue;
+      const srcZones = p.src_zones || [];
+      const hasExternalZone = srcZones.some(z => isExternalZone(z));
+      if (!hasExternalZone) continue;
+
+      const triggers = [];
+
+      // Check applications
+      const apps = p.applications || [];
+      for (const app of apps) {
+        const appLower = String(app).toLowerCase();
+        if (RISKY_APPS.has(appLower)) {
+          triggers.push(app);
+        }
+      }
+
+      // Check services
+      const services = p.services || [];
+      for (const svcName of services) {
+        if (svcName === 'any' || svcName === 'application-default') continue;
+        const ports = servicePorts.get(svcName);
+        if (ports) {
+          for (const port of ports) {
+            if (RISKY_PORTS.has(port)) {
+              triggers.push(svcName);
+              break;
+            }
+          }
+        }
+      }
+
+      if (triggers.length) {
+        const trigger = triggers[0];
+        flagged.push({
+          policy: p,
+          trigger,
+          label: `${pLabel(p)} — exposes ${trigger}`,
+        });
+      }
+    }
+
+    const count = flagged.length;
+    if (!count) {
+      return {
+        id: 'exposed_services',
+        count: 0,
+        items: [],
+        description: 'No exposed management or risky services from external zones.',
+      };
+    }
+
+    const items = flagged.map(f => ({ key: pKey(f.policy), label: f.label }));
+    const firstFew = flagged.slice(0, 3).map(f => f.label).join('; ');
+    return {
+      id: 'exposed_services',
+      count,
+      items,
+      description: `${count} permit rule${count !== 1 ? 's expose' : ' exposes'} management or risky services from an external zone. ${firstFew}${count > 3 ? ` + ${count - 3} more` : ''}.`,
+    };
+  },
+
+  /**
+   * 11. Broad Source/Destination — permit rules with 0.0.0.0/0, ::/0, or /8 supernets.
+   * Issue #30 Group A check. Does NOT flag the literal 'any' keyword (covered by permissive check).
+   */
+  _broadAddresses(config) {
+    const policies = config.security_policies || [];
+    const pKey = (p) => p._rule_index != null ? String(p._rule_index) : p.name;
+    const pLabel = (p) => p._rule_index != null ? `#${p._rule_index} ${p.name}` : p.name;
+
+    // Build address name → is-broad map
+    const isBroadMap = new Map();
+    for (const addr of (config.address_objects || [])) {
+      if (!addr.name || !addr.value) continue;
+      const val = String(addr.value).trim();
+      if (val === '0.0.0.0/0' || val === '::/0') {
+        isBroadMap.set(addr.name, val);
+      } else if (val.includes('/')) {
+        const parts = val.split('/');
+        if (parts.length === 2 && parts[0].includes('.')) {
+          const prefix = parseInt(parts[1], 10);
+          if (!isNaN(prefix) && prefix <= 8) {
+            isBroadMap.set(addr.name, val);
+          }
+        }
+      }
+    }
+
+    const flagged = [];
+    for (const p of policies) {
+      if (p.disabled || p.action !== 'allow') continue;
+
+      const broadSources = [];
+      const broadDests = [];
+
+      const srcAddrs = p.src_addresses || [];
+      for (const addr of srcAddrs) {
+        if (addr === 'any' || addr === 'all') continue; // covered by permissive check
+        if (addr === '0.0.0.0/0' || addr === '::/0') {
+          broadSources.push(addr);
+        } else if (isBroadMap.has(addr)) {
+          broadSources.push(`${addr} (${isBroadMap.get(addr)})`);
+        }
+      }
+
+      const dstAddrs = p.dst_addresses || [];
+      for (const addr of dstAddrs) {
+        if (addr === 'any' || addr === 'all') continue;
+        if (addr === '0.0.0.0/0' || addr === '::/0') {
+          broadDests.push(addr);
+        } else if (isBroadMap.has(addr)) {
+          broadDests.push(`${addr} (${isBroadMap.get(addr)})`);
+        }
+      }
+
+      if (broadSources.length || broadDests.length) {
+        const parts = [];
+        if (broadSources.length) parts.push(`source: ${broadSources[0]}`);
+        if (broadDests.length) parts.push(`destination: ${broadDests[0]}`);
+        const note = parts.join(', ');
+        flagged.push({
+          policy: p,
+          note,
+          label: `${pLabel(p)} — broad ${note}`,
+        });
+      }
+    }
+
+    const count = flagged.length;
+    if (!count) {
+      return {
+        id: 'broad_address',
+        count: 0,
+        items: [],
+        description: 'No permit rules with broad supernets (0.0.0.0/0, ::/0, or /8).',
+      };
+    }
+
+    const items = flagged.map(f => ({ key: pKey(f.policy), label: f.label }));
+    const firstFew = flagged.slice(0, 3).map(f => f.label).join('; ');
+    return {
+      id: 'broad_address',
+      count,
+      items,
+      description: `${count} permit rule${count !== 1 ? 's have' : ' has'} broad source or destination addresses. ${firstFew}${count > 3 ? ` + ${count - 3} more` : ''}.`,
     };
   },
 };

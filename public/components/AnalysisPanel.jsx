@@ -18,6 +18,9 @@ const FINDING_LABELS = {
   permissive: 'Overly Permissive',
   empty_groups: 'Empty Groups',
   'never-hit': 'Never-Hit Policies',
+  inbound_any: 'Inbound Any (External)',
+  exposed_services: 'Exposed Mgmt/Risky Services',
+  broad_address: 'Broad Source/Destination',
 };
 
 const FINDING_SEVERITY = {
@@ -29,6 +32,9 @@ const FINDING_SEVERITY = {
   permissive: 'warning',
   empty_groups: 'info',
   'never-hit': 'warning',
+  inbound_any: 'warning',
+  exposed_services: 'warning',
+  broad_address: 'warning',
 };
 
 const FINDING_ACTIONS = {

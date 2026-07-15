@@ -77,6 +77,25 @@ export function parentInterface(ifaceName) {
 }
 
 /**
+ * Re-point every sub-interface of `parentPanos` to a unit on `srxIface`'s base.
+ * @param {{ [k: string]: string }} mappings
+ * @param {string} parentPanos - PAN-OS parent name (e.g. ethernet1/13)
+ * @param {string} srxIface - the parent's new SRX target (e.g. ge-0/0/5)
+ * @returns {{ [k: string]: string }} updated copy
+ */
+export function deriveSubInterfaceMappings(mappings, parentPanos, srxIface) {
+  const base = String(srxIface || '').split('.')[0];
+  if (!base) return { ...mappings };
+  const updated = { ...mappings };
+  for (const key of Object.keys(updated)) {
+    if (isSubInterface(key) && parentInterface(key) === parentPanos) {
+      updated[key] = `${base}.${key.split('.').pop()}`;
+    }
+  }
+  return updated;
+}
+
+/**
  * Resolve the real Junos interface base for a tunnel-type selection.
  * The `st0-ra` value is a UI marker for SSL-VPN intent; it always serializes
  * to a real `st0` interface so the emitted mapping is a valid Junos token.
@@ -308,7 +327,9 @@ export default function InterfaceMapper({
         }
       }
 
-      return updated;
+      // Re-point this parent's sub-interfaces to the new port.
+      const withSubs = deriveSubInterfaceMappings(updated, panosIface, srxIface);
+      return withSubs;
     });
   };
 
@@ -619,6 +640,21 @@ export default function InterfaceMapper({
                           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                             <code className="loopback-mapped">lo0.{getUnit(panosIface)}</code>
                             <span className="port-badge speed-virtual">Loopback</span>
+                          </div>
+                        ) : isSubInterface(panosIface) ? (
+                          /* Sub-interface — a unit on its parent's port (no separate port) */
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <code style={{ color: 'var(--accent)', fontWeight: 600 }}>
+                              {currentSrx || `${(mappings[parentInterface(panosIface)] || '').split('.')[0]}.${panosIface.split('.').pop()}`}
+                            </code>
+                            {parsedIfaceMap[panosIface]?.vlan && (
+                              <span className="port-badge" style={{ fontSize: 10, padding: '1px 5px' }}>
+                                vlan {parsedIfaceMap[panosIface].vlan}
+                              </span>
+                            )}
+                            <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>
+                              unit on {parentInterface(panosIface)}
+                            </span>
                           </div>
                         ) : (
                           /* Physical port dropdown */

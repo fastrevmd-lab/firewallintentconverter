@@ -29,4 +29,24 @@ describe('report SSL-VPN section', () => {
     const html = generateReportHtml(base);
     expect(html).not.toContain('Remote Access VPN');
   });
+
+  it('places the Remote Access VPN section right after Security Policies (before NAT)', () => {
+    const data = {
+      ...base,
+      intermediateConfig: {
+        ...base.intermediateConfig,
+        global_protect: { gateways: [{ name: 'G41-GP-GW', tunnel_interface: 'tunnel.10' }] },
+      },
+    };
+    const html = generateReportHtml(data);
+    // Anchor on the section-title markup (plain labels like "NAT Rules" also
+    // appear in the Executive Summary stats).
+    const policiesIdx = html.indexOf('section-title">Security Policies');
+    const raIdx = html.indexOf('section-title">Remote Access VPN');
+    const natIdx = html.indexOf('section-title">NAT Rules');
+    expect(policiesIdx).toBeGreaterThan(-1);
+    expect(natIdx).toBeGreaterThan(-1);
+    expect(policiesIdx).toBeLessThan(raIdx);   // after Security Policies
+    expect(raIdx).toBeLessThan(natIdx);        // before NAT Rules
+  });
 });

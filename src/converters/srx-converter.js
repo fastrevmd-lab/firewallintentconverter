@@ -243,12 +243,17 @@ export function convertToSrxSetCommands(config, interfaceMappings = {}, targetCo
     commands.push('# For each entry below, replace the placeholder with the real');
     commands.push('# protocol and destination-port(s), or map it to an existing');
     commands.push('# Junos predefined application in your policies.');
+    commands.push('#');
+    commands.push('# NOTE: These application definitions AND all policies referencing');
+    commands.push('# them are DEACTIVATED pending a real protocol/port definition,');
+    commands.push('# then reactivation.');
     commands.push('# =============================================================');
     for (const [placeholderName, originalName] of unmappedApps) {
       commands.push(`# INTERVIEW: "${originalName}" — placeholder "${placeholderName}" emitted below with sentinel values.`);
       commands.push(`set applications application ${placeholderName} protocol tcp`);
       commands.push(`set applications application ${placeholderName} destination-port 1`);
       commands.push(`set applications application ${placeholderName} description ${setQuoted(`INTERVIEW REQUIRED: ${originalName}`, 'applications.unmapped.description')}`);
+      commands.push(`deactivate applications application ${placeholderName}`);
     }
     commands.push('# =============================================================');
     commands.push('');
@@ -1666,6 +1671,7 @@ function emitPolicyBody(commands, policyPath, policyName, ctx) {
 
   let apps = resolveApplications(policy.applications, policy.services, warnings, policyName, appGroups, sourceVendor, pIdx, identifiers, identifierPath);
   if (apps.includes('any')) apps = ['any'];
+  const hasUnmappedApp = apps.some(a => unmappedApps.has(a));
   for (const app of apps) {
     commands.push(`set ${policyPath} match application ${app}`);
   }
@@ -1711,7 +1717,7 @@ function emitPolicyBody(commands, policyPath, policyName, ctx) {
     commands.push(`set ${policyPath} scheduler-name ${scheduleName}`);
   }
 
-  if (policy.disabled) deactivateCommands.push(`deactivate ${policyPath}`);
+  if (policy.disabled || hasUnmappedApp) deactivateCommands.push(`deactivate ${policyPath}`);
 }
 
 function convertSecurityPolicies(policies, commands, warnings, summary, profileMaps = {}, appGroups = [], sourceVendor = '', ruleGroups = [], identifiers, identifierPath, policyStructure = 'global') {

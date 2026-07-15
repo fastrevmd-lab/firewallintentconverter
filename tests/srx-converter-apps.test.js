@@ -112,5 +112,91 @@ test('truly-unknown app emits one INTERVIEW block and exactly one port-1 sentine
   assert(portOneLines === 1, `expected exactly 1 sentinel port-1 line for the unknown app, got ${portOneLines}`);
 });
 
+console.log('--- Issue #33: deactivate policies and apps with unmapped App-IDs ---');
+
+test('policy with unmapped app is deactivated', () => {
+  const cfg = {
+    metadata: { source_vendor: 'panos' },
+    zones: [{ name: 'trust', interfaces: [] }, { name: 'untrust', interfaces: [] }],
+    security_policies: [{
+      name: 'p-unmapped',
+      src_zones: ['trust'], dst_zones: ['untrust'],
+      src_addresses: ['any'], dst_addresses: ['any'],
+      applications: ['some-weird-app-9000'], services: [],
+      action: 'permit',
+    }],
+  };
+  const { commands } = convertToSrxSetCommands(cfg, {});
+  const joined = commands.join('\n');
+  assert(joined.includes('match application some-weird-app-9000-UNMAPPED'),
+    'policy should reference some-weird-app-9000-UNMAPPED placeholder');
+  assert(joined.includes('deactivate security policies global policy p-unmapped'),
+    'policy referencing unmapped app must be deactivated');
+});
+
+test('unmapped application definition is deactivated', () => {
+  const cfg = {
+    metadata: { source_vendor: 'panos' },
+    zones: [{ name: 'trust', interfaces: [] }, { name: 'untrust', interfaces: [] }],
+    security_policies: [{
+      name: 'p-unmapped',
+      src_zones: ['trust'], dst_zones: ['untrust'],
+      src_addresses: ['any'], dst_addresses: ['any'],
+      applications: ['some-weird-app-9000'], services: [],
+      action: 'permit',
+    }],
+  };
+  const { commands } = convertToSrxSetCommands(cfg, {});
+  const joined = commands.join('\n');
+  assert(joined.includes('set applications application some-weird-app-9000-UNMAPPED protocol tcp'),
+    'unmapped app definition should exist');
+  assert(joined.includes('deactivate applications application some-weird-app-9000-UNMAPPED'),
+    'unmapped app definition must be deactivated');
+  assert(!joined.match(/^set security policies.*some-weird-app-9000-UNMAPPED.*\nthen permit$/m) || joined.includes('deactivate security policies'),
+    'no active policy should reference unmapped app without being deactivated');
+});
+
+test('policy with only known apps is NOT deactivated', () => {
+  const cfg = {
+    metadata: { source_vendor: 'panos' },
+    zones: [{ name: 'trust', interfaces: [] }, { name: 'untrust', interfaces: [] }],
+    security_policies: [{
+      name: 'p-known',
+      src_zones: ['trust'], dst_zones: ['untrust'],
+      src_addresses: ['any'], dst_addresses: ['any'],
+      applications: ['ssl', 'web-browsing'], services: [],
+      action: 'permit',
+    }],
+  };
+  const { commands } = convertToSrxSetCommands(cfg, {});
+  const joined = commands.join('\n');
+  assert(joined.includes('match application junos-https'),
+    'ssl should resolve to junos-https');
+  assert(!joined.includes('deactivate security policies global policy p-known'),
+    'policy with only known apps must NOT be deactivated');
+});
+
+test('mixed policy (known + unmapped) is deactivated due to unmapped app', () => {
+  const cfg = {
+    metadata: { source_vendor: 'panos' },
+    zones: [{ name: 'trust', interfaces: [] }, { name: 'untrust', interfaces: [] }],
+    security_policies: [{
+      name: 'p-mixed',
+      src_zones: ['trust'], dst_zones: ['untrust'],
+      src_addresses: ['any'], dst_addresses: ['any'],
+      applications: ['ssl', 'mystery-app-999'], services: [],
+      action: 'permit',
+    }],
+  };
+  const { commands } = convertToSrxSetCommands(cfg, {});
+  const joined = commands.join('\n');
+  assert(joined.includes('match application junos-https') && joined.includes('match application mystery-app-999-UNMAPPED'),
+    'policy should reference both junos-https and mystery-app-999-UNMAPPED');
+  assert(joined.includes('deactivate security policies global policy p-mixed'),
+    'policy with any unmapped app must be deactivated');
+  assert(joined.includes('deactivate applications application mystery-app-999-UNMAPPED'),
+    'unmapped app definition must be deactivated');
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

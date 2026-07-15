@@ -26,12 +26,16 @@
 function isLiteralAddress(value) {
   if (!value || typeof value !== 'string') return false;
 
-  // IPv4: digits and dots, optionally with /prefix or -range
-  // IPv6: hex digits and colons, optionally with /prefix
-  const ipv4Pattern = /^[\d.]+(-[\d.]+)?(\/\d+)?$/;
-  const ipv6Pattern = /^[0-9a-fA-F:]+(-[0-9a-fA-F:]+)?(\/\d+)?$/;
+  // Fix 2: IPv4 address requires full dotted-quad (not "10" or "1.2.3")
+  const ipv4AddrPattern = /^(\d{1,3}\.){3}\d{1,3}(\/\d{1,2})?$/;
 
-  return ipv4Pattern.test(value) || ipv6Pattern.test(value);
+  // Fix 2: IPv4 range is two full dotted-quads joined by a dash
+  const ipv4RangePattern = /^(\d{1,3}\.){3}\d{1,3}-(\d{1,3}\.){3}\d{1,3}$/;
+
+  // Fix 3: IPv6 requires at least one colon (not bare hex like "abcd" or "fe80")
+  const ipv6Pattern = /^[0-9a-fA-F:]+:[0-9a-fA-F:]*(-[0-9a-fA-F:]+:[0-9a-fA-F:]*)?(\/\d+)?$/;
+
+  return ipv4AddrPattern.test(value) || ipv4RangePattern.test(value) || ipv6Pattern.test(value);
 }
 
 /**
@@ -119,10 +123,12 @@ export function findPolicyReferenceIssues(config) {
     for (const svc of services) {
       if (!svc || typeof svc !== 'string') continue;
 
-      // Defined if: 'any', 'application-default', literal proto/port, or in serviceNames
+      // Fix 4: Check defined service names BEFORE literal check so a defined
+      // numeric-named service (e.g., service_objects: [{name: '8080', ...}]) is
+      // treated as a defined reference, not a literal.
       if (svc === 'any') continue;
-      if (isLiteralService(svc)) continue;
       if (serviceNames.has(svc)) continue;
+      if (isLiteralService(svc)) continue;
 
       // Undefined reference — add if not already tracked
       if (!undefinedServices.includes(svc)) {

@@ -283,4 +283,172 @@ describe('SRX fidelity manifest — undefined references', () => {
     // Manifest should show 1 total
     expect(output).toMatch(/# Source security policies: 1/);
   });
+
+  // Fix 1: Complete fidelity manifest with disposition breakdown
+  it('emits full disposition breakdown in manifest', () => {
+    const config = {
+      metadata: { source_vendor: 'panos' },
+      zones: [
+        { name: 'trust', interfaces: [] },
+        { name: 'untrust', interfaces: [] },
+      ],
+      address_objects: [],
+      address_groups: [],
+      service_objects: [],
+      service_groups: [],
+      applications: [],
+      application_groups: [],
+      schedules: [],
+      security_policies: [
+        {
+          name: 'Active-Rule',
+          src_zones: ['trust'],
+          dst_zones: ['untrust'],
+          src_addresses: ['any'],
+          dst_addresses: ['any'],
+          services: ['any'],
+          applications: [],
+          action: 'allow',
+        },
+        {
+          name: 'Disabled-Rule',
+          disabled: true,
+          src_zones: ['trust'],
+          dst_zones: ['untrust'],
+          src_addresses: ['any'],
+          dst_addresses: ['any'],
+          services: ['any'],
+          applications: [],
+          action: 'allow',
+        },
+        {
+          name: 'Undefined-Ref-Rule',
+          src_zones: ['trust'],
+          dst_zones: ['untrust'],
+          src_addresses: ['GHOST-OBJ'],
+          dst_addresses: ['any'],
+          services: ['any'],
+          applications: [],
+          action: 'allow',
+        },
+        {
+          name: 'Unmapped-App-Rule',
+          src_zones: ['trust'],
+          dst_zones: ['untrust'],
+          src_addresses: ['any'],
+          dst_addresses: ['any'],
+          services: ['any'],
+          applications: ['UnknownApp'],
+          action: 'allow',
+        },
+      ],
+    };
+
+    const result = convertToSrxSetCommands(config);
+    const output = result.commands.join('\n');
+
+    // Should emit full disposition breakdown
+    expect(output).toMatch(/# Source security policies: 4/);
+    expect(output).toMatch(/#   active \(converted\): 1/);
+    expect(output).toMatch(/#   inactive \(disabled in source\): 1/);
+    expect(output).toMatch(/#   inactive \(unmapped application\): 1/);
+    expect(output).toMatch(/#   inactive \(undefined reference\): 1/);
+
+    // Should emit detail lines for undefined references
+    expect(output).toMatch(/# Undefined references \(rule -> missing object\):/);
+    expect(output).toMatch(/#   - Undefined-Ref-Rule: address "GHOST-OBJ"/);
+  });
+
+  it('counts policy in only one inactive category when multiple conditions apply', () => {
+    const config = {
+      metadata: { source_vendor: 'panos' },
+      zones: [
+        { name: 'trust', interfaces: [] },
+        { name: 'untrust', interfaces: [] },
+      ],
+      address_objects: [],
+      address_groups: [],
+      service_objects: [],
+      service_groups: [],
+      applications: [],
+      application_groups: [],
+      schedules: [],
+      security_policies: [
+        {
+          name: 'Active-Rule',
+          src_zones: ['trust'],
+          dst_zones: ['untrust'],
+          src_addresses: ['any'],
+          dst_addresses: ['any'],
+          services: ['any'],
+          applications: [],
+          action: 'allow',
+        },
+        {
+          name: 'Both-Disabled-And-Undefined',
+          disabled: true,
+          src_zones: ['trust'],
+          dst_zones: ['untrust'],
+          src_addresses: ['GHOST-OBJ'],
+          dst_addresses: ['any'],
+          services: ['any'],
+          applications: [],
+          action: 'allow',
+        },
+      ],
+    };
+
+    const result = convertToSrxSetCommands(config);
+    const output = result.commands.join('\n');
+
+    // Total = 2, active = 1, inactive union = 1 (not 2)
+    expect(output).toMatch(/# Source security policies: 2/);
+    expect(output).toMatch(/#   active \(converted\): 1/);
+    // The policy is in both disabled and undefined sets, but counted once
+    const inactiveMatch = output.match(/#   inactive \(disabled in source\): (\d+)/);
+    const undefinedMatch = output.match(/#   inactive \(undefined reference\): (\d+)/);
+    const disabledCount = inactiveMatch ? parseInt(inactiveMatch[1]) : 0;
+    const undefinedCount = undefinedMatch ? parseInt(undefinedMatch[1]) : 0;
+    // Active should be total minus size of union (which is 1 policy with both conditions)
+    expect(disabledCount).toBe(1);
+    expect(undefinedCount).toBe(1);
+    // Active = 2 - union{0,1} = 2 - 1 = 1
+    const activeMatch = output.match(/#   active \(converted\): (\d+)/);
+    expect(activeMatch ? parseInt(activeMatch[1]) : 0).toBe(1);
+  });
+
+  it('does not emit undefined references detail section when map is empty', () => {
+    const config = {
+      metadata: { source_vendor: 'panos' },
+      zones: [
+        { name: 'trust', interfaces: [] },
+        { name: 'untrust', interfaces: [] },
+      ],
+      address_objects: [],
+      address_groups: [],
+      service_objects: [],
+      service_groups: [],
+      applications: [],
+      application_groups: [],
+      schedules: [],
+      security_policies: [
+        {
+          name: 'Rule-1',
+          src_zones: ['trust'],
+          dst_zones: ['untrust'],
+          src_addresses: ['any'],
+          dst_addresses: ['any'],
+          services: ['any'],
+          applications: [],
+          action: 'allow',
+        },
+      ],
+    };
+
+    const result = convertToSrxSetCommands(config);
+    const output = result.commands.join('\n');
+
+    // Should NOT emit detail section when no undefined refs
+    expect(output).not.toMatch(/# Undefined references \(rule -> missing object\):/);
+  });
 });

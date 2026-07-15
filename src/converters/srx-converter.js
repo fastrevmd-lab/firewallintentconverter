@@ -1681,7 +1681,7 @@ function emitPolicyBody(commands, policyPath, policyName, ctx) {
     policy, pIdx, srcAddrs, dstAddrs, dstZones, appGroups, sourceVendor,
     utmPolicyMap, idpPolicyMap, secIntelEnabled, secIntelPolicyName,
     identifiers, identifierPath, warnings, deactivateCommands, deactivateCaveats,
-    policyReferenceIssues,
+    policyReferenceIssues, unmappedAppPolicyIndices,
   } = ctx;
 
   // Description (include PAN-OS tags as comments)
@@ -1713,6 +1713,12 @@ function emitPolicyBody(commands, policyPath, policyName, ctx) {
   let apps = resolveApplications(policy.applications, policy.services, warnings, policyName, appGroups, sourceVendor, pIdx, identifiers, identifierPath);
   if (apps.includes('any')) apps = ['any'];
   const hasUnmappedApp = apps.some(a => unmappedApps.has(a));
+
+  // Fix 1: Track this policy index if it has an unmapped app
+  if (hasUnmappedApp && unmappedAppPolicyIndices) {
+    unmappedAppPolicyIndices.add(pIdx);
+  }
+
   for (const app of apps) {
     commands.push(`set ${policyPath} match application ${app}`);
   }
@@ -1817,6 +1823,9 @@ function convertSecurityPolicies(policies, commands, warnings, summary, profileM
   const deactivateCommands = [];
   const deactivateCaveats = [];
 
+  // Fix 1: Track policies with unmapped applications for fidelity manifest
+  const unmappedAppPolicyIndices = new Set();
+
   for (let pIdx = 0; pIdx < policies.length; pIdx++) {
     const policy = policies[pIdx];
 
@@ -1896,7 +1905,7 @@ function convertSecurityPolicies(policies, commands, warnings, summary, profileM
             policy, pIdx, srcAddrs, dstAddrs, dstZones, appGroups, sourceVendor,
             utmPolicyMap, idpPolicyMap, secIntelEnabled, secIntelPolicyName,
             identifiers, identifierPath, warnings, deactivateCommands, deactivateCaveats,
-            policyReferenceIssues,
+            policyReferenceIssues, unmappedAppPolicyIndices,
           });
         }
       }
@@ -1931,7 +1940,7 @@ function convertSecurityPolicies(policies, commands, warnings, summary, profileM
         policy, pIdx, srcAddrs, dstAddrs, dstZones, appGroups, sourceVendor,
         utmPolicyMap, idpPolicyMap, secIntelEnabled, secIntelPolicyName,
         identifiers, identifierPath, warnings, deactivateCommands, deactivateCaveats,
-        policyReferenceIssues,
+        policyReferenceIssues, unmappedAppPolicyIndices,
       });
     }
 
@@ -1948,8 +1957,26 @@ function convertSecurityPolicies(policies, commands, warnings, summary, profileM
     commands.push(...deactivateCommands);
   }
 
-  // Count policies deactivated due to undefined references
-  summary.policies_deactivated_undefined_ref = policyReferenceIssues.size;
+  // Fix 1: Compute full disposition breakdown for fidelity manifest
+  const disabledIndices = new Set();
+  const undefinedRefIndices = new Set(policyReferenceIssues.keys());
+
+  for (let i = 0; i < policies.length; i++) {
+    if (policies[i]._implicit) continue;
+    if (policies[i].disabled) disabledIndices.add(i);
+  }
+
+  // Compute inactive union: a policy in multiple categories counts once
+  const inactiveUnion = new Set([
+    ...disabledIndices,
+    ...undefinedRefIndices,
+    ...unmappedAppPolicyIndices,
+  ]);
+
+  const activeCount = summary.total_source_policies - inactiveUnion.size;
+
+  // Update summary counters
+  summary.policies_deactivated_undefined_ref = undefinedRefIndices.size;
 
   // Emit fidelity manifest if there are non-implicit policies
   if (summary.total_source_policies > 0) {
@@ -1958,7 +1985,27 @@ function convertSecurityPolicies(policies, commands, warnings, summary, profileM
     commands.push('# Conversion Fidelity Manifest');
     commands.push('# =============================================');
     commands.push(`# Source security policies: ${summary.total_source_policies}`);
-    commands.push(`#   inactive (undefined reference): ${summary.policies_deactivated_undefined_ref}`);
+    commands.push(`#   active (converted): ${activeCount}`);
+    commands.push(`#   inactive (disabled in source): ${disabledIndices.size}`);
+    commands.push(`#   inactive (unmapped application): ${unmappedAppPolicyIndices.size}`);
+    commands.push(`#   inactive (undefined reference): ${undefinedRefIndices.size}`);
+
+    // Emit detail lines for undefined references if any
+    if (policyReferenceIssues.size > 0) {
+      commands.push('# Undefined references (rule -> missing object):');
+      for (const [pIdx, issue] of policyReferenceIssues) {
+        const policy = policies[pIdx];
+        const policyName = policy.name || `policy-${pIdx}`;
+        const items = [];
+        for (const addr of issue.addresses || []) {
+          items.push(`address "${addr}"`);
+        }
+        for (const svc of issue.services || []) {
+          items.push(`service "${svc}"`);
+        }
+        commands.push(`#   - ${policyName}: ${items.join(', ')}`);
+      }
+    }
   }
 
   commands.push('');

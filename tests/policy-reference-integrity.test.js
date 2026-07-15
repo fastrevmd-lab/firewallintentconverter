@@ -322,4 +322,161 @@ describe('findPolicyReferenceIssues', () => {
     const keys = Array.from(issues.keys());
     expect(keys).toEqual([1, 3]);
   });
+
+  // Fix 2: Tighten IPv4 literal detection
+  it('flags incomplete IPv4-like strings as undefined when not in address_objects', () => {
+    const config = {
+      address_objects: [],
+      address_groups: [],
+      service_objects: [],
+      service_groups: [],
+      security_policies: [
+        {
+          name: 'Rule-Partial-1',
+          src_addresses: ['10'],
+          dst_addresses: ['any'],
+          services: ['any'],
+          applications: [],
+        },
+        {
+          name: 'Rule-Partial-2',
+          src_addresses: ['1.2.3'],
+          dst_addresses: ['any'],
+          services: ['any'],
+          applications: [],
+        },
+        {
+          name: 'Rule-Partial-3',
+          src_addresses: ['10-20'],
+          dst_addresses: ['any'],
+          services: ['any'],
+          applications: [],
+        },
+      ],
+    };
+
+    const issues = findPolicyReferenceIssues(config);
+    expect(issues.size).toBe(3);
+    expect(issues.get(0).addresses).toEqual(['10']);
+    expect(issues.get(1).addresses).toEqual(['1.2.3']);
+    expect(issues.get(2).addresses).toEqual(['10-20']);
+  });
+
+  it('does not flag full IPv4 addresses and ranges as undefined', () => {
+    const config = {
+      address_objects: [],
+      address_groups: [],
+      service_objects: [],
+      service_groups: [],
+      security_policies: [
+        {
+          name: 'Rule-Full-1',
+          src_addresses: ['10.0.0.1'],
+          dst_addresses: ['any'],
+          services: ['any'],
+          applications: [],
+        },
+        {
+          name: 'Rule-Full-2',
+          src_addresses: ['10.0.0.0/8'],
+          dst_addresses: ['any'],
+          services: ['any'],
+          applications: [],
+        },
+        {
+          name: 'Rule-Full-3',
+          src_addresses: ['10.0.0.1-10.0.0.10'],
+          dst_addresses: ['any'],
+          services: ['any'],
+          applications: [],
+        },
+      ],
+    };
+
+    const issues = findPolicyReferenceIssues(config);
+    expect(issues.size).toBe(0);
+  });
+
+  // Fix 3: Tighten IPv6 literal detection
+  it('flags bare hex as undefined when not in address_objects', () => {
+    const config = {
+      address_objects: [],
+      address_groups: [],
+      service_objects: [],
+      service_groups: [],
+      security_policies: [
+        {
+          name: 'Rule-Bare-Hex-1',
+          src_addresses: ['abcd'],
+          dst_addresses: ['any'],
+          services: ['any'],
+          applications: [],
+        },
+        {
+          name: 'Rule-Bare-Hex-2',
+          src_addresses: ['fe80'],
+          dst_addresses: ['any'],
+          services: ['any'],
+          applications: [],
+        },
+      ],
+    };
+
+    const issues = findPolicyReferenceIssues(config);
+    expect(issues.size).toBe(2);
+    expect(issues.get(0).addresses).toEqual(['abcd']);
+    expect(issues.get(1).addresses).toEqual(['fe80']);
+  });
+
+  it('does not flag IPv6 addresses with colons as undefined', () => {
+    const config = {
+      address_objects: [],
+      address_groups: [],
+      service_objects: [],
+      service_groups: [],
+      security_policies: [
+        {
+          name: 'Rule-IPv6-1',
+          src_addresses: ['2001:db8::1'],
+          dst_addresses: ['any'],
+          services: ['any'],
+          applications: [],
+        },
+        {
+          name: 'Rule-IPv6-2',
+          src_addresses: ['2001:db8::/32'],
+          dst_addresses: ['any'],
+          services: ['any'],
+          applications: [],
+        },
+      ],
+    };
+
+    const issues = findPolicyReferenceIssues(config);
+    expect(issues.size).toBe(0);
+  });
+
+  // Fix 4: Prefer defined names over literal for services
+  it('treats defined numeric service object as defined, not literal', () => {
+    const config = {
+      address_objects: [],
+      address_groups: [],
+      service_objects: [
+        { name: '8080', protocol: 'tcp', port: '8080' },
+      ],
+      service_groups: [],
+      security_policies: [
+        {
+          name: 'Rule-Defined-Numeric',
+          src_addresses: ['any'],
+          dst_addresses: ['any'],
+          services: ['8080'],
+          applications: [],
+        },
+      ],
+    };
+
+    const issues = findPolicyReferenceIssues(config);
+    expect(issues.size).toBe(0);
+  });
 });

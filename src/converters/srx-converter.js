@@ -284,6 +284,8 @@ export function convertToSrxSetCommands(config, interfaceMappings = {}, targetCo
     config.zones,
     identifiers,
     identifierPath,
+    config.interfaces,
+    interfaceMappings,
   );
   const routingInstances = new Set();
   convertStaticRoutes(config.static_routes, commands, warnings, summary, interfaceMappings, identifiers, identifierPath, routingInstances);
@@ -2287,6 +2289,8 @@ function convertNatRules(
   configuredZones,
   identifiers,
   identifierPath,
+  interfaces,
+  interfaceMappings,
 ) {
   if (!natRules || natRules.length === 0) return;
 
@@ -2306,6 +2310,18 @@ function convertNatRules(
 
   // Build set of address-group names for NAT match name-refs
   const groupNames = new Set((addressGroups || []).map(g => g.name));
+
+  // Helper: Extract provider interface's host IP as a /32 or /128 for provider source NAT pools
+  const providerInterfaceIp = (panIfaceName) => {
+    if (!panIfaceName) return null;
+    const iface = (interfaces || []).find(i => i.name === panIfaceName && (i.ip || i.ipv6));
+    const raw = iface ? (iface.ip || iface.ipv6) : '';
+    if (!raw) return null;
+    const host = String(raw).split('/')[0];
+    if (/^\d+\.\d+\.\d+\.\d+$/.test(host)) return `${host}/32`;
+    if (host.includes(':')) return `${host}/128`;
+    return null;
+  };
 
   const natRuleIndex = new Map(natRules.map((rule, index) => [rule, index]));
   const sourceZonesFor = natSourceZones;
@@ -2542,7 +2558,21 @@ function convertNatRules(
         // Translation action
         if (rule.translated_src) {
           if (rule.translated_src.type === 'interface') {
-            commands.push(`set ${rulePath} then source-nat interface`);
+            const panIf = rule.translated_src.interface || '';
+            const providerIp = providerInterfaceIp(panIf);
+            if (providerIp) {
+              const srxIf = mapInterfaceName(panIf, interfaceMappings);
+              const providerPool = identifiers.nameForGenerated(identifierPath(`nat_rules[${ruleIndex}]`), 'provider-source-nat-pool');
+              commands.push(`# NAT: source translated to provider interface ${srxIf} (${providerIp})`);
+              commands.push(`set security nat source pool ${providerPool} address ${providerIp}`);
+              commands.push(`set ${rulePath} then source-nat pool ${providerPool}`);
+            } else {
+              if (panIf) {
+                const srxIf = mapInterfaceName(panIf, interfaceMappings);
+                commands.push(`# NAT: source translated to interface ${srxIf} — no static IP found; using egress interface NAT (verify routing sends this traffic out ${srxIf})`);
+              }
+              commands.push(`set ${rulePath} then source-nat interface`);
+            }
           } else if (rule.translated_src.type === 'dynamic-ip-pool') {
             // Create a source NAT pool
             const poolName = identifiers.nameForGenerated(

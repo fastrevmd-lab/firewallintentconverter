@@ -1467,6 +1467,17 @@ function collectNat(config, state) {
         role: 'static-source-nat-pool',
         stableParentKey: `source-rule:${rule.name}`,
       });
+    } else if (rule.translated_src?.type === 'interface' && rule.translated_src?.interface) {
+      collector.addGenerated({
+        catalogKey: JUNOS_IDENTIFIER_CATALOG.NAT_POOL,
+        context: `${device}/nat:source`,
+        namespace: 'source-nat-pool',
+        kind: 'source-nat-pool',
+        sourceName: `${rule.name}-provider`,
+        definitionPath: ownerPath,
+        role: 'provider-source-nat-pool',
+        stableParentKey: `source-rule:${rule.name}`,
+      });
     }
     if (rule.translated_dst) {
       collector.addGenerated({

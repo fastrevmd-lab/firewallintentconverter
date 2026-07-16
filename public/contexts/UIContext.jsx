@@ -19,6 +19,7 @@ const initialState = {
   loadingMessage: '',
   error: null,
   policyStructure: 'global',
+  deploymentMode: 'standalone',
 
   // Modals / dialogs
   showModelSelector: false,

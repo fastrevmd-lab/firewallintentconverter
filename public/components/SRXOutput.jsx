@@ -146,6 +146,21 @@ export default function SRXOutput({ output, summary, isParsed, sanitizationTable
             <option value="zone-pair">Zone-pair (from-zone / to-zone)</option>
           </select>
         </label>
+        <label className="deployment-mode-select" style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', color: 'var(--text-secondary)' }}>
+          Target architecture:
+          <select
+            value={uiState?.deploymentMode || 'standalone'}
+            onChange={(e) => {
+              uiDispatch({ type: 'SET_FIELD', field: 'deploymentMode', value: e.target.value });
+              if (typeof onReconvert === 'function') onReconvert();
+            }}
+            style={{ fontSize: '13px', padding: '4px 8px', border: '1px solid var(--border-color)', borderRadius: '4px', background: 'var(--bg-primary)', color: 'var(--text-primary)' }}
+          >
+            <option value="standalone">Standalone</option>
+            <option value="chassis-cluster">Chassis Cluster</option>
+            <option value="mnha">MNHA</option>
+          </select>
+        </label>
         <span style={{ width: 1, height: 20, background: 'var(--border-color)', flexShrink: 0 }} />
         <button className="btn btn-secondary btn-sm" onClick={handleDownload}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">

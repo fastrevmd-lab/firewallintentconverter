@@ -3714,6 +3714,14 @@ function convertMnhaConfig(haConfig, commands, warnings, summary, interfaceMappi
   const peers = buildMnhaPeerList(haConfig, nodeCount);
   const iclInterfaces = []; // Track ICL interfaces for security zone
 
+  // SRG1 (data plane) — SRG-level attributes emitted ONCE (not per peer).
+  const deployType = haConfig.deployment_type || 'routing';
+  commands.push(`${prefix} services-redundancy-group 1 deployment-type ${deployType}`);
+  commands.push(`${prefix} services-redundancy-group 1 activeness-priority ${haConfig.activeness_priority || 200}`);
+  if (haConfig.preemption) {
+    commands.push(`${prefix} services-redundancy-group 1 preemption`);
+  }
+
   for (const peer of peers) {
     // Peer node identity
     if (peer.peer_ip) {
@@ -3742,20 +3750,10 @@ function convertMnhaConfig(haConfig, commands, warnings, summary, interfaceMappi
     commands.push(`${prefix} services-redundancy-group 0 peer-id ${peer.peer_id}`);
 
     // SRG1 (data plane) — associate each peer
-    const deployType = peer.deployment_type || haConfig.deployment_type || 'routing';
-    commands.push(`${prefix} services-redundancy-group 1 deployment-type ${deployType}`);
     commands.push(`${prefix} services-redundancy-group 1 peer-id ${peer.peer_id}`);
-
-    const activePrio = peer.activeness_priority || haConfig.activeness_priority || 200;
-    commands.push(`${prefix} services-redundancy-group 1 activeness-priority ${activePrio}`);
-
-    if (peer.preemption ?? haConfig.preemption) {
-      commands.push(`${prefix} services-redundancy-group 1 preemption`);
-    }
   }
 
-  // Mandatory activeness-probe for deployment-type routing (added once after SRG1 config)
-  const deployType = haConfig.deployment_type || 'routing';
+  // Mandatory activeness-probe for deployment-type routing (emitted once, SRG-level).
   if (deployType === 'routing') {
     const probeDest = haConfig.activeness_probe_dest || '192.0.2.1';
     const probeSrc = haConfig.activeness_probe_src || '192.0.2.2';

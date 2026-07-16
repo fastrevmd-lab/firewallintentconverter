@@ -264,4 +264,19 @@ describe('Correct MNHA output (Part B)', () => {
     expect(withVpn.commands.some(l => /CAVEAT.*vpn-profile/.test(l))).toBe(true);
   });
 
+
+  it('emits SRG1 deployment-type/activeness-priority/activeness-probe once for multi-node MNHA', () => {
+    const cfg = { zones: [], security_policies: [], service_objects: [], address_objects: [], address_groups: [], nat_rules: [],
+      ha_config: { enabled: true, node_count: 3, local_id: 1, local_ip: '10.255.0.1', priority: 200, peer_id: 2, peer_ip: '10.255.0.2',
+        ha_interfaces: [{ interface: 'ethernet1/5' }], additional_peers: [{ peer_id: 3, peer_ip: '10.255.0.3', icl_interface: 'ethernet1/6' }], monitoring: { link_groups: [] } } };
+    const o = convertToSrxSetCommands(cfg, { 'ethernet1/5': 'ge-0/0/4', 'ethernet1/6': 'ge-0/0/5' }, null, { deploymentMode: 'mnha' });
+    const setLines = o.commands.filter(l => l.startsWith('set '));
+    expect(setLines.filter(l => /services-redundancy-group 1 deployment-type/.test(l))).toHaveLength(1);
+    expect(setLines.filter(l => /services-redundancy-group 1 activeness-priority/.test(l))).toHaveLength(1);
+    expect(setLines.filter(l => /services-redundancy-group 1 activeness-probe/.test(l))).toHaveLength(1);
+    // peer associations ARE per-peer
+    expect(setLines.filter(l => /services-redundancy-group 1 peer-id/.test(l))).toHaveLength(2);
+    expect(setLines.filter(l => /services-redundancy-group 0 peer-id/.test(l))).toHaveLength(2);
+  });
+
 });

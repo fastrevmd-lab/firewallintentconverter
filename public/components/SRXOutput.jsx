@@ -138,7 +138,8 @@ export default function SRXOutput({ output, summary, isParsed, sanitizationTable
             value={uiState?.policyStructure || 'global'}
             onChange={(e) => {
               uiDispatch({ type: 'SET_FIELD', field: 'policyStructure', value: e.target.value });
-              if (typeof onReconvert === 'function') onReconvert();
+              // Pass the fresh value as an override — uiState hasn't updated yet.
+              if (typeof onReconvert === 'function') onReconvert({ policyStructure: e.target.value });
             }}
             style={{ fontSize: '13px', padding: '4px 8px', border: '1px solid var(--border-color)', borderRadius: '4px', background: 'var(--bg-primary)', color: 'var(--text-primary)' }}
           >
@@ -152,7 +153,8 @@ export default function SRXOutput({ output, summary, isParsed, sanitizationTable
             value={uiState?.deploymentMode || 'standalone'}
             onChange={(e) => {
               uiDispatch({ type: 'SET_FIELD', field: 'deploymentMode', value: e.target.value });
-              if (typeof onReconvert === 'function') onReconvert();
+              // Pass the fresh value as an override — uiState hasn't updated yet.
+              if (typeof onReconvert === 'function') onReconvert({ deploymentMode: e.target.value });
             }}
             style={{ fontSize: '13px', padding: '4px 8px', border: '1px solid var(--border-color)', borderRadius: '4px', background: 'var(--bg-primary)', color: 'var(--text-primary)' }}
           >

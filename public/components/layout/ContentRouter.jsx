@@ -665,7 +665,7 @@ export default function ContentRouter({
             <button className={`format-btn ${outputFormat === 'xml' ? 'active' : ''}`} onClick={() => conversion.handleConvert('xml')}>XML</button>
           </div>
         )}
-        <SRXOutput output={srxOutput} summary={conversionSummary} isParsed={!!intermediateConfig} sanitizationTable={sanitizationTable} onReconvert={() => conversion.handleConvert('set')} />
+        <SRXOutput output={srxOutput} summary={conversionSummary} isParsed={!!intermediateConfig} sanitizationTable={sanitizationTable} onReconvert={(overrides) => conversion.handleConvert('set', overrides)} />
       </div>
     );
   }

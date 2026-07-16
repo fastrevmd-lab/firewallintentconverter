@@ -11,6 +11,7 @@ import { useConversionContext } from '../contexts/ConversionContext.jsx';
 import { useUIContext } from '../contexts/UIContext.jsx';
 import { useMergeContext } from '../contexts/MergeContext.jsx';
 import { convertConfig, mergeConvert } from '../utils/engine.js';
+import { resolveConversionOptions } from '../utils/conversion-options.js';
 import { validateHardwareCapacity } from '../data/hardware-db.js';
 import { JunosIdentifierPlanningError } from '../../src/security/junos-identifiers.js';
 import { JunosSerializationError } from '../../src/security/junos-serialization.js';
@@ -65,7 +66,7 @@ export default function useConversion() {
   // -----------------------------------------------------------------------
   // handleConvert — convert a single parsed config to SRX output
   // -----------------------------------------------------------------------
-  const handleConvert = useCallback(async (format = 'set') => {
+  const handleConvert = useCallback(async (format = 'set', overrides = {}) => {
     if (!intermediateConfig) return;
 
     uiDispatch({ type: 'SET_LOADING', isLoading: true, message: 'Converting to SRX format...' });
@@ -97,10 +98,9 @@ export default function useConversion() {
         format,
         interfaceMappings,
         targetContext.type !== 'none' ? targetContext : null,
-        {
-          policyStructure: uiState?.policyStructure || 'global',
-          deploymentMode: uiState?.deploymentMode || 'standalone',
-        },
+        // Overrides win over uiState so a just-changed selector takes effect
+        // immediately, before its dispatch has propagated (stale-closure fix).
+        resolveConversionOptions(uiState, overrides),
       );
 
       // Append hardware capacity warnings if target model is set

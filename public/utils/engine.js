@@ -100,7 +100,7 @@ export async function convertConfig(intermediateConfig, format = 'set', interfac
 
   let output;
   if (format === 'xml') {
-    output = xmlMod.buildSrxXml(intermediateConfig, interfaceMappings, targetContext);
+    output = xmlMod.buildSrxXml(intermediateConfig, interfaceMappings, targetContext, options);
   } else {
     output = converterMod.convertToSrxSetCommands(intermediateConfig, interfaceMappings, targetContext, options);
   }

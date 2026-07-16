@@ -12,6 +12,8 @@ import { useUIContext } from '../contexts/UIContext.jsx';
 import { useMergeContext } from '../contexts/MergeContext.jsx';
 import { convertConfig, mergeConvert } from '../utils/engine.js';
 import { resolveConversionOptions } from '../utils/conversion-options.js';
+import { resolveAssistModel } from '../utils/llm-attribution.js';
+import { loadLLMSettings } from '../utils/llm-settings.js';
 import { validateHardwareCapacity } from '../data/hardware-db.js';
 import { JunosIdentifierPlanningError } from '../../src/security/junos-identifiers.js';
 import { JunosSerializationError } from '../../src/security/junos-serialization.js';
@@ -100,7 +102,11 @@ export default function useConversion() {
         targetContext.type !== 'none' ? targetContext : null,
         // Overrides win over uiState so a just-changed selector takes effect
         // immediately, before its dispatch has propagated (stale-closure fix).
-        resolveConversionOptions(uiState, overrides),
+        // llmModel stamps which model assisted (empty when purely deterministic).
+        {
+          ...resolveConversionOptions(uiState, overrides),
+          llmModel: resolveAssistModel(configForConversion.security_policies, loadLLMSettings()),
+        },
       );
 
       // Append hardware capacity warnings if target model is set
@@ -181,6 +187,10 @@ export default function useConversion() {
       const globalConfig = {
         ha_config: parsedSlots.find(s => s.intermediateConfig.ha_config?.enabled)?.intermediateConfig.ha_config || { enabled: false },
         syslog_config: parsedSlots.flatMap(s => s.intermediateConfig.syslog_config || []),
+        llmModel: resolveAssistModel(
+          parsedSlots.flatMap(s => s.intermediateConfig.security_policies || []),
+          loadLLMSettings(),
+        ),
       };
 
       const data = await mergeConvert(slotsPayload, crossLsLinks, format, globalConfig);

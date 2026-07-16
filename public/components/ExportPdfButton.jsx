@@ -3,6 +3,7 @@ import { useConfigContext } from '../contexts/ConfigContext.jsx';
 import { useConversionContext } from '../contexts/ConversionContext.jsx';
 import { generateFullPdfHtml } from '../utils/pdf-report-generator.js';
 import { loadLLMSettings } from '../utils/llm-settings.js';
+import { resolveAssistModel } from '../utils/llm-attribution.js';
 import { PANOS_MODELS, SRX_MODELS } from '../data/hardware-db.js';
 
 /**
@@ -21,10 +22,13 @@ export default function ExportPdfButton() {
     const sourceModelData = cfg.sourceModel ? allSourceModels[cfg.sourceModel] || null : null;
     const targetModelData = cfg.targetModel ? SRX_MODELS[cfg.targetModel] || null : null;
 
-    // Detect if LLM is local (ollama/lmstudio)
+    // Detect if LLM is local (ollama/lmstudio) and which model assisted
     let isLocalLLM = false;
+    let llmModel = '';
     try {
-      isLocalLLM = ['ollama', 'lmstudio'].includes(loadLLMSettings().provider);
+      const llmSettings = loadLLMSettings();
+      isLocalLLM = ['ollama', 'lmstudio'].includes(llmSettings.provider);
+      llmModel = resolveAssistModel(cfg.intermediateConfig?.security_policies, llmSettings);
     } catch { /* settings unavailable: use the non-local default */ }
 
     const html = generateFullPdfHtml({
@@ -46,6 +50,7 @@ export default function ExportPdfButton() {
       sourceModelData,
       targetModelData,
       isLocalLLM,
+      llmModel,
     });
 
     const win = window.open('', '_blank');

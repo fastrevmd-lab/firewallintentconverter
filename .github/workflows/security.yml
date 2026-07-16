@@ -1,0 +1,19 @@
+name: security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    # Reusable SAST + secret scan (gitleaks + semgrep + njsscan).
+    # Source: fastrevmd-lab/security-review (private; user-level Actions access granted).
+    uses: fastrevmd-lab/security-review/.github/workflows/security-review.yml@main

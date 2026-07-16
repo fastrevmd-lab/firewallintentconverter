@@ -1,4 +1,6 @@
-import { version } from '../package.json';
+// Import attribute is required for native Node ESM (the CI self-contained suites
+// run these modules under `node` directly); Vite/vitest also accept it.
+import pkg from '../package.json' with { type: 'json' };
 
 /**
  * Application version — single source of truth is package.json.
@@ -7,4 +9,4 @@ import { version } from '../package.json';
  * produced it.
  * @type {string}
  */
-export const APP_VERSION = version;
+export const APP_VERSION = pkg.version;

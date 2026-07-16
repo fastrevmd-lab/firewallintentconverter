@@ -4,6 +4,7 @@ import { useConversionContext } from '../../contexts/ConversionContext.jsx';
 import { useUIContext } from '../../contexts/UIContext.jsx';
 import { useUndoContext } from '../../contexts/UndoContext.jsx';
 import ProjectSecurityBadge from '../ProjectSecurityBadge.jsx';
+import { APP_VERSION } from '../../../src/version.js';
 
 /**
  * StatusBar — Bottom bar showing conversion stats and quick indicators.
@@ -134,6 +135,13 @@ export default function StatusBar({ projectSecurityDescriptor }) {
         style={{ fontFamily: 'var(--font-mono)' }}
       >
         {modKey}+P Commands
+      </div>
+
+      <div className="status-separator" />
+
+      {/* App version — matches output/report stamps for provenance */}
+      <div className="status-item" title="Application version" style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>
+        v{APP_VERSION}
       </div>
     </div>
   );

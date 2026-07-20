@@ -2,6 +2,33 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.2.1] - 2026-07-19
+
+### Added
+- Version and assisting-LLM provenance stamps: `src/version.js` sources `APP_VERSION` from `package.json` and stamps it into the UI footer, the top line of every generated output file (set + XML), and the PDF report, alongside the assisting model label when one was used.
+- Rulebase analysis suite: exposure and dangerous-service checks, policy correctness and coverage checks, device-plane and VPN hardening checks, operational cleanup checks, NAT shadow detection, and redundant-rule parity with shadowed rules (order, bulk action, explainer).
+- Bulk actions for NAT-shadow, undefined-reference, and zone findings, plus an Ignore action for advisory findings.
+- Target architecture as an explicit conversion input, driving skill-correct MNHA output.
+- Reference-integrity gate and a conversion fidelity manifest.
+- `security policies global` output mode, now the default.
+- SSL-VPN / remote-access interface target, and PAN-OS sub-interfaces mapped to tagged units on the parent SRX port.
+- CI: security-review SAST caller (gitleaks + semgrep + njsscan).
+
+### Changed
+- Source NAT is pinned to the provider interface's address; source match address-groups and service protocol/port are preserved.
+- Backup static routes use `qualified-next-hop` instead of ECMP.
+- Policies referencing unmapped App-IDs are deactivated rather than emitted as active `tcp/1`.
+- Licensing consolidated to MIT-only; mechub branding applied across the web application.
+
+### Fixed
+- Zone-pair and deployment-mode selectors take effect immediately.
+- Non-literal interface IPv6/IPv4 no longer blocks conversion.
+- NAT pools emit literal addresses, never object names.
+- Set-output gate rejects malformed IPv4, failing closed.
+- Screens preserve PAN alarm-rate and attach to the zone.
+- UI-only `_analysisFindings` no longer blocks conversion.
+- Remote Access VPN report section is grouped after Security Policies.
+
 ## [1.2.0] - 2026-04-16
 
 ### Added

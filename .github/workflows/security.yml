@@ -41,18 +41,117 @@ jobs:
         run: |
           pipx install semgrep==1.170.0
           pipx install njsscan==0.4.3
+          # njsscan's bundled semgrep imports pkg_resources, which setuptools>=81
+          # no longer ships. Without it njsscan crashes but still *exits 0* with an
+          # empty result set - a silent pass for a gating step. Pin it explicitly.
+          # --force is required: pipx leaves an already-present setuptools alone
+          # and logs "already seems to be installed ... Not modifying", so without
+          # it the pin is a silent no-op and the runner image picks the version.
+          pipx inject --force njsscan 'setuptools<81'
 
       - name: semgrep (SAST)
         run: semgrep scan --error --config p/javascript --config p/react --config p/secrets .
         env:
           SEMGREP_TIMEOUT: "300"
 
-      - name: njsscan (node-specific, report-only)
-        # Non-blocking: njsscan's keyword rules (node_secret/node_api_key)
-        # structurally false-positive on this repo because it *generates*
-        # firewall config full of the literal words "secret"/"api key"
-        # (verified: all ERROR findings are variable names / Junos keyword
-        # literals / sanitized placeholders, not real secrets). gitleaks +
-        # semgrep are the hard gates; njsscan output stays visible for triage.
-        continue-on-error: true
-        run: njsscan --exit-warning src public
+      - name: njsscan (node-specific)
+        # Gating. njsscan's keyword rules (node_secret/node_api_key/node_username)
+        # structurally false-positive on this repo because it *generates* firewall
+        # config full of the literal words "secret"/"api key". Those specific sites
+        # are suppressed inline with `// njsscan-ignore: <rule>` plus a written
+        # justification, so the rules stay live everywhere else and a genuinely new
+        # finding blocks the build. See issue #70 for the triage evidence.
+        #
+        # SEMGREP_TIMEOUT is required, not cosmetic: at the 5s default, regex_dos
+        # times out on srx-converter.js / srx-xml-builder.js and njsscan silently
+        # reports fewer findings (13 -> 9 locally). A timeout is not a pass, so the
+        # gate must not depend on how loaded the runner is.
+        env:
+          SEMGREP_TIMEOUT: "300"
+        run: |
+          # The canary is scanned *in the same invocation* as src/ and public/,
+          # not as a separate run. libsast ignores semgrep's exit status, and a
+          # child that dies with no stdout and no stderr (an OOM kill) yields zero
+          # findings AND zero errors, so an empty report is not evidence of a
+          # clean tree. Attesting a separate canary scan would only prove the
+          # engine *can* run; requiring the canary finding in this report proves
+          # the run that covered the real tree actually happened.
+          canary_dir="${RUNNER_TEMP:-/tmp}/njsscan-canary"
+          mkdir -p "$canary_dir"
+          cat > "$canary_dir/canary.js" <<'CANARY'
+          const password = 'njsscan-canary-value-do-not-use-123456';
+          module.exports = { password };
+          CANARY
+
+          njsscan --json -o njsscan.json src public "$canary_dir" || true
+
+          # The verdict is computed here, not taken from njsscan's exit status:
+          # njsscan exits 0 for INFO findings even with --exit-warning (it fails
+          # only on ERROR, or WARNING with the flag), so a new INFO-severity rule
+          # would print and pass on a gate that is supposed to block new findings.
+          CANARY_DIR="$canary_dir" python3 - <<'CHECK'
+          import json, os, sys
+
+          # The parse gap we knowingly tolerate, pinned to the exact lines it may
+          # affect: semgrep's JS parser cannot read the import attribute on line 3
+          # of src/version.js. Semgrep folds every gap in a file into one
+          # PartialParsing error, so allowlisting by path alone would also swallow
+          # any *new* unparsed region in that file. Match the line set exactly.
+          ALLOWED_PARSE_GAPS = {'src/version.js': {3}}
+          CANARY_RULE = 'node_password'
+          canary_root = os.path.realpath(os.environ['CANARY_DIR'])
+
+          report = json.load(open('njsscan.json'))
+
+          hits = []
+          for section in ('nodejs', 'templates'):
+              for rule, body in (report.get(section) or {}).items():
+                  severity = (body.get('metadata') or {}).get('severity', 'UNKNOWN')
+                  for hit in body.get('files') or []:
+                      path = hit.get('file_path') or ''
+                      is_canary = os.path.realpath(path).startswith(canary_root)
+                      hits.append((severity, rule, hit, is_canary))
+
+          if not any(is_canary and rule == CANARY_RULE for _, rule, _, is_canary in hits):
+              print('njsscan did not flag the canary that was scanned alongside src/')
+              print('and public/, so this scan did not run. A clean report from it')
+              print('proves nothing about the tree.')
+              print('errors:', report.get('errors'))
+              sys.exit(1)
+          print('canary detected in this scan; the engine covered the real tree.')
+
+          # Fail closed on anything meaning "did not scan".
+          fatal_errors = []
+          for err in report.get('errors') or []:
+              if not isinstance(err, dict):
+                  fatal_errors.append(err)
+                  continue
+              kind = err.get('type')
+              if isinstance(kind, list):
+                  kind = kind[0] if kind else None
+              lines = {
+                  span.get('start', {}).get('line')
+                  for span in (err.get('spans') or [])
+              }
+              if kind == 'PartialParsing' and ALLOWED_PARSE_GAPS.get(err.get('path')) == lines:
+                  print(f"::warning::known parse gap, not scanned: {err.get('path')} line(s) {sorted(lines)}")
+                  continue
+              fatal_errors.append(err)
+
+          if fatal_errors:
+              print('njsscan did not complete - the gate did not actually run:')
+              for err in fatal_errors:
+                  print(' -', str(err)[:300])
+              sys.exit(1)
+
+          # Any finding in the real tree fails, at any severity.
+          real = [(sev, rule, hit) for sev, rule, hit, is_canary in hits if not is_canary]
+          for severity, rule, hit in real:
+              print(f"[{severity}] {rule}  {hit.get('file_path')}:{hit.get('match_lines')}")
+              print(f"    {str(hit.get('match_string'))[:200]}")
+          if real:
+              print(f'njsscan gate failed: {len(real)} finding(s) in src/ or public/.')
+              sys.exit(1)
+
+          print('njsscan completed; engine ran to completion, no findings.')
+          CHECK

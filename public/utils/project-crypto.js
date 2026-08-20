@@ -106,7 +106,9 @@ function decodeCanonicalBase64(value, { exactBytes, minimumBytes, maximumBytes }
   if (typeof value !== 'string'
       || value.length === 0
       || value.length > MAX_PROJECT_FILE_BYTES
-      || !BASE64_PATTERN.test(value)) {
+      // njsscan regex_dos: false positive. BASE64_PATTERN repeats a fixed-width {4} group, so the star admits only n/4 partitions
+      // at O(1) each - linear, not catastrophic. Input is also length-capped on the line above.
+      || !BASE64_PATTERN.test(value)) {  // njsscan-ignore: regex_dos
     invalidEnvelope();
   }
   let binary;

@@ -243,7 +243,8 @@ function orderedZoneEntries(zones) {
 function generatedPolicyName(policy, fromZone, toZone) {
   const name = policy.name || '';
   const generic = !name
-    || /^(rule|policy|permit|deny)[-_]?\d+$/i.test(name)
+    // njsscan regex_dos: false positive. Alternation is four distinct literals and is not nested under a quantifier - nothing to backtrack.
+    || /^(rule|policy|permit|deny)[-_]?\d+$/i.test(name)  // njsscan-ignore: regex_dos
     || /^\d+$/.test(name);
   if (!generic) return null;
   const action = ['allow', 'permit'].includes(policy.action) ? 'permit' : 'deny';

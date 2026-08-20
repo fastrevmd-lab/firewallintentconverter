@@ -465,7 +465,8 @@ function buildPoliciesXml(policies, lines, warnings, profileMaps = {}, appGroups
         definitionIndex += 1;
         const occurrence = definitionIndex;
         const genericName = !policy.name
-          || /^(rule|policy|permit|deny)[-_]?\d+$/i.test(policy.name)
+          // njsscan regex_dos: false positive. Alternation is four distinct literals and is not nested under a quantifier - nothing to backtrack.
+          || /^(rule|policy|permit|deny)[-_]?\d+$/i.test(policy.name)  // njsscan-ignore: regex_dos
           || /^\d+$/.test(policy.name);
         const outputName = genericName
           ? identifierNames.generated(

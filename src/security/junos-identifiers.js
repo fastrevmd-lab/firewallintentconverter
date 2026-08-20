@@ -103,7 +103,8 @@ function safeJunosIdentifier(value, field) {
 
 function mappingScalar(value, field, { allowEmpty = false } = {}) {
   if (typeof value !== 'string'
-      || UNSAFE_CONTROL.test(value)
+      // njsscan regex_dos: false positive. UNSAFE_CONTROL is a single character class with no quantifier at all.
+      || UNSAFE_CONTROL.test(value)  // njsscan-ignore: regex_dos
       || (!allowEmpty && value.length === 0)) {
     invalidMapping(`invalid ${field}`);
   }

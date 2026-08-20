@@ -626,7 +626,8 @@ export async function testLLMConnection(settings) {
   if (!settings || !settings.provider) {
     throw new Error('No provider selected.');
   }
-  const userPrompt = 'Reply with a short, friendly one-sentence greeting to confirm the connection works.';
+  // njsscan node_username: false positive. Connection-test prompt copy; `userPrompt` is a variable name, not a credential.
+  const userPrompt = 'Reply with a short, friendly one-sentence greeting to confirm the connection works.';  // njsscan-ignore: node_username
   const systemPrompt = 'You are a connection test. Respond in a single short sentence.';
   const testSettings = { ...settings, maxTokens: settings.maxTokens || 128 };
   try {

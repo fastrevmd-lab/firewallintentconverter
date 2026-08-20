@@ -1,7 +1,8 @@
 import { safeJsonParse } from './safe-json.js';
 
 export const LLM_SETTINGS_STORAGE_KEY = 'llm-settings';
-export const LLM_API_KEY_SESSION_KEY = 'llm-api-key';
+// njsscan node_api_key: false positive. sessionStorage key *name*, not a key value. The API key itself is never persisted here.
+export const LLM_API_KEY_SESSION_KEY = 'llm-api-key';  // njsscan-ignore: node_api_key
 
 export class LLMSettingsStorageError extends Error {
   constructor(message = 'LLM settings storage is unavailable.') {

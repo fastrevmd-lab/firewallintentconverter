@@ -92,7 +92,9 @@ export function createExclusiveBridgeMutationLock() {
       owner = token;
       return Object.freeze({
         release() {
-          if (owner !== token) return false;
+          // njsscan node_timing_attack: false positive. `token` is a Symbol compared by reference identity to own a UI mutation lock.
+          // It is not a secret and never crosses a trust boundary, so constant-time compare does not apply.
+          if (owner !== token) return false;  // njsscan-ignore: node_timing_attack
           owner = null;
           return true;
         },

@@ -1929,7 +1929,8 @@ function convertSecurityPolicies(policies, commands, warnings, summary, profileM
           } else {
             definitionIndex += 1;
             const genericName = !policy.name
-              || /^(rule|policy|permit|deny)[-_]?\d+$/i.test(policy.name)
+              // njsscan regex_dos: false positive. Alternation is four distinct literals and is not nested under a quantifier - nothing to backtrack.
+              || /^(rule|policy|permit|deny)[-_]?\d+$/i.test(policy.name)  // njsscan-ignore: regex_dos
               || /^\d+$/.test(policy.name);
             policyName = genericName
               ? identifiers.nameForGenerated(
@@ -2300,7 +2301,8 @@ function mapAction(panosAction) {
 function resolveNatAddress(addr, addrLookup, warnings) {
   if (!addr || addr === 'any') return null;
   // Already an IP or subnet (contains a dot and looks numeric)
-  if (/^\d+\.\d+\.\d+\.\d+(\/\d+)?$/.test(addr) || /^[0-9a-fA-F:]+\/\d+$/.test(addr)) {
+  // njsscan regex_dos: false positive. Adjacent tokens are disjoint (\d excludes the literal dot and slash), so neither pattern backtracks.
+  if (/^\d+\.\d+\.\d+\.\d+(\/\d+)?$/.test(addr) || /^[0-9a-fA-F:]+\/\d+$/.test(addr)) {  // njsscan-ignore: regex_dos
     return addr;
   }
   const resolved = addrLookup[addr];
@@ -4232,7 +4234,8 @@ function convertAaaConfig(aaaConfig, commands, warnings, summary, identifiers, i
       if (!entry.server) continue;
       commands.push(`set system radius-server ${entry.server} port ${entry.port || 1812}`);
       if (entry.secret) {
-        commands.push(`set system radius-server ${entry.server} secret ${setQuoted(entry.secret, 'aaa_config.radius.secret')}`);
+        // njsscan node_secret: false positive. Junos CLI keyword in *generated* config, not a stored credential; value is sanitized by setQuoted().
+        commands.push(`set system radius-server ${entry.server} secret ${setQuoted(entry.secret, 'aaa_config.radius.secret')}`);  // njsscan-ignore: node_secret
       } else {
         commands.push(`# set system radius-server ${entry.server} secret "<SHARED-SECRET>" /* requires manual configuration */`);
       }
@@ -4252,7 +4255,8 @@ function convertAaaConfig(aaaConfig, commands, warnings, summary, identifiers, i
       if (!entry.server) continue;
       commands.push(`set system tacplus-server ${entry.server} port ${entry.port || 49}`);
       if (entry.secret) {
-        commands.push(`set system tacplus-server ${entry.server} secret ${setQuoted(entry.secret, 'aaa_config.tacacs.secret')}`);
+        // njsscan node_secret: false positive. Junos CLI keyword in *generated* config, not a stored credential; value is sanitized by setQuoted().
+        commands.push(`set system tacplus-server ${entry.server} secret ${setQuoted(entry.secret, 'aaa_config.tacacs.secret')}`);  // njsscan-ignore: node_secret
       } else {
         commands.push(`# set system tacplus-server ${entry.server} secret "<SHARED-SECRET>" /* requires manual configuration */`);
       }

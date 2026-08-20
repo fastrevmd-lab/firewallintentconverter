@@ -539,7 +539,8 @@ function validatePbf(rules, basePath, addressObjects = []) {
         const fieldPath = `${rulePath}.${field}[${addressIndex}]`;
         const resolved = addressesByName.get(value);
         const looksLikeAddress = typeof value === 'string' && (
-          value.includes(':') || value.includes('/') || /^\d+(?:\.\d+){3}$/.test(value)
+          // njsscan regex_dos: false positive. Bounded {3} repetition over disjoint tokens; cannot backtrack.
+          value.includes(':') || value.includes('/') || /^\d+(?:\.\d+){3}$/.test(value)  // njsscan-ignore: regex_dos
         );
         if (resolved === undefined && !looksLikeAddress) return;
         const currentFamily = pbfAddressFamily(resolved ?? value, fieldPath);

@@ -2,6 +2,32 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.2.2] - 2026-08-26
+
+Supply-chain and CI only. No behaviour change in the converter itself; the
+version stamp in generated set/XML output and the PDF report moves to 1.2.2.
+
+### Security
+- Bumped nanoid to 3.3.18 for [GHSA-2v37-7h3g-55p8](https://github.com/advisories/GHSA-2v37-7h3g-55p8)
+  (CWE-835, CVSS 5.9). It reaches the tree transitively through vite -> postcss.
+  The 1.2.1-era postcss bump did **not** clear it: postcss 8.5.25 declares
+  `nanoid: ^3.3.16` and the lockfile resolved to 3.3.16, still inside the
+  vulnerable range. Lockfile-only change; postcss stays at 8.5.25. Not
+  reachable in practice — the loop needs a custom generator called with size 0,
+  and postcss mints fixed-length identifiers — but cleared so the audit report
+  stays trustworthy. `npm audit` now reports 0 vulnerabilities.
+- Bumped postcss 8.5.15 -> 8.5.25.
+
+### Changed
+- njsscan is a hard CI gate instead of report-only. It structurally
+  false-positives on a repo that *generates* firewall config full of the words
+  "secret" and "api key", so the 13 known sites carry individual
+  `// njsscan-ignore: <rule>` suppressions with written justifications rather
+  than the scanner being disabled repo-wide. Every rule stays live everywhere
+  else, and a genuinely new finding now blocks the build.
+- Moved `actions/checkout`, `setup-node`, and `setup-python` off deprecated
+  Node 20 runners.
+
 ## [1.2.1] - 2026-07-19
 
 ### Added

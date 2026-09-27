@@ -6,6 +6,7 @@
  * No data dependencies — purely presentational concerns.
  */
 import React, { createContext, useContext, useReducer } from 'react';
+import { LLM_RISK_ACCEPTANCE_STORAGE_KEY } from '../utils/llm-risk-acceptance.js';
 
 // ---------------------------------------------------------------------------
 // Initial state
@@ -58,8 +59,8 @@ const initialState = {
   // Command palette
   commandPaletteOpen: false,
 
-  // LLM risk disclaimer acceptance: null | 'all' | 'local-only' | 'rejected'
-  llmRiskAcceptance: localStorage.getItem('llm-risk-acceptance') || null,
+  // LLM risk disclaimer acceptance: null | 'all' | 'local-only' | 'deterministic' | 'rejected'
+  llmRiskAcceptance: localStorage.getItem(LLM_RISK_ACCEPTANCE_STORAGE_KEY) || null,
 };
 
 // ---------------------------------------------------------------------------
@@ -138,7 +139,15 @@ function uiReducer(state, action) {
     }
 
     case 'SET_LLM_RISK_ACCEPTANCE':
-      localStorage.setItem('llm-risk-acceptance', action.value);
+      // `value` is null when the user is asked to choose again (e.g. "Change
+      // mode"). storeItem(key, null) would coerce to the string "null", which
+      // is truthy on the next read and silently skips the disclaimer — always
+      // clear the key instead so consent is re-asked after a reload.
+      if (action.value === null || action.value === undefined) {
+        localStorage.removeItem(LLM_RISK_ACCEPTANCE_STORAGE_KEY);
+      } else {
+        localStorage.setItem(LLM_RISK_ACCEPTANCE_STORAGE_KEY, action.value);
+      }
       return { ...state, llmRiskAcceptance: action.value };
 
     default:

@@ -1,0 +1,66 @@
+name: Bug report
+description: Report something that isn't working as expected
+title: "bug: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. If this is a security vulnerability, please use "Report a security vulnerability" below instead — do not file it here.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: App version (shown in the footer / PDF report) or commit SHA you're using
+      placeholder: "1.2.2"
+    validations:
+      required: true
+  - type: dropdown
+    id: source-format
+    attributes:
+      label: Source format (if applicable)
+      description: Which source vendor/format were you converting from, if this is a conversion issue?
+      options:
+        - "N/A / not conversion-related"
+        - PAN-OS
+        - Junos SRX
+        - FortiGate / FortiOS
+        - Cisco ASA / FTD
+        - Check Point
+        - SonicWall
+        - Huawei USG
+        - AWS Security Groups
+        - Azure NSG
+        - GCP Firewall Rules
+        - Greenfield / SRX Best Practice
+    validations:
+      required: false
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Minimal steps, and if possible a minimal source config that reproduces it. Please sanitize it first (use the app's built-in sanitizer, or hand-edit) — no real hostnames, IPs, serials, or credentials.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Browser and version, OS, and whether you used the hosted app or the standalone build
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant console output or error text
+      description: Sanitized browser console output or error text, if any
+      render: shell
+    validations:
+      required: false

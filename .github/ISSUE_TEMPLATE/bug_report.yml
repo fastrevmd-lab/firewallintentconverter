@@ -60,7 +60,7 @@ body:
     id: logs
     attributes:
       label: Relevant console output or error text
-      description: Sanitized browser console output or error text, if any
+      description: Sanitized browser console output or error text, if any. Debug/trace console output can contain full config payloads, including password hashes and keys — redact before pasting.
       render: shell
     validations:
       required: false

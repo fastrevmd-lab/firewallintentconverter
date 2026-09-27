@@ -14,7 +14,7 @@ Usage:
 
 import argparse
 import os
-import time
+import threading
 from pathlib import Path
 
 from flask import Blueprint, Flask, current_app, jsonify, request
@@ -75,8 +75,48 @@ SAFE_FAILURES = {
         "The NETCONF device operation failed.",
         502,
     ),
+    "LOAD_SESSION_REQUIRED": (
+        "This operation requires a configuration already loaded (and, for "
+        "commit, a passing commit check) in this same session.",
+        409,
+    ),
+    "CONFIRM_UNSUPPORTED_ON_PRIVATE": (
+        "Nothing was committed. This device release does not support the "
+        "confirm timer on a private candidate.",
+        409,
+    ),
     "UNEXPECTED_ERROR": ("An unexpected bridge error occurred.", 500),
 }
+
+# Junos's exact <rpc-error> text when `commit confirmed` is attempted on a
+# private candidate (Juniper RLI 43242; still unresolved as of 26.2R1.7).
+# Matched verbatim so we never guess at partial or reworded device text.
+_CONFIRM_UNSUPPORTED_ON_PRIVATE_MESSAGE = (
+    "commit confirmed not supported for private configuration"
+)
+
+
+def _is_confirm_unsupported_on_private(error):
+    """True if a CommitError is Junos's private-candidate confirm refusal.
+
+    Checks both `rpc_error` (populated from a real device XML reply) and
+    `errs` (the list PyEZ callers, and this bridge's tests, construct
+    CommitError from directly) so the match works the same way against a
+    live device and a mocked one.
+    """
+    candidates = []
+    rpc_error = getattr(error, "rpc_error", None)
+    if isinstance(rpc_error, dict):
+        candidates.append(rpc_error.get("message"))
+    for err in getattr(error, "errs", None) or []:
+        if isinstance(err, dict):
+            candidates.append(err.get("message"))
+    return any(
+        isinstance(message, str)
+        and message.strip() == _CONFIRM_UNSUPPORTED_ON_PRIVATE_MESSAGE
+        for message in candidates
+    )
+
 
 SAFE_VALIDATION_PATH_SEGMENTS = frozenset(
     {"configuration"}
@@ -227,6 +267,49 @@ def _cleanup_config(dev, cu=None, locked=False):
     _close_device(dev)
 
 
+# ---------------------------------------------------------------------------
+# Load sessions — a private candidate lives only on the NETCONF connection
+# that opened it, so diff/commit-check/commit must run on that same
+# connection rather than reconnecting. There is at most one live session per
+# device; any load, or any commit-check/commit failure, replaces or clears it.
+# ---------------------------------------------------------------------------
+class _LoadSession:
+    __slots__ = ("dev", "cu", "checked")
+
+    def __init__(self, dev, cu):
+        self.dev = dev
+        self.cu = cu
+        self.checked = False
+
+
+_load_sessions = {}
+_load_sessions_lock = threading.Lock()
+
+
+def _get_session(name):
+    """Return the live load session for a device, if any."""
+    with _load_sessions_lock:
+        return _load_sessions.get(name)
+
+
+def _store_session(name, session):
+    """Replace any live session for a device with a new one."""
+    with _load_sessions_lock:
+        _load_sessions[name] = session
+
+
+def _discard_session(name):
+    """Best-effort close and forget any live load session for a device."""
+    with _load_sessions_lock:
+        session = _load_sessions.pop(name, None)
+    if session is not None:
+        try:
+            session.cu.rpc.close_configuration()
+        except Exception:
+            pass
+        _close_device(session.dev)
+
+
 def _strip_submitted_text(value):
     """Trim submitted text while leaving type rejection to inventory validation."""
     return value.strip() if isinstance(value, str) else value
@@ -352,6 +435,7 @@ def remove_device(name):
     if len(filtered) == len(devices):
         return _error_response("Device not found.", 404)
     _save_devices(filtered)
+    _discard_session(name)
     return jsonify({"ok": True})
 
 
@@ -399,6 +483,8 @@ def unlock_config(name):
     if not dev_dict:
         return _error_response("Device not found.", 404)
 
+    _discard_session(name)
+
     dev = None
     try:
         dev = _connect(dev_dict)
@@ -426,41 +512,16 @@ def unlock_config(name):
         return _safe_failure("UNEXPECTED_ERROR")
 
 
-def _acquire_lock(dev_dict, cu, dev):
-    """Try to lock the candidate config.  On LockError, reconnect and retry once."""
-    try:
-        cu.lock()
-        return cu, dev
-    except LockError:
-        # Previous session may have left a stale lock.
-        # Close this connection (which releases any lock *we* hold),
-        # wait briefly, reconnect, and try once more.
-        try:
-            cu.rollback(0)
-        except Exception:
-            pass
-        try:
-            cu.unlock()
-        except Exception:
-            pass
-        try:
-            dev.close()
-        except Exception:
-            pass
-        time.sleep(2)
-        retry_dev = _connect(dev_dict)
-        try:
-            retry_cu = Config(retry_dev)
-            retry_cu.lock()
-        except Exception:
-            _close_device(retry_dev)
-            raise
-        return retry_cu, retry_dev
-
-
 @bridge.route("/devices/<name>/load", methods=["POST"])
 def load_config(name):
-    """Load configuration into candidate configuration."""
+    """Load configuration into a private candidate, all-or-nothing.
+
+    On success, the NETCONF connection is kept open as this device's load
+    session: the private candidate it holds only exists on this connection,
+    so diff/commit-check/commit must reuse it rather than reconnecting. Any
+    load error discards the candidate and the connection and reports
+    ``ok: false`` — there is no partial/line-by-line fallback.
+    """
     dev_dict, _ = _find_device(name)
     if not dev_dict:
         return _error_response("Device not found.", 404)
@@ -482,128 +543,95 @@ def load_config(name):
     except Exception:
         return _safe_failure("UNEXPECTED_ERROR")
 
+    # A fresh load supersedes any prior session for this device.
+    _discard_session(name)
+
     dev = None
-    cu = None
-    locked = False
     try:
         dev = _connect(dev_dict)
         cu = Config(dev)
-        cu, dev = _acquire_lock(dev_dict, cu, dev)
-        locked = True
+        cu.rpc.open_configuration(private=True)
 
-        # First try loading the full config at once
         try:
             cu.load(config_text, format=fmt)
-            cu.unlock()
-            locked = False
-            _close_device(dev)
-            total = len(config_text.splitlines())
-            return jsonify({"ok": True, "message": f"Configuration loaded ({total} lines)."})
         except ConfigLoadError:
-            cu.rollback()  # Clean slate for line-by-line
-
-        # Batch load failed — fall back to line-by-line for set format
-        if fmt != "set":
-            cu.unlock()
-            locked = False
+            try:
+                cu.rollback()
+            except Exception:
+                pass
+            try:
+                cu.rpc.close_configuration()
+            except Exception:
+                pass
             _close_device(dev)
             return _safe_failure("DEVICE_OPERATION_FAILED")
 
-        errors = []
-        loaded = 0
-        skipped = 0
-        for i, line in enumerate(config_text.splitlines(), 1):
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                cu.load(line, format="set")
-                loaded += 1
-            except ConfigLoadError:
-                skipped += 1
-                errors.append({
-                    "line": i,
-                    "code": "DEVICE_OPERATION_FAILED",
-                })
-
-        cu.unlock()
-        locked = False
-        _close_device(dev)
-
-        if loaded == 0:
-            return _safe_failure("DEVICE_OPERATION_FAILED")
-
-        return jsonify({
-            "ok": True,
-            "message": f"Loaded {loaded} commands, skipped {skipped} with errors.",
-            "warnings": errors[:50] if errors else None,
-            "loaded": loaded,
-            "skipped": skipped,
-        })
+        _store_session(name, _LoadSession(dev, cu))
+        total = len(config_text.splitlines())
+        return jsonify({"ok": True, "message": f"Configuration loaded ({total} lines)."})
     except DeviceConnectionError as error:
-        _cleanup_config(dev, cu, locked)
+        _close_device(dev)
         return _safe_failure(error.code)
     except (CommitError, ConfigLoadError, LockError, UnlockError, RpcError):
-        _cleanup_config(dev, cu, locked)
+        _close_device(dev)
         return _safe_failure("DEVICE_OPERATION_FAILED")
     except Exception:
-        _cleanup_config(dev, cu, locked)
+        _close_device(dev)
         return _safe_failure("UNEXPECTED_ERROR")
 
 
 @bridge.route("/devices/<name>/diff", methods=["GET"])
 def config_diff(name):
-    """Show candidate vs active configuration diff."""
+    """Show private candidate vs active configuration diff for the load session."""
     dev_dict, _ = _find_device(name)
     if not dev_dict:
         return _error_response("Device not found.", 404)
 
-    dev = None
+    session = _get_session(name)
+    if session is None:
+        return _safe_failure("LOAD_SESSION_REQUIRED")
+
     try:
-        dev = _connect(dev_dict)
-        cu = Config(dev)
-        diff = cu.diff() or ""
-        _close_device(dev)
+        diff = session.cu.diff() or ""
         return jsonify({"ok": True, "diff": diff})
-    except DeviceConnectionError as error:
-        _close_device(dev)
-        return _safe_failure(error.code)
     except (CommitError, ConfigLoadError, LockError, UnlockError, RpcError):
-        _close_device(dev)
+        _discard_session(name)
         return _safe_failure("DEVICE_OPERATION_FAILED")
     except Exception:
-        _close_device(dev)
+        _discard_session(name)
         return _safe_failure("UNEXPECTED_ERROR")
 
 
 @bridge.route("/devices/<name>/commit-check", methods=["POST"])
 def commit_check(name):
-    """Dry-run commit check — validates candidate without applying."""
+    """Dry-run commit check on the load session's private candidate."""
     dev_dict, _ = _find_device(name)
     if not dev_dict:
         return _error_response("Device not found.", 404)
 
-    dev = None
+    session = _get_session(name)
+    if session is None:
+        return _safe_failure("LOAD_SESSION_REQUIRED")
+
     try:
-        dev = _connect(dev_dict)
-        cu = Config(dev)
-        cu.commit_check()
-        _close_device(dev)
+        session.cu.commit_check()
+        session.checked = True
         return jsonify({"ok": True, "message": "Commit check passed."})
-    except DeviceConnectionError as error:
-        _close_device(dev)
-        return _safe_failure(error.code)
     except (CommitError, ConfigLoadError, LockError, UnlockError, RpcError):
-        _close_device(dev)
+        _discard_session(name)
         return _safe_failure("DEVICE_OPERATION_FAILED")
     except Exception:
-        _close_device(dev)
+        _discard_session(name)
         return _safe_failure("UNEXPECTED_ERROR")
 
 
 @bridge.route("/devices/<name>/commit", methods=["POST"])
 def commit(name):
-    """Commit the candidate configuration."""
+    """Commit the private candidate from this device's load session.
+
+    Refuses to run unless that same session already has a passing
+    commit-check — never on a fresh, unchecked connection.
+    """
     dev_dict, _ = _find_device(name)
     if not dev_dict:
         return _error_response("Device not found.", 404)
@@ -616,19 +644,19 @@ def commit(name):
     comment = data.get("comment", "")
     confirm_minutes = data.get("confirm_minutes")
 
-    dev = None
-    try:
-        dev = _connect(dev_dict)
-        cu = Config(dev)
+    session = _get_session(name)
+    if session is None or not session.checked:
+        return _safe_failure("LOAD_SESSION_REQUIRED")
 
+    try:
         kwargs = {}
         if comment:
             kwargs["comment"] = comment
         if confirm_minutes and int(confirm_minutes) > 0:
             kwargs["confirm"] = int(confirm_minutes)
 
-        cu.commit(**kwargs)
-        _close_device(dev)
+        session.cu.commit(**kwargs)
+        _discard_session(name)
 
         msg = "Configuration committed successfully."
         if confirm_minutes and int(confirm_minutes) > 0:
@@ -637,14 +665,16 @@ def commit(name):
                 f"Run 'confirm' within {confirm_minutes} minutes or the device will auto-rollback."
             )
         return jsonify({"ok": True, "message": msg, "confirm_active": bool(confirm_minutes)})
-    except DeviceConnectionError as error:
-        _close_device(dev)
-        return _safe_failure(error.code)
-    except (CommitError, ConfigLoadError, LockError, UnlockError, RpcError):
-        _close_device(dev)
+    except CommitError as error:
+        _discard_session(name)
+        if _is_confirm_unsupported_on_private(error):
+            return _safe_failure("CONFIRM_UNSUPPORTED_ON_PRIVATE")
+        return _safe_failure("DEVICE_OPERATION_FAILED")
+    except (ConfigLoadError, LockError, UnlockError, RpcError):
+        _discard_session(name)
         return _safe_failure("DEVICE_OPERATION_FAILED")
     except Exception:
-        _close_device(dev)
+        _discard_session(name)
         return _safe_failure("UNEXPECTED_ERROR")
 
 
@@ -701,6 +731,8 @@ def rollback(name):
     elif not isinstance(data, dict):
         return _error_response("Request body must be a JSON object.")
     rollback_id = data.get("id", 0)
+
+    _discard_session(name)
 
     dev = None
     try:

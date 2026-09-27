@@ -15,6 +15,7 @@ const BRIDGE_CODE_MESSAGES = new Map([
   ['DEVICE_CREDENTIAL_UNAVAILABLE', 'The configured device credential is unavailable.'],
   ['DEVICE_UNREACHABLE', 'The NETCONF device is unreachable.'],
   ['DEVICE_OPERATION_FAILED', 'The NETCONF device operation failed.'],
+  ['CONFIRM_UNSUPPORTED_ON_PRIVATE', 'Nothing was committed. This device release does not support the confirm timer on a private candidate.'],
   ['UNEXPECTED_ERROR', 'An unexpected bridge error occurred.'],
 ]);
 
@@ -221,6 +222,12 @@ export function bridgeErrorMessage(error, fallback = 'Bridge operation failed.')
 /** Test a mapped bridge response status without trusting arbitrary errors. */
 export function isBridgeResponseStatus(error, status) {
   return error instanceof BridgeClientError && error.status === status;
+}
+
+
+/** Test a mapped bridge response code without trusting arbitrary errors. */
+export function isBridgeResponseCode(error, code) {
+  return error instanceof BridgeClientError && error.code === code;
 }
 
 

@@ -246,6 +246,58 @@ class LoadCommitSessionTests(unittest.TestCase):
         self.assertEqual(retry_response.status_code, 409)
         connect_mock.assert_not_called()
 
+    def test_confirm_unsupported_on_private_returns_fixed_code(self):
+        dev = Mock()
+        config = Mock()
+        self._load(dev, config)
+        self.client.post("/devices/edge/commit-check", headers=self.auth)
+        config.commit.side_effect = CommitError(
+            None,
+            errs=[
+                {
+                    "message": "commit confirmed not supported for private configuration",
+                    "severity": "error",
+                }
+            ],
+        )
+
+        response = self.client.post(
+            "/devices/edge/commit",
+            json={"comment": "x", "confirm_minutes": 1},
+            headers=self.auth,
+        )
+        body = response.get_json()
+        self.assertEqual(response.status_code, 409)
+        self.assertFalse(body["ok"])
+        self.assertEqual(body["code"], "CONFIRM_UNSUPPORTED_ON_PRIVATE")
+        self.assertNotIn("private configuration", body["error"])
+        self.assertIsNone(app_module._get_session("edge"))
+        dev.close.assert_called_once_with()
+
+    def test_similarly_worded_commit_error_is_not_misclassified(self):
+        """Only the exact device string maps to the fixed code — see MEC-172."""
+        dev = Mock()
+        config = Mock()
+        self._load(dev, config)
+        self.client.post("/devices/edge/commit-check", headers=self.auth)
+        config.commit.side_effect = CommitError(
+            None,
+            errs=[
+                {
+                    "message": "commit confirmed not supported here",
+                    "severity": "error",
+                }
+            ],
+        )
+
+        response = self.client.post(
+            "/devices/edge/commit",
+            json={"comment": "x", "confirm_minutes": 1},
+            headers=self.auth,
+        )
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(response.get_json()["code"], "DEVICE_OPERATION_FAILED")
+
 
 if __name__ == "__main__":
     unittest.main()

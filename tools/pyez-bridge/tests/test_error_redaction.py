@@ -263,6 +263,37 @@ class BridgeErrorRedactionTests(unittest.TestCase):
         device.close.assert_called_once_with()
         self.assert_redacted(response, captured)
 
+    def test_confirm_unsupported_on_private_never_echoes_device_text(self):
+        device = Mock()
+        config = Mock()
+        config.commit.side_effect = CommitError(
+            None,
+            errs=[
+                {
+                    "message": (
+                        "commit confirmed not supported for private configuration"
+                    ),
+                    "severity": "error",
+                }
+            ],
+        )
+        session = app_module._LoadSession(device, config)
+        session.checked = True
+        app_module._store_session("edge", session)
+
+        response, captured = self.request_with_captured_output(
+            "post",
+            "/devices/edge/commit",
+            {"comment": "x", "confirm_minutes": 1},
+        )
+        body = response.get_json()
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(body["code"], "CONFIRM_UNSUPPORTED_ON_PRIVATE")
+        # The fixed message text, never the raw Junos rpc-error string.
+        public_text = response.get_data(as_text=True) + captured
+        self.assertNotIn("commit confirmed not supported for private configuration", public_text)
+        self.assert_redacted(response, captured)
+
     def test_rpc_errors_are_operation_failures_without_details(self):
         device = Mock()
         device.rpc.get_config.side_effect = RpcError(

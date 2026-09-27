@@ -80,8 +80,43 @@ SAFE_FAILURES = {
         "commit, a passing commit check) in this same session.",
         409,
     ),
+    "CONFIRM_UNSUPPORTED_ON_PRIVATE": (
+        "Nothing was committed. This device release does not support the "
+        "confirm timer on a private candidate.",
+        409,
+    ),
     "UNEXPECTED_ERROR": ("An unexpected bridge error occurred.", 500),
 }
+
+# Junos's exact <rpc-error> text when `commit confirmed` is attempted on a
+# private candidate (Juniper RLI 43242; still unresolved as of 26.2R1.7).
+# Matched verbatim so we never guess at partial or reworded device text.
+_CONFIRM_UNSUPPORTED_ON_PRIVATE_MESSAGE = (
+    "commit confirmed not supported for private configuration"
+)
+
+
+def _is_confirm_unsupported_on_private(error):
+    """True if a CommitError is Junos's private-candidate confirm refusal.
+
+    Checks both `rpc_error` (populated from a real device XML reply) and
+    `errs` (the list PyEZ callers, and this bridge's tests, construct
+    CommitError from directly) so the match works the same way against a
+    live device and a mocked one.
+    """
+    candidates = []
+    rpc_error = getattr(error, "rpc_error", None)
+    if isinstance(rpc_error, dict):
+        candidates.append(rpc_error.get("message"))
+    for err in getattr(error, "errs", None) or []:
+        if isinstance(err, dict):
+            candidates.append(err.get("message"))
+    return any(
+        isinstance(message, str)
+        and message.strip() == _CONFIRM_UNSUPPORTED_ON_PRIVATE_MESSAGE
+        for message in candidates
+    )
+
 
 SAFE_VALIDATION_PATH_SEGMENTS = frozenset(
     {"configuration"}
@@ -630,7 +665,12 @@ def commit(name):
                 f"Run 'confirm' within {confirm_minutes} minutes or the device will auto-rollback."
             )
         return jsonify({"ok": True, "message": msg, "confirm_active": bool(confirm_minutes)})
-    except (CommitError, ConfigLoadError, LockError, UnlockError, RpcError):
+    except CommitError as error:
+        _discard_session(name)
+        if _is_confirm_unsupported_on_private(error):
+            return _safe_failure("CONFIRM_UNSUPPORTED_ON_PRIVATE")
+        return _safe_failure("DEVICE_OPERATION_FAILED")
+    except (ConfigLoadError, LockError, UnlockError, RpcError):
         _discard_session(name)
         return _safe_failure("DEVICE_OPERATION_FAILED")
     except Exception:

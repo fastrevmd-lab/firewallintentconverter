@@ -9,6 +9,7 @@
  */
 import React, { useState, useMemo, useCallback } from 'react';
 import { getConversionOutputText } from '../../src/conversion/conversion-output.js';
+import { safeJsonParse } from '../utils/safe-json.js';
 
 /**
  * Simple line-by-line diff algorithm (longest common subsequence based).
@@ -108,6 +109,27 @@ const DIFF_COLORS = {
 };
 
 const STORAGE_KEY = 'config-diff-previous';
+// An unconverted SRX baseline is unsanitized device config; don't let it sit
+// in localStorage indefinitely — expire it like a short-lived cache entry.
+const BASELINE_TTL_MS = 24 * 60 * 60 * 1000;
+
+/** Reads the saved baseline, discarding it once it's past its expiry. */
+function readSavedBaseline() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return '';
+    const parsed = safeJsonParse(raw);
+    if (!parsed || typeof parsed.text !== 'string' || typeof parsed.savedAt !== 'number') {
+      localStorage.removeItem(STORAGE_KEY);
+      return '';
+    }
+    if (Date.now() - parsed.savedAt > BASELINE_TTL_MS) {
+      localStorage.removeItem(STORAGE_KEY);
+      return '';
+    }
+    return parsed.text;
+  } catch { return ''; }
+}
 
 export default function ConfigDiff({ currentOutput }) {
   const [mode, setMode] = useState('previous'); // 'previous' or 'paste'
@@ -119,17 +141,13 @@ export default function ConfigDiff({ currentOutput }) {
     [currentOutput],
   );
 
-  // Load previous output from localStorage
-  const previousText = useMemo(() => {
-    try {
-      return localStorage.getItem(STORAGE_KEY) || '';
-    } catch { return ''; }
-  }, []);
+  // Load previous output from localStorage (expires after BASELINE_TTL_MS)
+  const previousText = useMemo(() => readSavedBaseline(), []);
 
-  // Save current as "previous" for next comparison
+  // Save current as "previous" for next comparison, timestamped for expiry
   const handleSaveAsPrevious = useCallback(() => {
     try {
-      localStorage.setItem(STORAGE_KEY, currentText);
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ text: currentText, savedAt: Date.now() }));
     } catch { /* ignore */ }
   }, [currentText]);
 
@@ -223,7 +241,7 @@ export default function ConfigDiff({ currentOutput }) {
         <div className="empty-state" style={{ flex: 1 }}>
           <p>
             {mode === 'previous'
-              ? 'No previous conversion saved. Click "Save Current as Baseline" after converting, then convert again to see differences.'
+              ? 'No previous conversion saved (or it expired after 24 hours). Click "Save Current as Baseline" after converting, then convert again to see differences.'
               : 'Paste an older config in the text area above to compare.'}
           </p>
         </div>

@@ -680,26 +680,41 @@ def commit(name):
 
 @bridge.route("/devices/<name>/confirm", methods=["POST"])
 def confirm_commit(name):
-    """Confirm a pending commit-confirm (cancel the auto-rollback timer)."""
+    """Confirm a pending commit-confirm (cancel the auto-rollback timer).
+
+    This is a fresh connection with no session of its own, so it must take
+    the exclusive lock before committing. Junos refuses that lock while the
+    shared candidate holds another operator's or tool's uncommitted changes,
+    so a LockError here must fail closed rather than commit over them.
+    """
     dev_dict, _ = _find_device(name)
     if not dev_dict:
         return _error_response("Device not found.", 404)
 
     dev = None
+    cu = None
+    locked = False
     try:
         dev = _connect(dev_dict)
         cu = Config(dev)
+        cu.lock()
+        locked = True
         cu.commit()  # A bare commit after commit-confirm confirms it
+        try:
+            cu.unlock()
+        except Exception:
+            pass
+        locked = False
         _close_device(dev)
         return jsonify({"ok": True, "message": "Commit confirmed. Auto-rollback cancelled."})
     except DeviceConnectionError as error:
-        _close_device(dev)
+        _cleanup_config(dev, cu, locked)
         return _safe_failure(error.code)
     except (CommitError, ConfigLoadError, LockError, UnlockError, RpcError):
-        _close_device(dev)
+        _cleanup_config(dev, cu, locked)
         return _safe_failure("DEVICE_OPERATION_FAILED")
     except Exception:
-        _close_device(dev)
+        _cleanup_config(dev, cu, locked)
         return _safe_failure("UNEXPECTED_ERROR")
 
 

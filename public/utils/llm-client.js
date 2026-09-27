@@ -1,7 +1,7 @@
 import { loadLLMSettings } from './llm-settings.js';
 import { safeJsonParse } from './safe-json.js';
 import { mapVendorApp, isLoaded as appMappingsLoaded } from '../../src/utils/app-mappings.js';
-import { isLocalOnlyLLMMode } from './llm-risk-acceptance.js';
+import { assertLLMModeAllowsCalls } from './llm-risk-acceptance.js';
 
 /**
  * Browser-Side LLM API Client
@@ -547,17 +547,23 @@ function isLoopbackHostname(hostname) {
 }
 
 /**
- * Enforces the "local-only" LLM risk mode at the point of call. This is the
+ * Enforces the LLM risk-acceptance mode at the point of call. This is the
  * deterministic gate: it does not trust the Settings UI to have kept its
  * provider dropdown or saved settings in sync with the current mode, and it
  * runs for every provider — including "custom" — before any network request
  * is built.
  *
+ * Modes other than 'all' and 'local-only' (undecided, 'deterministic',
+ * 'rejected', or an unrecognized stored value) are refused outright — only
+ * 'local-only' gets the additional cloud-provider/loopback checks below.
+ *
  * @param {{provider?: string, baseUrl?: string}} settings
- * @throws {Error} If the mode is local-only and the provider/URL is not local.
+ * @throws {Error} If the mode disallows LLM calls, or is local-only and the
+ *   provider/URL is not local.
  */
 function assertLocalOnlyModeAllows(settings) {
-  if (!isLocalOnlyLLMMode()) return;
+  const mode = assertLLMModeAllowsCalls();
+  if (mode !== 'local-only') return;
 
   if (CLOUD_PROVIDER_IDS.has(settings.provider)) {
     throw new Error(

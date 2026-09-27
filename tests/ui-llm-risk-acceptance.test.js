@@ -28,4 +28,21 @@ describe('LLM risk acceptance persistence (M8)', () => {
     expect(removeItemSpy).toHaveBeenCalledWith(LLM_RISK_ACCEPTANCE_STORAGE_KEY);
     expect(setItemSpy).not.toHaveBeenCalled();
   });
+
+  it('a stale "null" string from a pre-1.2.3 install is treated as undecided and cleared (MEC-134 F2)', async () => {
+    // Regression test: users who clicked "Change mode" on 1.2.2 or earlier
+    // have the literal string "null" stored. initialState used to read it
+    // with a raw localStorage.getItem(), which is truthy, so the app skipped
+    // the disclaimer and never asked those installs to re-consent.
+    vi.spyOn(globalThis.localStorage, 'getItem').mockImplementation((key) =>
+      key === LLM_RISK_ACCEPTANCE_STORAGE_KEY ? 'null' : null,
+    );
+    const removeItemSpy = vi.spyOn(globalThis.localStorage, 'removeItem');
+
+    vi.resetModules();
+    const fresh = await import('../public/contexts/UIContext.jsx');
+
+    expect(fresh.initialState.llmRiskAcceptance).toBeNull();
+    expect(removeItemSpy).toHaveBeenCalledWith(LLM_RISK_ACCEPTANCE_STORAGE_KEY);
+  });
 });

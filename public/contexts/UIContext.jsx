@@ -6,7 +6,7 @@
  * No data dependencies — purely presentational concerns.
  */
 import React, { createContext, useContext, useReducer } from 'react';
-import { LLM_RISK_ACCEPTANCE_STORAGE_KEY } from '../utils/llm-risk-acceptance.js';
+import { LLM_RISK_ACCEPTANCE_STORAGE_KEY, getLLMRiskAcceptance } from '../utils/llm-risk-acceptance.js';
 
 // ---------------------------------------------------------------------------
 // Initial state
@@ -60,7 +60,10 @@ const initialState = {
   commandPaletteOpen: false,
 
   // LLM risk disclaimer acceptance: null | 'all' | 'local-only' | 'deterministic' | 'rejected'
-  llmRiskAcceptance: localStorage.getItem(LLM_RISK_ACCEPTANCE_STORAGE_KEY) || null,
+  // Goes through getLLMRiskAcceptance() (not a raw localStorage.getItem) so a
+  // stale/invalid stored value — e.g. the literal string "null" written by
+  // pre-1.2.3 builds — is treated as undecided and cleared, not as consent.
+  llmRiskAcceptance: getLLMRiskAcceptance(),
 };
 
 // ---------------------------------------------------------------------------

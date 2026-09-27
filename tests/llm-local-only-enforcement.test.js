@@ -164,6 +164,57 @@ async function run() {
   await getLLMSuggestion('hi');
   assert(fetchCalls.length === 1 && fetchCalls[0].startsWith('http://localhost:11434'), 'ollama: default baseUrl is loopback and reachable in local-only mode');
 
+  // F1 (MEC-134): the gate used to check only for the exact string
+  // 'local-only' and let every other mode through to the network. Modes
+  // other than 'all'/'local-only' — undecided (no stored value), a stale
+  // 'null' string, 'deterministic', 'rejected', and any unrecognized value —
+  // must fail closed at every entry point, not just be hidden by the UI.
+  saveLLMSettings({ provider: 'claude', apiKey: 'FAKE-TEST-KEY-0001', model: 'claude-sonnet-4-6' });
+
+  const DISALLOWED_MODES = [
+    [null, 'no stored value'],
+    ['null', 'the literal string "null"'],
+    ['deterministic', "'deterministic'"],
+    ['rejected', "'rejected'"],
+    ['bogus-mode', 'an unrecognized value'],
+  ];
+
+  for (const [mode, label] of DISALLOWED_MODES) {
+    setRiskMode(mode);
+
+    fetchCalls = [];
+    await assertRejects(() => getLLMSuggestion('hi'), `getLLMSuggestion rejects when mode is ${label}`);
+    assert(fetchCalls.length === 0, `getLLMSuggestion (${label}): no request reached fetch`);
+
+    fetchCalls = [];
+    await assertRejects(
+      () => getLLMChatResponse([{ role: 'user', content: 'hi' }]),
+      `getLLMChatResponse rejects when mode is ${label}`,
+    );
+    assert(fetchCalls.length === 0, `getLLMChatResponse (${label}): no request reached fetch`);
+
+    fetchCalls = [];
+    await assertRejects(
+      () => testLLMConnection({ provider: 'claude', apiKey: 'FAKE-TEST-KEY-0001' }),
+      `testLLMConnection rejects when mode is ${label}`,
+    );
+    assert(fetchCalls.length === 0, `testLLMConnection (${label}): no request reached fetch`);
+
+    fetchCalls = [];
+    await assertRejects(
+      () => translatePolicies(MINIMAL_CONFIG, 'SRX345', ''),
+      `translatePolicies rejects when mode is ${label}`,
+    );
+    assert(fetchCalls.length === 0, `translatePolicies (${label}): no request reached fetch`);
+
+    fetchCalls = [];
+    await assertRejects(
+      () => groupPolicies(MINIMAL_CONFIG.security_policies),
+      `groupPolicies rejects when mode is ${label}`,
+    );
+    assert(fetchCalls.length === 0, `groupPolicies (${label}): no request reached fetch`);
+  }
+
   // Sanity check: outside local-only mode, the same cloud provider works.
   setRiskMode('all');
   saveLLMSettings({ provider: 'claude', apiKey: 'FAKE-TEST-KEY-0001', model: 'claude-sonnet-4-6' });

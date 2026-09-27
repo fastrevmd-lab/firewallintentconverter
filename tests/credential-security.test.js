@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { getLLMChatResponse, getLLMSuggestion } from '../public/utils/llm-client.js';
 import { saveLLMSettings } from '../public/utils/llm-settings.js';
+import { LLM_RISK_ACCEPTANCE_STORAGE_KEY } from '../public/utils/llm-risk-acceptance.js';
 import { bridgeResponseError } from '../public/utils/bridge-client.js';
 import {
   EMPTY_DEVICE_REGISTRATION,
@@ -311,6 +312,10 @@ describe('credential source invariants', () => {
       { provider: 'openai', header: 'Authorization', value: 'Bearer SENTINEL_KEY', label: 'OpenAI' },
       { provider: 'gemini', header: 'x-goog-api-key', value: 'SENTINEL_KEY', label: 'Gemini' },
     ];
+
+    // Credential redaction is orthogonal to mode gating (MEC-134 F1 tests
+    // that separately); allow cloud providers here so the calls reach fetch.
+    globalThis.localStorage.setItem(LLM_RISK_ACCEPTANCE_STORAGE_KEY, 'all');
 
     for (const testCase of cases) {
       for (const call of [

@@ -267,6 +267,21 @@ def _cleanup_config(dev, cu=None, locked=False):
     _close_device(dev)
 
 
+def _discard_locked_candidate(cu, locked):
+    """Reset a candidate this connection locked back to the active config.
+
+    Only runs when `locked` is true — this connection holds the lock and the
+    candidate is ours to discard. Without that guard, a LockError (locked is
+    still False) would run rollback(0) against another operator's or tool's
+    uncommitted changes.
+    """
+    if locked and cu is not None:
+        try:
+            cu.rollback(0)
+        except Exception:
+            pass
+
+
 # ---------------------------------------------------------------------------
 # Load sessions — a private candidate lives only on the NETCONF connection
 # that opened it, so diff/commit-check/commit must run on that same
@@ -720,7 +735,14 @@ def confirm_commit(name):
 
 @bridge.route("/devices/<name>/rollback", methods=["POST"])
 def rollback(name):
-    """Rollback the candidate configuration to the last committed state."""
+    """Rollback the candidate configuration to the last committed state.
+
+    This is a fresh connection with no session of its own, so it must take
+    the exclusive lock before rolling back and committing. Junos refuses
+    that lock while the shared candidate holds another operator's or tool's
+    uncommitted changes, so a LockError here must fail closed rather than
+    overwrite them.
+    """
     dev_dict, _ = _find_device(name)
     if not dev_dict:
         return _error_response("Device not found.", 404)
@@ -730,26 +752,43 @@ def rollback(name):
         data = {}
     elif not isinstance(data, dict):
         return _error_response("Request body must be a JSON object.")
-    rollback_id = data.get("id", 0)
+
+    raw_rollback_id = data.get("id", 0)
+    if isinstance(raw_rollback_id, bool) or not isinstance(raw_rollback_id, int):
+        return _error_response("id must be an integer between 0 and 49.", 400)
+    rollback_id = raw_rollback_id
+    if rollback_id < 0 or rollback_id > 49:
+        return _error_response("id must be an integer between 0 and 49.", 400)
 
     _discard_session(name)
 
     dev = None
+    cu = None
+    locked = False
     try:
         dev = _connect(dev_dict)
         cu = Config(dev)
-        cu.rollback(int(rollback_id))
+        cu.lock()
+        locked = True
+        cu.rollback(rollback_id)
         cu.commit(comment="Rollback via PyEZ Bridge")
+        try:
+            cu.unlock()
+        except Exception:
+            pass
+        locked = False
         _close_device(dev)
         return jsonify({"ok": True, "message": f"Rolled back to configuration {rollback_id}."})
     except DeviceConnectionError as error:
-        _close_device(dev)
+        _cleanup_config(dev, cu, locked)
         return _safe_failure(error.code)
     except (CommitError, ConfigLoadError, LockError, UnlockError, RpcError):
-        _close_device(dev)
+        _discard_locked_candidate(cu, locked)
+        _cleanup_config(dev, cu, locked)
         return _safe_failure("DEVICE_OPERATION_FAILED")
     except Exception:
-        _close_device(dev)
+        _discard_locked_candidate(cu, locked)
+        _cleanup_config(dev, cu, locked)
         return _safe_failure("UNEXPECTED_ERROR")
 
 

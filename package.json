@@ -9,7 +9,8 @@
     "build": "vite build",
     "preview": "vite preview --host",
     "build:standalone": "vite build --config vite.standalone.config.js && sed 's|\\.\\./assets/|./assets/|g' dist-standalone/standalone/index.html > dist-standalone/index.html && rm -rf dist-standalone/standalone && cp standalone/README.txt dist-standalone/",
-    "zip:standalone": "npm run build:standalone && cd dist-standalone && zip -r ../firewallintentconverter-standalone.zip . -x 'prompts/*' && cd .."
+    "zip:standalone": "npm run build:standalone && cd dist-standalone && zip -r ../firewallintentconverter-standalone.zip . -x 'prompts/*' && cd ..",
+    "test": "vitest run && for f in tests/*.test.js; do grep -q \"from 'vitest'\" \"$f\" || node \"$f\"; done"
   },
   "devDependencies": {
     "@fontsource-variable/geist": "5.2.9",
@@ -20,6 +21,6 @@
     "react": "18.3.1",
     "react-dom": "18.3.1",
     "vite": "8.0.16",
-    "vitest": "4.1.10"
+    "vitest": "4.1.11"
   }
 }

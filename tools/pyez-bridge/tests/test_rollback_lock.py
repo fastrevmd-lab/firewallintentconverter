@@ -122,6 +122,22 @@ class RollbackLockTests(unittest.TestCase):
         config.unlock.assert_called_once_with()
         dev.close.assert_called_once_with()
 
+    def test_failed_commit_discards_the_loaded_rollback_before_unlocking(self):
+        """A failed commit must not leave the rollback it loaded sitting in
+        the shared candidate — the next operator's commit would push it."""
+        dev = Mock()
+        config = Mock()
+        config.commit.side_effect = CommitError(
+            None, errs=[{"message": "commit failed", "severity": "error"}]
+        )
+
+        self._rollback(dev, config, rollback_id=5)
+
+        self.assertEqual(
+            [c for c in config.method_calls if c[0] in ("rollback", "unlock")],
+            [("rollback", (5,), {}), ("rollback", (0,), {}), ("unlock", (), {})],
+        )
+
     def test_unlock_failure_after_commit_still_reports_success_and_closes(self):
         dev = Mock()
         config = Mock()

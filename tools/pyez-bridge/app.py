@@ -267,6 +267,21 @@ def _cleanup_config(dev, cu=None, locked=False):
     _close_device(dev)
 
 
+def _discard_locked_candidate(cu, locked):
+    """Reset a candidate this connection locked back to the active config.
+
+    Only runs when `locked` is true — this connection holds the lock and the
+    candidate is ours to discard. Without that guard, a LockError (locked is
+    still False) would run rollback(0) against another operator's or tool's
+    uncommitted changes.
+    """
+    if locked and cu is not None:
+        try:
+            cu.rollback(0)
+        except Exception:
+            pass
+
+
 # ---------------------------------------------------------------------------
 # Load sessions — a private candidate lives only on the NETCONF connection
 # that opened it, so diff/commit-check/commit must run on that same
@@ -768,9 +783,11 @@ def rollback(name):
         _cleanup_config(dev, cu, locked)
         return _safe_failure(error.code)
     except (CommitError, ConfigLoadError, LockError, UnlockError, RpcError):
+        _discard_locked_candidate(cu, locked)
         _cleanup_config(dev, cu, locked)
         return _safe_failure("DEVICE_OPERATION_FAILED")
     except Exception:
+        _discard_locked_candidate(cu, locked)
         _cleanup_config(dev, cu, locked)
         return _safe_failure("UNEXPECTED_ERROR")
 

@@ -137,6 +137,13 @@ export default function useLLM() {
       : (intermediateConfig?.security_policies || []);
     if (policies.length === 0) return;
 
+    // Same sanitization gate as handleTranslateWithLLM — grouping also sends
+    // rule data (zones, addresses, descriptions) to the configured LLM.
+    if (!isSanitized && !uiState.llmWarningDismissed) {
+      uiDispatch({ type: 'SHOW_MODAL', name: 'llmWarning' });
+      return;
+    }
+
     const llmStatus = getLLMStatus();
     if (!llmStatus.configured) {
       uiDispatch({ type: 'SET_FIELD', field: 'error', value: 'LLM provider not configured. Open Settings to configure one.' });
@@ -155,7 +162,7 @@ export default function useLLM() {
     } finally {
       uiDispatch({ type: 'SET_FIELD', field: 'groupingInProgress', value: false });
     }
-  }, [uiState.platformView, srxTranslatedPolicies, intermediateConfig, configDispatch, uiDispatch]);
+  }, [uiState.platformView, srxTranslatedPolicies, intermediateConfig, isSanitized, uiState.llmWarningDismissed, configDispatch, uiDispatch]);
 
   // -----------------------------------------------------------------------
   // Review handlers (source policies)

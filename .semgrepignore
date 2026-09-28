@@ -1,0 +1,7 @@
+# Gitleaks rule/config files intentionally contain literal secret-shaped
+# strings (PEM/PGP key headers, vendor obfuscated-secret regexes) so gitleaks
+# itself can match them. semgrep's p/secrets ruleset flags the same literal
+# text as a hardcoded secret. .gitleaks.toml already carries an [allowlist]
+# for gitleaks with this rationale; this is the semgrep-side equivalent.
+.gitleaks-vendor.toml
+.gitleaks.toml

@@ -47,6 +47,10 @@ export function isBridgeResponseStatus() {
   return false;
 }
 
+export function isBridgeResponseCode() {
+  return false;
+}
+
 export function safeBridgeLoadWarnings() {
   return [];
 }

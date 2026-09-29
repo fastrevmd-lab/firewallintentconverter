@@ -1,7 +1,7 @@
 # SSL-VPN / Remote-Access Interface Target (Issue #23)
 
 **Date:** 2026-07-14
-**Issue:** [#23](https://github.com/fastrevmd-lab/firewallintentconverter/issues/23)
+**Issue:** [#23](https://github.com/mechubsec/firewallintentconverter/issues/23)
 **Status:** Approved — ready for implementation planning
 
 ## Problem

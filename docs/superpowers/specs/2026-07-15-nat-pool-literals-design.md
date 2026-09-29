@@ -1,7 +1,7 @@
 # NAT Pool Literal Addresses (Issue #35 — core correctness)
 
 **Date:** 2026-07-15
-**Issue:** [#35](https://github.com/fastrevmd-lab/firewallintentconverter/issues/35)
+**Issue:** [#35](https://github.com/mechubsec/firewallintentconverter/issues/35)
 **Status:** Approved (autonomous) — implementing the correctness core
 
 ## Problem

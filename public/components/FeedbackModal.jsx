@@ -6,7 +6,7 @@ const CATEGORIES = [
   { value: 'improvement', label: 'Improvement', ghLabel: 'improvement' },
 ];
 
-const REPO_URL = 'https://github.com/fastrevmd-lab/firewallintentconverter';
+const REPO_URL = 'https://github.com/mechubsec/firewallintentconverter';
 
 export default function FeedbackModal({ onClose }) {
   const [category, setCategory] = useState('feature');

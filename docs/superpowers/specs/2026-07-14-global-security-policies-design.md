@@ -1,7 +1,7 @@
 # SRX `security policies global` Output Mode (Issue #29)
 
 **Date:** 2026-07-14
-**Issue:** [#29](https://github.com/fastrevmd-lab/firewallintentconverter/issues/29)
+**Issue:** [#29](https://github.com/mechubsec/firewallintentconverter/issues/29)
 **Status:** Approved — ready for implementation planning
 
 ## Problem

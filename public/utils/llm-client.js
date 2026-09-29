@@ -1,6 +1,7 @@
 import { loadLLMSettings } from './llm-settings.js';
 import { safeJsonParse } from './safe-json.js';
 import { mapVendorApp, isLoaded as appMappingsLoaded } from '../../src/utils/app-mappings.js';
+import { assertLLMModeAllowsCalls } from './llm-risk-acceptance.js';
 
 /**
  * Browser-Side LLM API Client
@@ -530,6 +531,66 @@ export function loadVendorTranslatePrompt(vendor) {
 }
 
 // ---------------------------------------------------------------------------
+// Local-only mode enforcement
+// ---------------------------------------------------------------------------
+
+const CLOUD_PROVIDER_IDS = new Set(['claude', 'openai', 'gemini']);
+
+/** Base URLs the local providers fall back to when none is configured. */
+const PROVIDER_DEFAULT_BASE_URLS = {
+  ollama: 'http://localhost:11434',
+  lmstudio: 'http://localhost:1234',
+};
+
+function isLoopbackHostname(hostname) {
+  return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
+}
+
+/**
+ * Enforces the LLM risk-acceptance mode at the point of call. This is the
+ * deterministic gate: it does not trust the Settings UI to have kept its
+ * provider dropdown or saved settings in sync with the current mode, and it
+ * runs for every provider — including "custom" — before any network request
+ * is built.
+ *
+ * Modes other than 'all' and 'local-only' (undecided, 'deterministic',
+ * 'rejected', or an unrecognized stored value) are refused outright — only
+ * 'local-only' gets the additional cloud-provider/loopback checks below.
+ *
+ * @param {{provider?: string, baseUrl?: string}} settings
+ * @throws {Error} If the mode disallows LLM calls, or is local-only and the
+ *   provider/URL is not local.
+ */
+function assertLocalOnlyModeAllows(settings) {
+  const mode = assertLLMModeAllowsCalls();
+  if (mode !== 'local-only') return;
+
+  if (CLOUD_PROVIDER_IDS.has(settings.provider)) {
+    throw new Error(
+      `Local-only mode is enabled: the "${settings.provider}" provider requires a cloud API and cannot be used. ` +
+      'Choose Ollama, LM Studio, or a local custom endpoint, or change mode in the risk disclaimer.',
+    );
+  }
+
+  const baseUrl = settings.baseUrl || PROVIDER_DEFAULT_BASE_URLS[settings.provider];
+  // No URL configured yet — let the provider caller report its own
+  // "not configured" error rather than duplicating that message here.
+  if (!baseUrl) return;
+
+  let hostname;
+  try {
+    hostname = new URL(baseUrl).hostname;
+  } catch {
+    throw new Error('Local-only mode is enabled: the base URL is invalid.');
+  }
+  if (!isLoopbackHostname(hostname)) {
+    throw new Error(
+      `Local-only mode is enabled: the base URL must point to localhost or 127.0.0.1 (got "${hostname}").`,
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Main Entry Point
 // ---------------------------------------------------------------------------
 
@@ -547,6 +608,7 @@ export async function getLLMSuggestion(userPrompt, systemPrompt = '') {
   if (!settings.provider) {
     throw new Error('No LLM provider configured. Open Settings to configure one.');
   }
+  assertLocalOnlyModeAllows(settings);
 
   switch (settings.provider) {
     case 'claude':
@@ -579,6 +641,7 @@ export async function getLLMChatResponse(messages, systemPrompt = '') {
   if (!settings.provider) {
     throw new Error('No LLM provider configured. Open Settings to configure one.');
   }
+  assertLocalOnlyModeAllows(settings);
 
   switch (settings.provider) {
     case 'claude':
@@ -630,6 +693,7 @@ export async function testLLMConnection(settings) {
   const userPrompt = 'Reply with a short, friendly one-sentence greeting to confirm the connection works.';  // njsscan-ignore: node_username
   const systemPrompt = 'You are a connection test. Respond in a single short sentence.';
   const testSettings = { ...settings, maxTokens: settings.maxTokens || 128 };
+  assertLocalOnlyModeAllows(testSettings);
   try {
     switch (settings.provider) {
       case 'claude': return await callClaude(testSettings, userPrompt, systemPrompt);
@@ -1087,6 +1151,7 @@ async function _callLLM(userPrompt, systemPrompt, maxTokensOverride) {
   if (!settings.provider) {
     throw new Error('No LLM provider configured. Open Settings to configure one.');
   }
+  assertLocalOnlyModeAllows(settings);
   if (maxTokensOverride) {
     settings.maxTokens = maxTokensOverride;
   }

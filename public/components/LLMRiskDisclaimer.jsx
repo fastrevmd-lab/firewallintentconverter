@@ -70,11 +70,13 @@ export default function LLMRiskDisclaimer({ onAcceptAll, onAcceptLocalOnly, onDe
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--success)" strokeWidth="2">
               <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
             </svg>
-            <h4>Built-in Sanitization Protection</h4>
+            <h4>Built-in Sanitization Tool</h4>
           </div>
           <p>
-            This tool automatically sanitizes your configuration before any LLM interaction,
-            replacing sensitive data with safe placeholders. The following categories are detected and redacted:
+            Before sending a configuration to an LLM (for translation or AI grouping), this tool warns you if it
+            hasn't been sanitized and offers a one-click <strong>Sanitize Configuration</strong> action that replaces
+            sensitive data with safe placeholders. Sanitizing is not automatic and not enforced — you can dismiss the
+            warning and proceed with an unsanitized config. The tool detects and can redact these categories:
           </p>
           <ul>
             <li><strong>Credentials &amp; Secrets</strong> &mdash; Pre-shared keys, SNMP community strings, passwords/hashes, API keys, certificate private keys, RADIUS/TACACS shared secrets</li>

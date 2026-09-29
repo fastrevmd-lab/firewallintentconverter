@@ -108,6 +108,14 @@ export default function PushModal({ onClose }) {
     });
   }, [commitConfig, selectedDevice, commitComment, commitMode, confirmMinutes]);
 
+  const handleRetryWithoutConfirm = useCallback(async () => {
+    setCommitMode('immediate');
+    await commitConfig(selectedDevice, {
+      comment: commitComment,
+      confirm_minutes: 0,
+    });
+  }, [commitConfig, selectedDevice, commitComment]);
+
   const handleConfirm = useCallback(async () => {
     const ok = await confirmCommit();
     if (ok) goToStep('done');
@@ -343,6 +351,25 @@ export default function PushModal({ onClose }) {
         </div>
       )}
 
+      {/* If commit failed */}
+      {commitResult && !commitResult.ok && (
+        <div style={{ padding: '16px 0' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+            <span style={{ fontSize: 24, color: 'var(--error)' }}>{'✗'}</span>
+            <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--error)' }}>Commit Failed</span>
+          </div>
+          <div style={{
+            padding: '8px 12px', background: 'rgba(248, 113, 113, 0.08)',
+            border: '1px solid rgba(248, 113, 113, 0.2)', borderRadius: 'var(--radius)',
+            fontSize: 12, color: 'var(--text-primary)',
+          }}>
+            {commitResult.code === 'CONFIRM_UNSUPPORTED_ON_PRIVATE'
+              ? 'Nothing was committed. This device release does not support the confirm timer on a private candidate.'
+              : 'The device rejected the commit.'}
+          </div>
+        </div>
+      )}
+
       {/* If timer expired */}
       {confirmTimer && !confirmTimer.active && (
         <div style={{ padding: 16, textAlign: 'center', background: 'rgba(251, 191, 36, 0.1)', borderRadius: 'var(--radius)', marginBottom: 12 }}>
@@ -488,6 +515,12 @@ export default function PushModal({ onClose }) {
         buttons.push(
           <button key="done" className="btn btn-primary" onClick={handleClose}>
             Done
+          </button>
+        );
+      } else if (commitResult && commitResult.code === 'CONFIRM_UNSUPPORTED_ON_PRIVATE') {
+        buttons.push(
+          <button key="retry-no-confirm" className="btn btn-primary" onClick={handleRetryWithoutConfirm} disabled={isWorking}>
+            {isWorking ? 'Committing...' : 'Retry Without Confirm Timer'}
           </button>
         );
       } else if (!commitResult) {

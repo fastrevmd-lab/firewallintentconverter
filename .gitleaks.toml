@@ -2,8 +2,4 @@
 # known false positives in this repo.
 
 [extend]
-useDefault = true
-
-[[allowlists]]
-description = "Planning docs embed test fixtures that assert key-like strings are rejected; they contain marker strings, not key material"
-paths = ['''^docs/superpowers/plans/.*''']
+path = ".gitleaks-vendor.toml"

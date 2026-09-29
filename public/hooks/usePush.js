@@ -15,6 +15,7 @@ import {
   bridgeErrorMessage,
   bridgeFetch,
   bridgeResponseJson,
+  isBridgeResponseCode,
   isBridgeResponseStatus,
   loadBridgeSettings,
   safeBridgeLoadWarnings,
@@ -390,7 +391,10 @@ export default function usePush() {
       setIsWorking(false);
       return data;
     } catch (error) {
-      const result = { ok: false };
+      const code = isBridgeResponseCode(error, 'CONFIRM_UNSUPPORTED_ON_PRIVATE')
+        ? 'CONFIRM_UNSUPPORTED_ON_PRIVATE'
+        : null;
+      const result = { ok: false, code };
       setCommitResult(result);
       appendLog('error', bridgeErrorMessage(error, 'Commit failed.'));
       setIsWorking(false);

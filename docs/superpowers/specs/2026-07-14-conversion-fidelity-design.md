@@ -1,7 +1,7 @@
 # Conversion Fidelity: Reference-Integrity Gate + Completeness Manifest (Issue #34)
 
 **Date:** 2026-07-14
-**Issue:** [#34](https://github.com/fastrevmd-lab/firewallintentconverter/issues/34)
+**Issue:** [#34](https://github.com/mechubsec/firewallintentconverter/issues/34)
 **Status:** Approved (autonomous) — implementing
 
 ## Problem

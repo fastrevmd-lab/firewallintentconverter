@@ -24,6 +24,10 @@ global.sessionStorage = {
   removeItem: (k) => { delete _sessionStore[k]; },
 };
 global.fetch = async () => ({ ok: false, status: 404, json: async () => ({}) });
+// This file tests translation parsing/chunking, not mode gating (see
+// llm-local-only-enforcement.test.js for that) — allow all providers so
+// translatePolicies() calls below reach the mocked fetch.
+global.localStorage.setItem('llm-risk-acceptance', 'all');
 
 // ---------------------------------------------------------------------------
 // Import the functions under test

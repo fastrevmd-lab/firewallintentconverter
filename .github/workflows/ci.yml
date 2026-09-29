@@ -46,6 +46,32 @@ jobs:
       - name: Build web application
         run: npm run build
 
+      - name: Build standalone bundle
+        run: npm run build:standalone
+
+      - name: Verify standalone bundle ships no LLM/bridge networking code
+        shell: bash
+        run: |
+          set -uo pipefail
+          patterns=(
+            'api\.anthropic\.com'
+            'api\.openai\.com'
+            'generativelanguage\.googleapis\.com'
+            'anthropic-dangerous-direct-browser-access'
+            'x-api-key'
+            'Is Ollama running at'
+            'LM Studio error'
+            'Bridge access token is required'
+          )
+          leaked=0
+          for pattern in "${patterns[@]}"; do
+            if grep -Rl -E "$pattern" dist-standalone/assets/*.js; then
+              echo "::error::Found forbidden string matching '$pattern' in the standalone bundle"
+              leaked=1
+            fi
+          done
+          exit "$leaked"
+
   pyez-bridge:
     name: PyEZ bridge
     runs-on: ubuntu-latest

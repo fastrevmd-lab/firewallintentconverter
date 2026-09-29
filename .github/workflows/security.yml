@@ -1,9 +1,10 @@
 name: security
 
-# Self-contained SAST + secret scan (gitleaks + semgrep + njsscan).
-# Inlined rather than calling the reusable workflow in fastrevmd-lab/security-review:
-# GitHub does not allow a public repo to call a reusable workflow in a private repo.
-# Keep these steps in sync with security-review/.github/workflows/security-review.yml.
+# SAST (semgrep + njsscan). Secret scan comes from mechubsec/.github's shared
+# gitleaks workflow. SAST is inlined rather than calling the reusable workflow
+# in fastrevmd-lab/security-review: GitHub does not allow a public repo to call
+# a reusable workflow in a private repo. Keep these SAST steps in sync with
+# security-review/.github/workflows/security-review.yml.
 # Actions are pinned to commit SHAs; tool versions are pinned to releases.
 
 on:
@@ -19,8 +20,13 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Secret scan: the shared mechubsec workflow (pinned gitleaks binary; no
+  # license needed, unlike gitleaks-action on org repos).
+  secrets:
+    uses: mechubsec/.github/.github/workflows/gitleaks.yml@fb1a159c596bf2c57b9f6f1ff99f546463a6a84a
+
   scan:
-    name: SAST + secrets
+    name: SAST
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -28,12 +34,6 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-
-      - name: gitleaks (secrets)
-        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"
 
       - name: Install semgrep + njsscan (pinned, isolated)
         # pipx gives each tool its own venv; semgrep and njsscan have

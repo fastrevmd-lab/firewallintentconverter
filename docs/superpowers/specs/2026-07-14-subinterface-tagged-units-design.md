@@ -1,7 +1,7 @@
 # PAN-OS Sub-Interfaces → Tagged Units on Parent SRX Port (Issue #24)
 
 **Date:** 2026-07-14
-**Issue:** [#24](https://github.com/fastrevmd-lab/firewallintentconverter/issues/24)
+**Issue:** [#24](https://github.com/mechubsec/firewallintentconverter/issues/24)
 **Status:** Approved — ready for implementation planning
 
 ## Problem

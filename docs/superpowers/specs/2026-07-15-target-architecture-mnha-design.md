@@ -1,7 +1,7 @@
 # Target Architecture as Explicit Input + Correct MNHA Output (Issue #37)
 
 **Date:** 2026-07-15
-**Issue:** [#37](https://github.com/fastrevmd-lab/firewallintentconverter/issues/37)
+**Issue:** [#37](https://github.com/mechubsec/firewallintentconverter/issues/37)
 **Status:** Approved (autonomous) — MNHA output validated against the `srx-mnha` skill
 
 ## Problem

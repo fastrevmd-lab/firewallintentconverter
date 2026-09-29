@@ -6,7 +6,7 @@ Please **do not** open a public GitHub issue for a security vulnerability.
 
 Instead, use GitHub's private vulnerability reporting for this repository (Security tab → "Report a vulnerability", or GitHub Security Advisories directly):
 
-https://github.com/fastrevmd-lab/firewallintentconverter/security/advisories/new
+https://github.com/mechubsec/firewallintentconverter/security/advisories/new
 
 Include what you'd include in a bug report — affected version or commit, reproduction steps, and impact — but keep it in the private report, not a public issue, PR, discussion, or comment.
 

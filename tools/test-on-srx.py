@@ -81,14 +81,14 @@ SAMPLE_KEYS = [
 # ---------------------------------------------------------------------------
 PRESERVE_COMMANDS = """\
 set system host-name vSRX-test18
-set system root-authentication encrypted-password "$6$slN9fm9A$LPMXWgKf9v.MkzcbjQ4qSjQ3sNJMIILeSxDJawPXU5iV4oH39VUh6E0i6.YO9yT9E72p./dG/PyNIe.U73PIa0"
+set system root-authentication encrypted-password "$6$FAKEsalt$FAKEhashedpasswordplaceholder1234567890abcdefghijklmnopqrstuvwxyz"
 set system login user intenttester class super-user uid 2002
-set system login user intenttester authentication ssh-ed25519 "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIG+IhfC4H8iE4pC7ZoEf245h9Mp/ZvScgldFilcuVP2X intenttester@firewallintentconverter"
+set system login user intenttester authentication ssh-ed25519 "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFAKEKEYFAKEKEYFAKEKEYFAKEKEYFAKEKEYF intenttester@firewallintentconverter"
 set system login user netconf class super-user uid 2000
-set system login user netconf authentication ssh-ed25519 "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKOLjxJRoNDQuoBQXEEEKTcKRkhxOTDfMSWymo6m0jD+ root@cd62172ddf11"
+set system login user netconf authentication ssh-ed25519 "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFAKEKEYFAKEKEYFAKEKEYFAKEKEYFAKEKEYF root@cd62172ddf11"
 set system login user srxoutpost class super-user uid 2001
-set system login user srxoutpost authentication encrypted-password "$6$2OKfUw10$GIk.ae1jtRh30uHT.xfDd865Tp2tsl/4eqHBxf9ynKy009VG4XL6kY9Vpk/j51YZTBaJAxqKVcRf5hrOyNTs40"
-set system login user srxoutpost authentication ssh-ed25519 "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILGHHz1PiPRLN3o3oRqBNkw0t9+acY6L/h7jdbL3TgHl fastrevmd@gmail.com"
+set system login user srxoutpost authentication encrypted-password "$6$FAKEsalt$FAKEhashedpasswordplaceholder1234567890abcdefghijklmnopqrstuvwxyz"
+set system login user srxoutpost authentication ssh-ed25519 "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFAKEKEYFAKEKEYFAKEKEYFAKEKEYFAKEKEYF fastrevmd@gmail.com"
 set system services ssh root-login allow
 set system services ssh protocol-version v2
 set system services netconf ssh

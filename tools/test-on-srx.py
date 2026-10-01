@@ -11,12 +11,16 @@ For each of the 11 single-context sample configs:
   6. Logs results and prints a summary table
 
 Usage:
+    export TEST_SRX_ROOT_PASSWORD_HASH="$6$..."  # Required (from openssl passwd -6)
+    export TEST_SRX_SRXOUTPOST_PASSWORD_HASH="$6$..."  # Optional
     /path/to/venv/bin/python tools/test-on-srx.py
 
 Requirements:
     - PyEZ venv at tools/pyez-bridge/venv
     - Node.js available in PATH (for convert-sample.mjs)
     - vSRX reachable at 192.168.1.240:830
+    - TEST_SRX_ROOT_PASSWORD_HASH environment variable with encrypted password
+      hash (generate with: openssl passwd -6)
 """
 
 import json
@@ -39,6 +43,55 @@ CONVERTER_SCRIPT = SCRIPT_DIR / "convert-sample.mjs"
 # Re-exec under the venv Python if we're not already running from it
 if Path(sys.executable).resolve() != VENV_PYTHON.resolve():
     os.execv(str(VENV_PYTHON), [str(VENV_PYTHON), str(Path(__file__).resolve())] + sys.argv[1:])
+
+
+# ---------------------------------------------------------------------------
+# Validate required environment variables before importing PyEZ
+# ---------------------------------------------------------------------------
+# $id$[rounds=N$]salt$hash, restricted to the crypt(3) alphabet.
+CRYPT_HASH_PATTERN = re.compile(r"\$(1|5|6)\$(rounds=[0-9]{1,9}\$)?[./A-Za-z0-9]{1,16}\$[./A-Za-z0-9]{1,86}")
+
+
+def validate_password_hash(var_name, value, required=True):
+    """
+    Validate that a password hash is safe to interpolate into a Junos set command.
+
+    Returns the validated value, or None if optional and unset.
+    Exits with error if required and missing/invalid.
+    """
+    if not value:
+        if required:
+            print(f"ERROR: {var_name} environment variable is required", file=sys.stderr)
+            print(f"  Generate a hash with: openssl passwd -6", file=sys.stderr)
+            print(f"  Then: export {var_name}='$6$...'", file=sys.stderr)
+            sys.exit(1)
+        return None
+
+    # Allowlist the crypt(3) format rather than blocklisting characters: the
+    # value is interpolated inside a quoted Junos set command, and anything
+    # outside this alphabet (a quote, backslash, CR/LF) could break out of it.
+    if not CRYPT_HASH_PATTERN.fullmatch(value):
+        print(
+            f"ERROR: {var_name} must be a $6$, $5$ or $1$ crypt hash "
+            "(as printed by: openssl passwd -6)",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    return value
+
+
+# Read and validate password hashes from environment
+TEST_SRX_ROOT_PASSWORD_HASH = validate_password_hash(
+    "TEST_SRX_ROOT_PASSWORD_HASH",
+    os.environ.get("TEST_SRX_ROOT_PASSWORD_HASH"),
+    required=True,
+)
+TEST_SRX_SRXOUTPOST_PASSWORD_HASH = validate_password_hash(
+    "TEST_SRX_SRXOUTPOST_PASSWORD_HASH",
+    os.environ.get("TEST_SRX_SRXOUTPOST_PASSWORD_HASH"),
+    required=False,
+)
 
 from jnpr.junos import Device
 from jnpr.junos.utils.config import Config
@@ -79,25 +132,40 @@ SAMPLE_KEYS = [
 # ---------------------------------------------------------------------------
 # Preserve commands — prepended to every config load to keep management access
 # ---------------------------------------------------------------------------
-PRESERVE_COMMANDS = """\
-set system host-name vSRX-test18
-set system root-authentication encrypted-password "$6$FAKEsalt$FAKEhashedpasswordplaceholder1234567890abcdefghijklmnopqrstuvwxyz"
-set system login user intenttester class super-user uid 2002
-set system login user intenttester authentication ssh-ed25519 "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFAKEKEYFAKEKEYFAKEKEYFAKEKEYFAKEKEYF intenttester@firewallintentconverter"
-set system login user netconf class super-user uid 2000
-set system login user netconf authentication ssh-ed25519 "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFAKEKEYFAKEKEYFAKEKEYFAKEKEYFAKEKEYF root@cd62172ddf11"
-set system login user srxoutpost class super-user uid 2001
-set system login user srxoutpost authentication encrypted-password "$6$FAKEsalt$FAKEhashedpasswordplaceholder1234567890abcdefghijklmnopqrstuvwxyz"
-set system login user srxoutpost authentication ssh-ed25519 "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFAKEKEYFAKEKEYFAKEKEYFAKEKEYFAKEKEYF fastrevmd@gmail.com"
-set system services ssh root-login allow
-set system services ssh protocol-version v2
-set system services netconf ssh
-set system services netconf rfc-compliant
-set system services web-management https system-generated-certificate
-set system services web-management https interface fxp0.0
-set system services web-management http interface fxp0.0
-set interfaces fxp0 unit 0 family inet address 192.168.1.240/24
-"""
+def build_preserve_commands():
+    """Build preserve commands with password hashes from environment variables."""
+    commands = [
+        "set system host-name vSRX-test18",
+        f'set system root-authentication encrypted-password "{TEST_SRX_ROOT_PASSWORD_HASH}"',
+        "set system login user intenttester class super-user uid 2002",
+        'set system login user intenttester authentication ssh-ed25519 "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFAKEKEYFAKEKEYFAKEKEYFAKEKEYFAKEKEYF intenttester@firewallintentconverter"',
+        "set system login user netconf class super-user uid 2000",
+        'set system login user netconf authentication ssh-ed25519 "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFAKEKEYFAKEKEYFAKEKEYFAKEKEYFAKEKEYF root@cd62172ddf11"',
+        "set system login user srxoutpost class super-user uid 2001",
+    ]
+
+    # Add srxoutpost password only if provided
+    if TEST_SRX_SRXOUTPOST_PASSWORD_HASH:
+        commands.append(
+            f'set system login user srxoutpost authentication encrypted-password "{TEST_SRX_SRXOUTPOST_PASSWORD_HASH}"'
+        )
+
+    commands.extend([
+        'set system login user srxoutpost authentication ssh-ed25519 "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFAKEKEYFAKEKEYFAKEKEYFAKEKEYFAKEKEYF fastrevmd@gmail.com"',
+        "set system services ssh root-login allow",
+        "set system services ssh protocol-version v2",
+        "set system services netconf ssh",
+        "set system services netconf rfc-compliant",
+        "set system services web-management https system-generated-certificate",
+        "set system services web-management https interface fxp0.0",
+        "set system services web-management http interface fxp0.0",
+        "set interfaces fxp0 unit 0 family inet address 192.168.1.240/24",
+    ])
+
+    return "\n".join(commands)
+
+
+PRESERVE_COMMANDS = build_preserve_commands()
 
 # ---------------------------------------------------------------------------
 # Filters — remove commands that conflict with management access

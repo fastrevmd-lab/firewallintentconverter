@@ -88,12 +88,11 @@ SAFE_FAILURES = {
     "UNEXPECTED_ERROR": ("An unexpected bridge error occurred.", 500),
 }
 
-# Junos's exact <rpc-error> text when `commit confirmed` is attempted on a
-# private candidate. Junos XML protocol docs describe confirm-on-private as
-# unsupported; PyEZ issue Juniper/py-junos-eznc#954 reports it working on
-# vSRX 21.2R1.11+, and no release note pins the exact change. We have not
-# independently verified this on any release, so treat support as unknown
-# per device/release rather than assuming it is universally refused.
+# private candidate. Fails closed: the Junos XML protocol reference still
+# documents confirm-on-private as unsupported, and PyEZ eznc#954 shows it
+# refused on an older build; a Juniper maintainer separately reported it
+# working on vSRX 21.2R1.11+. Not verified on any release we ship against
+# — see MEC-153.
 # Matched verbatim so we never guess at partial or reworded device text.
 _CONFIRM_UNSUPPORTED_ON_PRIVATE_MESSAGE = (
     "commit confirmed not supported for private configuration"

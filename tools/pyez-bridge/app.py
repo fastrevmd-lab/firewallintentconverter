@@ -89,7 +89,11 @@ SAFE_FAILURES = {
 }
 
 # Junos's exact <rpc-error> text when `commit confirmed` is attempted on a
-# private candidate (Juniper RLI 43242; still unresolved as of 26.2R1.7).
+# private candidate. Junos XML protocol docs describe confirm-on-private as
+# unsupported; PyEZ issue Juniper/py-junos-eznc#954 reports it working on
+# vSRX 21.2R1.11+, and no release note pins the exact change. We have not
+# independently verified this on any release, so treat support as unknown
+# per device/release rather than assuming it is universally refused.
 # Matched verbatim so we never guess at partial or reworded device text.
 _CONFIRM_UNSUPPORTED_ON_PRIVATE_MESSAGE = (
     "commit confirmed not supported for private configuration"

@@ -88,6 +88,7 @@ SAFE_FAILURES = {
     "UNEXPECTED_ERROR": ("An unexpected bridge error occurred.", 500),
 }
 
+# Junos's exact <rpc-error> text when `commit confirmed` is attempted on a
 # private candidate. Fails closed: the Junos XML protocol reference still
 # documents confirm-on-private as unsupported, and PyEZ eznc#954 shows it
 # refused on an older build; a Juniper maintainer separately reported it
